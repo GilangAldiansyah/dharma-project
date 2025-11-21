@@ -1,8 +1,10 @@
+[phases.setup]
+nixPkgs = ["php83", "php83Packages.composer"]
+nixLibs = ["libxml2", "openssl", "curl"]
+
 [phases.build]
 cmds = [
-    "composer install --optimize-autoloader --no-dev --no-interaction",
-    "php artisan config:cache",
-    "php artisan route:cache"
+    "composer install --optimize-autoloader --no-dev --no-interaction"
 ]
 
 [start]
