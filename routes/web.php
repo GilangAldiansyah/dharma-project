@@ -51,7 +51,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // NG Reports System
     Route::get('/ng-reports', [NgReportController::class, 'index'])->name('ng-reports.index');
     Route::post('/ng-reports', [NgReportController::class, 'store'])->name('ng-reports.store');
-    Route::delete('/ng-reports/{ngReport}', [NgReportController::class, 'destroy'])->name('ng-reports.destroy');
+    // Route::delete('/ng-reports/{ngReport}', [NgReportController::class, 'destroys'])->name('ng-reports.destroys');
     Route::get('/ng-reports/dashboard', [NgReportController::class, 'dashboard'])->name('ng-reports.dashboard');
     Route::resource('ng-reports', NgReportController::class);
     Route::post('/ng-reports/{ngReport}/upload-pica', [NgReportController::class, 'uploadPica'])->name('ng-reports.upload-pica');
