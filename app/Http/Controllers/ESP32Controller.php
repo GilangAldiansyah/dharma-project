@@ -10,24 +10,18 @@ use Inertia\Inertia;
 
 class ESP32Controller extends Controller
 {
-    /**
-     * Endpoint untuk menerima data POST dari ESP32
-     * Route: POST /api/esp32/post
-     */
     public function postData(Request $request)
     {
         try {
-            // Validasi data dari ESP32
             $validated = $request->validate([
                 'device_id' => 'required|string|max:100',
                 'counter_a' => 'required|integer',
                 'counter_b' => 'required|integer',
                 'max_count' => 'required|integer',
                 'relay_status' => 'required|boolean',
-                'error_B' => 'required|boolean', // Sesuai dengan ESP32
+                'error_B' => 'required|boolean',
             ]);
 
-            // Update atau buat device baru
             $device = Esp32Device::updateOrCreate(
                 ['device_id' => $validated['device_id']],
                 [
@@ -80,20 +74,12 @@ class ESP32Controller extends Controller
         }
     }
 
-    /**
-     * Endpoint untuk mengambil semua status terbaru
-     * Route: GET /api/esp32/status
-     */
     public function getStatus()
     {
         $devices = Esp32Device::all()->keyBy('device_id');
         return response()->json($devices);
     }
 
-    /**
-     * Endpoint untuk mengambil riwayat device tertentu
-     * Route: GET /api/esp32/history/{device_id}
-     */
     public function getHistory($deviceId)
     {
         $logs = Esp32Log::where('device_id', $deviceId)
@@ -103,21 +89,12 @@ class ESP32Controller extends Controller
 
         return response()->json($logs);
     }
-
-    /**
-     * Endpoint untuk mendapatkan daftar device ID
-     * Route: GET /api/esp32/devices
-     */
     public function getDevices()
     {
         $deviceIds = Esp32Device::pluck('device_id');
         return response()->json($deviceIds);
     }
 
-    /**
-     * Halaman dashboard monitoring (Inertia)
-     * Route: GET /esp32/monitor
-     */
     public function monitor(Request $request)
     {
         $search = $request->input('search');
@@ -137,10 +114,6 @@ class ESP32Controller extends Controller
         ]);
     }
 
-    /**
-     * Detail device dengan history logs
-     * Route: GET /esp32/monitor/{device_id}
-     */
     public function detail($deviceId)
     {
         $device = Esp32Device::where('device_id', $deviceId)->firstOrFail();

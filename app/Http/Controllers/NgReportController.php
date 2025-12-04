@@ -14,15 +14,12 @@ class NgReportController extends Controller
 {
     public function dashboard(Request $request)
     {
-        // Get filter parameters
         $startDate = $request->input('start_date', Carbon::now()->startOfMonth()->toDateString());
         $endDate = $request->input('end_date', Carbon::now()->endOfMonth()->toDateString());
 
-        // Validate and parse dates
         $start = Carbon::parse($startDate)->startOfDay();
         $end = Carbon::parse($endDate)->endOfDay();
 
-        // NG by Part
         $ngByPart = NgReport::with('part')
             ->whereBetween('reported_at', [$start, $end])
             ->select('part_id', DB::raw('count(*) as total'))
@@ -38,7 +35,6 @@ class NgReportController extends Controller
                 ];
             });
 
-        // NG by Supplier
         $ngBySupplier = NgReport::with('part.supplier')
             ->whereBetween('reported_at', [$start, $end])
             ->get()
@@ -55,7 +51,6 @@ class NgReportController extends Controller
             ->take(15)
             ->values();
 
-        // Summary Statistics
         $totalNg = NgReport::whereBetween('reported_at', [$start, $end])->count();
         $openNg = NgReport::whereBetween('reported_at', [$start, $end])
             ->where('status', NgReport::STATUS_OPEN)
@@ -78,7 +73,6 @@ class NgReportController extends Controller
             ->unique()
             ->count();
 
-        // Daily Trend
         $dailyTrend = NgReport::whereBetween('reported_at', [$start, $end])
             ->select(DB::raw('DATE(reported_at) as date'), DB::raw('count(*) as total'))
             ->groupBy('date')
@@ -92,17 +86,14 @@ class NgReportController extends Controller
                 ];
             });
 
-        // Status Distribution
         $statusDistribution = [
             ['status' => 'Open', 'count' => $openNg, 'color' => 'red'],
             ['status' => 'PICA Submitted', 'count' => $picaSubmitted, 'color' => 'yellow'],
             ['status' => 'Closed', 'count' => $closedNg, 'color' => 'green'],
         ];
 
-        // Top 5 Critical Parts (parts with most NG)
         $criticalParts = $ngByPart->take(5);
 
-        // Top 5 Critical Suppliers
         $criticalSuppliers = $ngBySupplier->take(5);
 
         return Inertia::render('NgReports/Dashboard', [

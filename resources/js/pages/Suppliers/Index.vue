@@ -107,14 +107,10 @@ const handleFileUpload = (event: Event) => {
             const suppliers: any[] = [];
             const vendorSet = new Set<string>();
 
-            // Detect delimiter dari baris pertama
             let delimiter = ',';
             if (lines[0]?.includes(';')) delimiter = ';';
             else if (lines[0]?.includes('\t')) delimiter = '\t';
 
-            console.log('Using delimiter:', delimiter);
-
-            // Cari baris header (yang ada tulisan VENDOR)
             let headerIndex = -1;
             let vendorColumnIndex = -1;
 
@@ -148,13 +144,11 @@ const handleFileUpload = (event: Event) => {
                 if (vendor && vendor !== '' && !vendorSet.has(vendor)) {
                     vendorSet.add(vendor);
 
-                    // Generate kode supplier dari nama vendor
                     let supplierCode = vendor
                         .toUpperCase()
                         .replace(/[^A-Z0-9]/g, '')
                         .substring(0, 10);
 
-                    // Jika kode terlalu pendek, tambahkan dari nama
                     if (supplierCode.length < 3) {
                         supplierCode = vendor.substring(0, 10).toUpperCase();
                     }

@@ -37,14 +37,12 @@ class DieShopDashboardController extends Controller
             'activeDieParts' => DiePart::where('status', 'active')->count(),
         ];
 
-        // Recent Reports (last 10)
         $recentReports = DieShopReport::with(['diePart'])
             ->whereBetween('report_date', [$startDate, $endDate])
             ->latest('report_date')
             ->limit(10)
             ->get();
 
-        // Monthly Trend - Daily breakdown
         $monthlyTrend = [];
         $currentDate = $startDate->copy();
 
@@ -66,7 +64,6 @@ class DieShopDashboardController extends Controller
             $currentDate->addDay();
         }
 
-        // Top Die Parts (most frequently repaired)
         $topDieParts = DieShopReport::select('die_part_id', DB::raw('count(*) as report_count'))
             ->whereBetween('report_date', [$startDate, $endDate])
             ->with('diePart')
