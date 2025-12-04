@@ -21,7 +21,6 @@ Route::get('/', function () {
 })->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    // Welcome Page - System Selection
     Route::get('/welcome', [WelcomeController::class, 'index'])->name('welcome');
 
     // Stock Control Routes
@@ -42,7 +41,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/stock/output/{outputProduct}/materials', [StockController::class, 'getOutputMaterials']);
     Route::post('/stock/output/{outputProduct}/materials', [StockController::class, 'updateOutputMaterials']);
     Route::get('/stock/available-materials', [StockController::class, 'getAvailableMaterials']);
-       // Forecast
+    // Forecast
     Route::get('/forecast', [StockController::class, 'forecastIndex'])->name('forecast.index');
     Route::post('/forecast/update', [StockController::class, 'forecastUpdate'])->name('forecast.update');
     Route::post('/forecast/bulk-import', [StockController::class, 'forecastBulkImport'])->name('forecast.bulk-import');
@@ -74,8 +73,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/parts/{part}', [PartController::class, 'destroy'])->name('parts.destroy');
 
     // Die Shop System
-    Route::get('die-shop-dashboard', [DieShopDashboardController::class, 'index'])
-        ->name('die-shop-dashboard');
+    Route::get('die-shop-dashboard', [DieShopDashboardController::class, 'index'])->name('die-shop-dashboard');
     Route::resource('die-parts', DiePartController::class);
     Route::resource('die-shop-reports', DieShopReportController::class);
 
