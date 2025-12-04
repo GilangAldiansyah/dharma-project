@@ -334,12 +334,10 @@ const handleFileUpload = (event: Event) => {
                         .replace(/[^A-Z0-9]/g, '')
                         .substring(0, 20);
                 } else {
-                    // Strategi 2: Ambil huruf kapital dan angka dari nama part
                     const capsAndNumbers = partName.match(/[A-Z0-9]/g);
                     if (capsAndNumbers && capsAndNumbers.length >= 8) {
                         partCode = capsAndNumbers.join('').substring(0, 20);
                     } else {
-                        // Strategi 3: Hapus spasi, simbol, dan ambil 20 karakter pertama
                         partCode = partName
                             .toUpperCase()
                             .replace(/[^A-Z0-9]/g, '')
@@ -347,7 +345,6 @@ const handleFileUpload = (event: Event) => {
                     }
                 }
 
-                // Strategi 4: Jika masih terlalu pendek, gunakan nama asli
                 if (partCode.length < 5) {
                     partCode = partName
                         .substring(0, 20)
@@ -355,7 +352,6 @@ const handleFileUpload = (event: Event) => {
                         .toUpperCase();
                 }
 
-                // ✅ Tambahkan suffix jika part code sudah ada dalam batch ini
                 let finalPartCode = partCode;
                 let suffix = 1;
                 while (parts.some(p => p.part_code === finalPartCode)) {
@@ -363,7 +359,6 @@ const handleFileUpload = (event: Event) => {
                     suffix++;
                 }
 
-                // Match supplier
                 const matchedSupplier = props.suppliers.find(s => {
                     const supplierNameUpper = s.supplier_name.toUpperCase();
                     const supplierCodeUpper = s.supplier_code?.toUpperCase() || '';
@@ -474,7 +469,6 @@ const removeImportRow = (index: number) => {
                             </option>
                         </select>
 
-                        <!-- ✅ TAMBAH FILTER TYPE LINE -->
                         <select
                             v-model="filterTypeLine"
                             @change="filterByTypeLine"

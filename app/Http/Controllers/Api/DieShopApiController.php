@@ -62,7 +62,6 @@ class DieShopApiController extends Controller
 
         $reports = $query->latest('report_date')->get();
 
-        // Add duration info for each report
         $reports->transform(function ($report) {
             $report->duration_value = $report->calculateDuration();
             $report->duration_unit = $report->getDurationUnit();
@@ -104,7 +103,6 @@ class DieShopApiController extends Controller
                 }
             }
 
-            // Set empty string for null values to avoid database constraint errors
             $validated['repair_process'] = $validated['repair_process'] ?: '';
             $validated['problem_description'] = $validated['problem_description'] ?: '';
             $validated['cause'] = $validated['cause'] ?: '';
@@ -112,7 +110,6 @@ class DieShopApiController extends Controller
 
             $validated['photos'] = $photoPaths;
 
-            // Set completed_at if status is completed
             if ($validated['status'] === 'completed') {
                 $validated['completed_at'] = now();
             }
@@ -127,7 +124,6 @@ class DieShopApiController extends Controller
 
             $report->load(['diePart', 'spareparts']);
 
-            // Add duration info
             $report->duration_value = $report->calculateDuration();
             $report->duration_unit = $report->getDurationUnit();
             $report->duration_formatted = $report->getDurationFormatted();
@@ -179,7 +175,6 @@ class DieShopApiController extends Controller
                 }
             }
 
-            // Set empty string for null values
             $validated['repair_process'] = $validated['repair_process'] ?: '';
             $validated['problem_description'] = $validated['problem_description'] ?: '';
             $validated['cause'] = $validated['cause'] ?: '';
@@ -187,12 +182,10 @@ class DieShopApiController extends Controller
 
             $validated['photos'] = $photoPaths;
 
-            // Set completed_at when status changes to completed
             if ($validated['status'] === 'completed' && $report->status !== 'completed') {
                 $validated['completed_at'] = now();
             }
 
-            // Clear completed_at if status is changed from completed
             if ($validated['status'] !== 'completed' && $report->status === 'completed') {
                 $validated['completed_at'] = null;
             }
@@ -208,7 +201,6 @@ class DieShopApiController extends Controller
 
             $report->load(['diePart', 'spareparts']);
 
-            // Add duration info
             $report->duration_value = $report->calculateDuration();
             $report->duration_unit = $report->getDurationUnit();
             $report->duration_formatted = $report->getDurationFormatted();

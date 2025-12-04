@@ -66,7 +66,6 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Calculate statistics
         $statistics = $this->calculateStatistics($stockData);
 
         return Inertia::render('Dashboard/Index', [
@@ -95,17 +94,14 @@ class DashboardController extends Controller
             ? round($stockData->avg('coverage_days'), 1)
             : 0;
 
-        // Get low stock items (critical + warning)
         $lowStockItems = $stockData->filter(fn($item) =>
             $item['status'] === 'critical' || $item['status'] === 'warning'
         )->sortBy('coverage_days')->values();
 
-        // Get overstock items
         $overstockItems = $stockData->filter(fn($item) =>
             $item['status'] === 'overstock'
         )->sortByDesc('coverage_days')->values();
 
-        // Calculate by BL Type
         $bl1Count = $stockData->filter(fn($item) => $item['bl_type'] === 'BL1')->count();
         $bl2Count = $stockData->filter(fn($item) => $item['bl_type'] === 'BL2')->count();
 
@@ -137,14 +133,12 @@ class DashboardController extends Controller
             ->orderBy('id')
             ->get()
             ->map(function ($stock) {
-                // ✅ Apply new formula
                 $qtyDayActual = $stock->qty_day * $stock->qty_unit;
 
                 $coverageDays = $qtyDayActual > 0
                     ? floor($stock->soh / $qtyDayActual)
                     : 999;
 
-                // ✅ Apply same fixed logic (3 kategori)
                 $status = 'normal';
 
                 if ($qtyDayActual == 0) {
@@ -185,13 +179,10 @@ class DashboardController extends Controller
         $callback = function() use ($stockData) {
             $file = fopen('php://output', 'w');
 
-            // Add BOM for UTF-8
             fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
 
-            // Headers
             fputcsv($file, array_keys($stockData->first()));
 
-            // Data
             foreach ($stockData as $row) {
                 fputcsv($file, $row);
             }
@@ -226,9 +217,7 @@ class DashboardController extends Controller
         $criticalItems = DailyStock::where('stock_date', $date)
             ->get()
             ->filter(function($stock) {
-                // ✅ Apply new formula
                 $qtyDayActual = $stock->qty_day * $stock->qty_unit;
-                // ✅ Hanya yang SOH < qty_day_actual yang dianggap critical
                 return $stock->soh < $qtyDayActual && $qtyDayActual > 0;
             })
             ->map(function($stock) {
