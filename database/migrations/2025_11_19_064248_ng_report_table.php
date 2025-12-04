@@ -25,7 +25,7 @@ return new class extends Migration
             $table->foreignId('supplier_id')->constrained()->onDelete('cascade');
             $table->string('part_code')->unique();
             $table->string('part_name');
-            $table->string('product_image')->nullable();
+            $table->json('product_images')->nullable();
             $table->text('description')->nullable();
             $table->timestamps();
         });
@@ -35,7 +35,7 @@ return new class extends Migration
             $table->id();
             $table->string('report_number')->unique();
             $table->foreignId('part_id')->constrained()->onDelete('cascade');
-            $table->string('ng_image');
+            $table->json('ng_images')->nullable();
             $table->text('notes')->nullable();
             $table->string('reported_by');
             $table->timestamp('reported_at');

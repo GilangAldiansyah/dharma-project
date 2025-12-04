@@ -217,27 +217,10 @@ const exportToCSV = async () => {
             <!-- Compact Header with Stats -->
             <div class="bg-white dark:bg-sidebar rounded-lg shadow-sm p-3 border border-sidebar-border">
                 <div class="flex items-center justify-between flex-wrap gap-3">
-                    <div class="flex items-center gap-4">
-                        <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                            <BarChart3 class="w-5 h-5 text-blue-600" />
-                            Dashboard Stok
-                        </h1>
-                        <!-- Inline Statistics -->
-                        <div class="flex items-center gap-2 text-xs">
-                            <span class="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-semibold">
-                                🚨 {{ statistics.critical }}
-                            </span>
-                            <span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded font-semibold">
-                                ⚠️ {{ statistics.warning }}
-                            </span>
-                            <span class="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded font-semibold">
-                                ✅ {{ statistics.normal }}
-                            </span>
-                            <span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded font-semibold">
-                                📦 {{ statistics.overstock }}
-                            </span>
-                        </div>
-                    </div>
+                    <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                        <BarChart3 class="w-5 h-5 text-blue-600" />
+                        Dashboard Stok
+                    </h1>
                     <div class="flex items-center gap-2">
                         <input
                             v-model="selectedDate"
@@ -252,6 +235,44 @@ const exportToCSV = async () => {
                         >
                             <RefreshCw class="w-4 h-4" />
                         </button>
+                    </div>
+                </div>
+            </div>
+            <!-- Statistics Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <!-- Critical -->
+                <div class="bg-white dark:bg-sidebar rounded-lg shadow-sm p-3 border-l-4 border-red-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Krisis</p>
+                            <p class="text-2xl font-bold text-red-600 dark:text-red-400">{{ statistics.critical }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Stok &lt; 1 Hari</p>
+                        </div>
+                        <div class="text-3xl">🚨</div>
+                    </div>
+                </div>
+
+                <!-- Normal -->
+                <div class="bg-white dark:bg-sidebar rounded-lg shadow-sm p-3 border-l-4 border-green-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Aman</p>
+                            <p class="text-2xl font-bold text-green-600 dark:text-green-400">{{ statistics.normal }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Stok Memenuhi</p>
+                        </div>
+                        <div class="text-3xl">✅</div>
+                    </div>
+                </div>
+
+                <!-- Overstock -->
+                <div class="bg-white dark:bg-sidebar rounded-lg shadow-sm p-3 border-l-4 border-purple-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Berlebih</p>
+                            <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">{{ statistics.overstock }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Tidak Terpakai</p>
+                        </div>
+                        <div class="text-3xl">📦</div>
                     </div>
                 </div>
             </div>
@@ -537,7 +558,7 @@ const exportToCSV = async () => {
             </div>
 
             <div class="text-center text-sm text-gray-600 dark:text-gray-400">
-                Menampilkan {{ filteredData.length }} dari {{ stockData.length }} item | Terakhir diupdate: {{ new Date().toLocaleString('id-ID') }}
+                Menampilkan {{ filteredData.length }} dari {{ stockData.length }} item
             </div>
         </div>
     </AppLayout>

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DailyStock;
 use App\Models\OutputProduct;
+use App\Models\MonthlyForecast;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -27,7 +28,7 @@ class StockController extends Controller
         ]);
     }
 
-    private function getStockData($date, $blType)
+private function getStockData($date, $blType)
     {
         $stockData = DailyStock::where('stock_date', $date)
             ->where('bl_type', $blType)
@@ -64,6 +65,7 @@ class StockController extends Controller
                         'out_shift3' => 0,
                         'ng_shift1' => 0,
                         'ng_shift2' => 0,
+                        'ng_unit' => 0,
                         'total_produksi' => 0,
                         'total_out' => 0,
                         'soh' => $item->soh,
@@ -107,7 +109,8 @@ class StockController extends Controller
                         if (isset($updateData['stock_awal'])) {
                             $totalProduksi = ($item->produksi_shift1 ?? 0) + ($item->produksi_shift2 ?? 0) + ($item->produksi_shift3 ?? 0);
                             $totalOut = ($item->out_shift1 ?? 0) + ($item->out_shift2 ?? 0) + ($item->out_shift3 ?? 0);
-                            $newSoh = $updateData['stock_awal'] + $totalProduksi - $totalOut;
+                            $ngUnit = $item->ng_unit ?? 0;
+                            $newSoh = $updateData['stock_awal'] + $totalProduksi - $totalOut + $ngUnit;
                             $item->update(['soh' => $newSoh]);
                             $item->soh = $newSoh;
                         }
@@ -121,7 +124,7 @@ class StockController extends Controller
         return $stockData;
     }
 
-    private function formatStockData($item)
+ private function formatStockData($item)
     {
         return [
             'id' => $item->id,
@@ -144,6 +147,7 @@ class StockController extends Controller
             'out_shift3' => $item->out_shift3,
             'ng_shift1' => $item->ng_shift1,
             'ng_shift2' => $item->ng_shift2,
+            'ng_unit' => $item->ng_unit ?? 0,
             'total_produksi' => $item->total_produksi,
             'total_out' => $item->total_out,
             'soh' => $item->soh,
@@ -165,7 +169,6 @@ class StockController extends Controller
         if ($yesterdayOutput->isNotEmpty()) {
             $newRecords = [];
             foreach ($yesterdayOutput as $item) {
-                // Create new record with yesterday's master data, reset all shifts
                 $newRecord = OutputProduct::create([
                     'type' => $item->type,
                     'penanggung_jawab' => $item->penanggung_jawab,
@@ -181,7 +184,6 @@ class StockController extends Controller
                     'ng_shift3' => 0,
                 ]);
 
-                // ✅ COPY BOM MATERIALS dari kemarin
                 $yesterdayMaterials = $item->materials()->get();
 
                 if ($yesterdayMaterials->isNotEmpty()) {
@@ -191,17 +193,7 @@ class StockController extends Controller
                             'qty_per_unit' => $material->qty_per_unit,
                         ]);
                     }
-
-                    Log::info('📦 BOM copied to new day', [
-                        'from_output_id' => $item->id,
-                        'to_output_id' => $newRecord->id,
-                        'product_unit' => $newRecord->product_unit,
-                        'materials_count' => $yesterdayMaterials->count(),
-                        'from_date' => $yesterday,
-                        'to_date' => $date,
-                    ]);
                 }
-
                 $newRecords[] = $this->formatOutputData($newRecord);
             }
             return collect($newRecords);
@@ -316,7 +308,7 @@ class StockController extends Controller
         ]);
     }
 
-    public function update(Request $request)
+public function update(Request $request)
     {
         try {
             $validated = $request->validate([
@@ -340,7 +332,7 @@ class StockController extends Controller
                 'out_shift3' => 'nullable|integer|min:0',
                 'ng_shift1' => 'nullable|integer|min:0',
                 'ng_shift2' => 'nullable|integer|min:0',
-                'ng_shift3' => 'nullable|integer|min:0',
+                'ng_unit' => 'nullable|integer|min:0',
             ]);
 
             $data = [
@@ -362,12 +354,12 @@ class StockController extends Controller
                 'out_shift3' => $validated['out_shift3'] ?? 0,
                 'ng_shift1' => $validated['ng_shift1'] ?? 0,
                 'ng_shift2' => $validated['ng_shift2'] ?? 0,
-                'ng_shift3' => $validated['ng_shift3'] ?? 0
+                'ng_unit' => $validated['ng_unit'] ?? 0,
             ];
 
             $data['total_produksi'] = $data['produksi_shift1'] + $data['produksi_shift2'] + $data['produksi_shift3'];
             $data['total_out'] = $data['out_shift1'] + $data['out_shift2'] + $data['out_shift3'];
-            $data['soh'] = $data['stock_awal'] + $data['total_produksi'] - $data['total_out'];
+            $data['soh'] = $data['stock_awal'] + $data['total_produksi'] - $data['total_out'] + $data['ng_unit'];
 
             if (!empty($validated['id']) && is_numeric($validated['id'])) {
                 $stock = DailyStock::find($validated['id']);
@@ -425,138 +417,95 @@ class StockController extends Controller
         }
     }
 
-    /**
-     * Update Output Product with real-time sync to Control Stock
-     */
-    public function updateOutput(Request $request)
-{
-    try {
-        $validated = $request->validate([
-            'id' => 'nullable',
-            'type' => 'nullable|string',
-            'penanggung_jawab' => 'nullable|string',
-            'sap_no' => 'nullable|string',
-            'product_unit' => 'nullable|string',
-            'qty_day' => 'nullable|integer',
-            'stock_date' => 'required|date',
-            'out_shift1' => 'nullable|integer|min:0',
-            'out_shift2' => 'nullable|integer|min:0',
-            'out_shift3' => 'nullable|integer|min:0',
-            'ng_shift1' => 'nullable|integer|min:0',
-            'ng_shift2' => 'nullable|integer|min:0',
-            'ng_shift3' => 'nullable|integer|min:0',
-        ]);
+public function updateOutput(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'id' => 'nullable',
+                'type' => 'nullable|string',
+                'penanggung_jawab' => 'nullable|string',
+                'sap_no' => 'nullable|string',
+                'product_unit' => 'nullable|string',
+                'qty_day' => 'nullable|integer',
+                'stock_date' => 'required|date',
+                'out_shift1' => 'nullable|integer|min:0',
+                'out_shift2' => 'nullable|integer|min:0',
+                'out_shift3' => 'nullable|integer|min:0',
+                'ng_shift1' => 'nullable|integer|min:0',
+                'ng_shift2' => 'nullable|integer|min:0',
+                'ng_shift3' => 'nullable|integer|min:0',
+            ]);
 
-        $data = [
-            'type' => $validated['type'] ?? '',
-            'penanggung_jawab' => $validated['penanggung_jawab'] ?? '',
-            'sap_no' => $validated['sap_no'] ?? '',
-            'product_unit' => $validated['product_unit'] ?? '',
-            'qty_day' => $validated['qty_day'] ?? 0,
-            'stock_date' => $validated['stock_date'],
-            'out_shift1' => $validated['out_shift1'] ?? 0,
-            'out_shift2' => $validated['out_shift2'] ?? 0,
-            'out_shift3' => $validated['out_shift3'] ?? 0,
-            'ng_shift1' => $validated['ng_shift1'] ?? 0,
-            'ng_shift2' => $validated['ng_shift2'] ?? 0,
-            'ng_shift3' => $validated['ng_shift3'] ?? 0,
-        ];
+            $data = [
+                'type' => $validated['type'] ?? '',
+                'penanggung_jawab' => $validated['penanggung_jawab'] ?? '',
+                'sap_no' => $validated['sap_no'] ?? '',
+                'product_unit' => $validated['product_unit'] ?? '',
+                'qty_day' => $validated['qty_day'] ?? 0,
+                'stock_date' => $validated['stock_date'],
+                'out_shift1' => $validated['out_shift1'] ?? 0,
+                'out_shift2' => $validated['out_shift2'] ?? 0,
+                'out_shift3' => $validated['out_shift3'] ?? 0,
+                'ng_shift1' => $validated['ng_shift1'] ?? 0,
+                'ng_shift2' => $validated['ng_shift2'] ?? 0,
+                'ng_shift3' => $validated['ng_shift3'] ?? 0,
+            ];
 
-        $oldOutputData = null;
-        if (!empty($validated['id']) && is_numeric($validated['id'])) {
-            $output = OutputProduct::find($validated['id']);
-            if ($output) {
-                // ✅ CRITICAL FIX: Simpan OLD data SEBELUM di-update
-                $oldOutputData = [
-                    'out_shift1' => $output->out_shift1,
-                    'out_shift2' => $output->out_shift2,
-                    'out_shift3' => $output->out_shift3 ?? 0,
-                ];
+            $oldOutputData = null;
+            if (!empty($validated['id']) && is_numeric($validated['id'])) {
+                $output = OutputProduct::find($validated['id']);
+                if ($output) {
+                    $oldOutputData = [
+                        'out_shift1' => $output->out_shift1,
+                        'out_shift2' => $output->out_shift2,
+                        'out_shift3' => $output->out_shift3 ?? 0,
+                        'ng_shift1' => $output->ng_shift1 ?? 0,
+                        'ng_shift2' => $output->ng_shift2 ?? 0,
+                        'ng_shift3' => $output->ng_shift3 ?? 0,
+                    ];
 
-                // Update output product
-                $output->update($data);
-
-                // Reload to get fresh data
-                $output->refresh();
+                    $output->update($data);
+                    $output->refresh();
+                } else {
+                    $output = OutputProduct::create($data);
+                }
             } else {
                 $output = OutputProduct::create($data);
             }
-        } else {
-            $output = OutputProduct::create($data);
+
+            $this->syncOutputToControlStock($output, $oldOutputData);
+
+            return response()->json(['success' => true, 'data' => $output]);
+        } catch (\Exception $e) {
+            Log::error('Update output error', ['message' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
-
-        // SYNC TO CONTROL STOCK (Real-time)
-        $this->syncOutputToControlStock($output, $oldOutputData);
-
-        return response()->json(['success' => true, 'data' => $output]);
-    } catch (\Exception $e) {
-        Log::error('Update output error', ['message' => $e->getMessage()]);
-        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
     }
-}
 
 private function syncOutputToControlStock(OutputProduct $output, $oldOutputData = null)
 {
-    Log::info('🔵 START syncOutputToControlStock', [
-        'output_id' => $output->id,
-        'product_unit' => $output->product_unit,
-        'stock_date' => $output->stock_date,
-        'new_shifts' => [
-            'shift1' => $output->out_shift1,
-            'shift2' => $output->out_shift2,
-            'shift3' => $output->out_shift3,
-        ],
-        'old_shifts' => $oldOutputData
-    ]);
-
     $output->load('materials');
 
-    Log::info('📦 Materials loaded', [
-        'materials_count' => $output->materials->count(),
-        'materials' => $output->materials->map(function($m) {
-            return [
-                'sap_no' => $m->sap_no,
-                'qty_per_unit' => $m->qty_per_unit
-            ];
-        })->toArray()
-    ]);
-
     if ($output->materials->isEmpty()) {
-        Log::warning('⚠️ No materials defined for output product', [
-            'output_id' => $output->id,
-            'product_unit' => $output->product_unit
-        ]);
+        Log::warning('⚠️ No materials defined for output product');
         return;
     }
 
-    // Calculate delta
-    $deltaShift1 = ($output->out_shift1 ?? 0) - ($oldOutputData['out_shift1'] ?? 0);
-    $deltaShift2 = ($output->out_shift2 ?? 0) - ($oldOutputData['out_shift2'] ?? 0);
-    $deltaShift3 = ($output->out_shift3 ?? 0) - ($oldOutputData['out_shift3'] ?? 0);
+    $deltaOutShift1 = ($output->out_shift1 ?? 0) - ($oldOutputData['out_shift1'] ?? 0);
+    $deltaOutShift2 = ($output->out_shift2 ?? 0) - ($oldOutputData['out_shift2'] ?? 0);
+    $deltaOutShift3 = ($output->out_shift3 ?? 0) - ($oldOutputData['out_shift3'] ?? 0);
 
-    Log::info('📊 Delta calculated', [
-        'current_values' => [
-            'shift1' => $output->out_shift1,
-            'shift2' => $output->out_shift2,
-            'shift3' => $output->out_shift3,
-        ],
-        'old_values' => $oldOutputData,
-        'deltas' => [
-            'deltaShift1' => $deltaShift1,
-            'deltaShift2' => $deltaShift2,
-            'deltaShift3' => $deltaShift3,
-        ],
-    ]);
+    $oldTotalNg = ($oldOutputData['ng_shift1'] ?? 0) +
+                  ($oldOutputData['ng_shift2'] ?? 0) +
+                  ($oldOutputData['ng_shift3'] ?? 0);
 
-    // Loop setiap material yang dibutuhkan
-    foreach ($output->materials as $index => $material) {
-        Log::info("🔍 Processing material #{$index}", [
-            'material_id' => $material->id,
-            'sap_no' => $material->sap_no,
-            'qty_per_unit_from_bom' => $material->qty_per_unit,
-        ]);
+    $newTotalNg = ($output->ng_shift1 ?? 0) +
+                  ($output->ng_shift2 ?? 0) +
+                  ($output->ng_shift3 ?? 0);
 
-        // Find matching stock in BL1 or BL2
+    $deltaNgUnit = $newTotalNg - $oldTotalNg;
+
+    foreach ($output->materials as $material) {
         $matchingStocks = DailyStock::where('stock_date', $output->stock_date)
             ->where(function($query) use ($material) {
                 $query->where('id_sap', $material->sap_no)
@@ -564,84 +513,45 @@ private function syncOutputToControlStock(OutputProduct $output, $oldOutputData 
             })
             ->get();
 
-        Log::info("📋 Matching stocks found", [
-            'sap_no' => $material->sap_no,
-            'count' => $matchingStocks->count(),
-            'stock_ids' => $matchingStocks->pluck('id')->toArray(),
-            'bl_types' => $matchingStocks->pluck('bl_type')->toArray(),
-        ]);
-
         if ($matchingStocks->isEmpty()) {
-            Log::warning('❌ No matching stock found', [
-                'sap_no' => $material->sap_no,
-                'output_id' => $output->id,
-                'product' => $output->product_unit,
-                'stock_date' => $output->stock_date,
-            ]);
+            Log::warning('❌ No matching stock found', ['sap_no' => $material->sap_no]);
             continue;
         }
 
-        foreach ($matchingStocks as $stockIndex => $stock) {
-            // ✅ Gunakan qty_per_unit dari BOM, bukan dari Control Stock
+        foreach ($matchingStocks as $stock) {
             $qtyPerUnit = $material->qty_per_unit;
 
-            Log::info("📐 Before update - Stock state", [
-                'stock_id' => $stock->id,
-                'bl_type' => $stock->bl_type,
-                'current_out_shifts' => [
-                    'out_shift1' => $stock->out_shift1,
-                    'out_shift2' => $stock->out_shift2,
-                    'out_shift3' => $stock->out_shift3,
-                ],
-                'qty_per_unit_from_bom' => $qtyPerUnit,
-                'delta_to_apply' => [
-                    'shift1' => $deltaShift1 * $qtyPerUnit,
-                    'shift2' => $deltaShift2 * $qtyPerUnit,
-                    'shift3' => $deltaShift3 * $qtyPerUnit,
-                ]
-            ]);
+            $newOutShift1 = $stock->out_shift1 + ($deltaOutShift1 * $qtyPerUnit);
+            $newOutShift2 = $stock->out_shift2 + ($deltaOutShift2 * $qtyPerUnit);
+            $newOutShift3 = $stock->out_shift3 + ($deltaOutShift3 * $qtyPerUnit);
 
-            $newOutShift1 = $stock->out_shift1 + ($deltaShift1 * $qtyPerUnit);
-            $newOutShift2 = $stock->out_shift2 + ($deltaShift2 * $qtyPerUnit);
-            $newOutShift3 = $stock->out_shift3 + ($deltaShift3 * $qtyPerUnit);
+            $newNgUnit = $stock->ng_unit + ($deltaNgUnit * $qtyPerUnit);
 
             $totalOut = $newOutShift1 + $newOutShift2 + $newOutShift3;
-            $totalProduksi = ($stock->produksi_shift1 ?? 0) + ($stock->produksi_shift2 ?? 0) + ($stock->produksi_shift3 ?? 0);
-            $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut;
+            $totalProduksi = ($stock->produksi_shift1 ?? 0) +
+                           ($stock->produksi_shift2 ?? 0) +
+                           ($stock->produksi_shift3 ?? 0);
 
-            $updateResult = $stock->update([
+            $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut + $newNgUnit;
+
+            $stock->update([
                 'out_shift1' => max(0, $newOutShift1),
                 'out_shift2' => max(0, $newOutShift2),
                 'out_shift3' => max(0, $newOutShift3),
-                'total_out' => $totalOut,
-                'total_produksi' => $totalProduksi,
-                'soh' => $newSoh,
-            ]);
-
-            Log::info("✅ After update - Stock state", [
-                'stock_id' => $stock->id,
-                'bl_type' => $stock->bl_type,
-                'new_out_shifts' => [
-                    'out_shift1' => max(0, $newOutShift1),
-                    'out_shift2' => max(0, $newOutShift2),
-                    'out_shift3' => max(0, $newOutShift3),
-                ],
+                'ng_unit' => max(0, $newNgUnit),
                 'total_out' => $totalOut,
                 'soh' => $newSoh,
-                'update_success' => $updateResult,
             ]);
         }
     }
-
-    Log::info('🔵 END syncOutputToControlStock');
 }
+
 
     public function deleteOutput($id)
     {
         try {
             $output = OutputProduct::find($id);
             if ($output) {
-                // Before delete, reverse the OUT from control stock
                 $this->syncOutputToControlStock($output, [
                     'out_shift1' => $output->out_shift1,
                     'out_shift2' => $output->out_shift2,
@@ -658,13 +568,9 @@ private function syncOutputToControlStock(OutputProduct $output, $oldOutputData 
         }
     }
 
-    /**
- * Get materials for an output product
- */
 public function getOutputMaterials(OutputProduct $outputProduct)
 {
     $materials = $outputProduct->materials()->get()->map(function($material) use ($outputProduct) {
-        // Get qty_unit from Control Stock
         $stock = DailyStock::where('stock_date', $outputProduct->stock_date)
             ->where(function($query) use ($material) {
                 $query->where('id_sap', $material->sap_no)
@@ -697,19 +603,6 @@ public function updateOutputMaterials(Request $request, OutputProduct $outputPro
             'materials.*.qty_per_unit' => 'required|integer|min:1',
         ]);
 
-        Log::info('🔧 START updateOutputMaterials', [
-            'output_id' => $outputProduct->id,
-            'product_unit' => $outputProduct->product_unit,
-            'stock_date' => $outputProduct->stock_date,
-            'current_output_shifts' => [
-                'shift1' => $outputProduct->out_shift1,
-                'shift2' => $outputProduct->out_shift2,
-                'shift3' => $outputProduct->out_shift3,
-            ],
-            'new_materials_count' => count($validated['materials']),
-        ]);
-
-        // ✅ STEP 1: Get OLD materials BEFORE delete (untuk reverse calculation)
         $oldMaterials = $outputProduct->materials()->get()->map(function($m) {
             return [
                 'sap_no' => $m->sap_no,
@@ -717,13 +610,6 @@ public function updateOutputMaterials(Request $request, OutputProduct $outputPro
             ];
         })->toArray();
 
-        Log::info('📦 Old materials before delete', [
-            'count' => count($oldMaterials),
-            'materials' => $oldMaterials,
-        ]);
-
-        // ✅ STEP 2: REVERSE old materials effect from Control Stock
-        // Treat as if we're deleting the output (set all OUT to 0)
         foreach ($oldMaterials as $oldMaterial) {
             $this->reverseMaterialFromControlStock(
                 $outputProduct,
@@ -732,10 +618,8 @@ public function updateOutputMaterials(Request $request, OutputProduct $outputPro
             );
         }
 
-        // ✅ STEP 3: Delete existing materials
         $outputProduct->materials()->delete();
 
-        // ✅ STEP 4: Insert new materials
         foreach ($validated['materials'] as $material) {
             $outputProduct->materials()->create([
                 'sap_no' => $material['sap_no'],
@@ -743,16 +627,7 @@ public function updateOutputMaterials(Request $request, OutputProduct $outputPro
             ]);
         }
 
-        Log::info('📦 New materials inserted', [
-            'count' => count($validated['materials']),
-            'materials' => $validated['materials'],
-        ]);
-
-        // ✅ STEP 5: RE-APPLY new materials effect to Control Stock
-        // Treat as if we're creating new output with current OUT values
         $this->applyMaterialsToControlStock($outputProduct);
-
-        Log::info('✅ END updateOutputMaterials - Success');
 
         return response()->json([
             'success' => true,
@@ -773,15 +648,6 @@ public function updateOutputMaterials(Request $request, OutputProduct $outputPro
 
 private function reverseMaterialFromControlStock(OutputProduct $output, string $sapNo, int $qtyPerUnit)
 {
-    Log::info('🔙 Reversing material from Control Stock', [
-        'sap_no' => $sapNo,
-        'qty_per_unit' => $qtyPerUnit,
-        'output_shifts' => [
-            'shift1' => $output->out_shift1,
-            'shift2' => $output->out_shift2,
-            'shift3' => $output->out_shift3,
-        ],
-    ]);
 
     $matchingStocks = DailyStock::where('stock_date', $output->stock_date)
         ->where(function($query) use ($sapNo) {
@@ -791,57 +657,44 @@ private function reverseMaterialFromControlStock(OutputProduct $output, string $
         ->get();
 
     if ($matchingStocks->isEmpty()) {
-        Log::warning('⚠️ No matching stock to reverse', ['sap_no' => $sapNo]);
+        Log::warning('⚠️ No matching stock to reverse');
         return;
     }
 
     foreach ($matchingStocks as $stock) {
-        // Subtract the OLD qty_per_unit effect
-        $reverseShift1 = $output->out_shift1 * $qtyPerUnit;
-        $reverseShift2 = $output->out_shift2 * $qtyPerUnit;
-        $reverseShift3 = ($output->out_shift3 ?? 0) * $qtyPerUnit;
+        $reverseOutShift1 = $output->out_shift1 * $qtyPerUnit;
+        $reverseOutShift2 = $output->out_shift2 * $qtyPerUnit;
+        $reverseOutShift3 = ($output->out_shift3 ?? 0) * $qtyPerUnit;
 
-        $newOutShift1 = max(0, $stock->out_shift1 - $reverseShift1);
-        $newOutShift2 = max(0, $stock->out_shift2 - $reverseShift2);
-        $newOutShift3 = max(0, $stock->out_shift3 - $reverseShift3);
+        $totalNg = ($output->ng_shift1 ?? 0) +
+                   ($output->ng_shift2 ?? 0) +
+                   ($output->ng_shift3 ?? 0);
+        $reverseNgUnit = $totalNg * $qtyPerUnit;
+
+        $newOutShift1 = max(0, $stock->out_shift1 - $reverseOutShift1);
+        $newOutShift2 = max(0, $stock->out_shift2 - $reverseOutShift2);
+        $newOutShift3 = max(0, $stock->out_shift3 - $reverseOutShift3);
+        $newNgUnit = max(0, $stock->ng_unit - $reverseNgUnit);
 
         $totalOut = $newOutShift1 + $newOutShift2 + $newOutShift3;
-        $totalProduksi = ($stock->produksi_shift1 ?? 0) + ($stock->produksi_shift2 ?? 0) + ($stock->produksi_shift3 ?? 0);
-        $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut;
+        $totalProduksi = ($stock->produksi_shift1 ?? 0) +
+                       ($stock->produksi_shift2 ?? 0) +
+                       ($stock->produksi_shift3 ?? 0);
+        $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut + $newNgUnit;
 
         $stock->update([
             'out_shift1' => $newOutShift1,
             'out_shift2' => $newOutShift2,
             'out_shift3' => $newOutShift3,
+            'ng_unit' => $newNgUnit,
             'total_out' => $totalOut,
             'soh' => $newSoh,
-        ]);
-
-        Log::info('✅ Reversed from Control Stock', [
-            'stock_id' => $stock->id,
-            'bl_type' => $stock->bl_type,
-            'reversed_amounts' => [
-                'shift1' => $reverseShift1,
-                'shift2' => $reverseShift2,
-                'shift3' => $reverseShift3,
-            ],
-            'new_out_values' => [
-                'out_shift1' => $newOutShift1,
-                'out_shift2' => $newOutShift2,
-                'out_shift3' => $newOutShift3,
-            ],
-            'new_soh' => $newSoh,
         ]);
     }
 }
 
 private function applyMaterialsToControlStock(OutputProduct $output)
 {
-    Log::info('➕ Applying materials to Control Stock', [
-        'output_id' => $output->id,
-        'product_unit' => $output->product_unit,
-    ]);
-
     $output->load('materials');
 
     if ($output->materials->isEmpty()) {
@@ -863,43 +716,33 @@ private function applyMaterialsToControlStock(OutputProduct $output)
         }
 
         foreach ($matchingStocks as $stock) {
-            // Add the NEW qty_per_unit effect
-            $applyShift1 = $output->out_shift1 * $material->qty_per_unit;
-            $applyShift2 = $output->out_shift2 * $material->qty_per_unit;
-            $applyShift3 = ($output->out_shift3 ?? 0) * $material->qty_per_unit;
+            $applyOutShift1 = $output->out_shift1 * $material->qty_per_unit;
+            $applyOutShift2 = $output->out_shift2 * $material->qty_per_unit;
+            $applyOutShift3 = ($output->out_shift3 ?? 0) * $material->qty_per_unit;
 
-            $newOutShift1 = $stock->out_shift1 + $applyShift1;
-            $newOutShift2 = $stock->out_shift2 + $applyShift2;
-            $newOutShift3 = $stock->out_shift3 + $applyShift3;
+            $totalNg = ($output->ng_shift1 ?? 0) +
+                       ($output->ng_shift2 ?? 0) +
+                       ($output->ng_shift3 ?? 0);
+            $applyNgUnit = $totalNg * $material->qty_per_unit;
+
+            $newOutShift1 = $stock->out_shift1 + $applyOutShift1;
+            $newOutShift2 = $stock->out_shift2 + $applyOutShift2;
+            $newOutShift3 = $stock->out_shift3 + $applyOutShift3;
+            $newNgUnit = $stock->ng_unit + $applyNgUnit;
 
             $totalOut = $newOutShift1 + $newOutShift2 + $newOutShift3;
-            $totalProduksi = ($stock->produksi_shift1 ?? 0) + ($stock->produksi_shift2 ?? 0) + ($stock->produksi_shift3 ?? 0);
-            $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut;
+            $totalProduksi = ($stock->produksi_shift1 ?? 0) +
+                           ($stock->produksi_shift2 ?? 0) +
+                           ($stock->produksi_shift3 ?? 0);
+            $newSoh = ($stock->stock_awal ?? 0) + $totalProduksi - $totalOut + $newNgUnit;
 
             $stock->update([
                 'out_shift1' => $newOutShift1,
                 'out_shift2' => $newOutShift2,
                 'out_shift3' => $newOutShift3,
+                'ng_unit' => $newNgUnit,
                 'total_out' => $totalOut,
                 'soh' => $newSoh,
-            ]);
-
-            Log::info('✅ Applied to Control Stock', [
-                'stock_id' => $stock->id,
-                'bl_type' => $stock->bl_type,
-                'sap_no' => $material->sap_no,
-                'qty_per_unit' => $material->qty_per_unit,
-                'applied_amounts' => [
-                    'shift1' => $applyShift1,
-                    'shift2' => $applyShift2,
-                    'shift3' => $applyShift3,
-                ],
-                'new_out_values' => [
-                    'out_shift1' => $newOutShift1,
-                    'out_shift2' => $newOutShift2,
-                    'out_shift3' => $newOutShift3,
-                ],
-                'new_soh' => $newSoh,
             ]);
         }
     }
@@ -935,5 +778,354 @@ public function getAvailableMaterials(Request $request)
         'success' => true,
         'materials' => $materials,
     ]);
+    }
+
+    public function forecastIndex(Request $request)
+{
+    $year = $request->input('year', now()->year);
+    $month = $request->input('month', now()->month);
+
+    $forecasts = MonthlyForecast::forMonth($year, $month)
+        ->orderBy('type')
+        ->orderBy('sap_no')
+        ->get();
+
+    // Get unique SAP numbers from Output Products
+    $availableSapNumbers = OutputProduct::select('sap_no', 'product_unit', 'type')
+        ->distinct()
+        ->whereNotNull('sap_no')
+        ->where('sap_no', '!=', '')
+        ->orderBy('type')
+        ->orderBy('sap_no')
+        ->get();
+
+    return Inertia::render('Forecast/Index', [
+        'forecasts' => $forecasts,
+        'availableSapNumbers' => $availableSapNumbers,
+        'selectedYear' => $year,
+        'selectedMonth' => $month,
+        'months' => [
+            1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
+            5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
+            9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
+        ],
+    ]);
+}
+
+/**
+ * Update or create forecast
+ * Alur: Forecast → Output Products → Control Stock (via BOM)
+ */
+public function forecastUpdate(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'id' => 'nullable|integer',
+            'sap_no' => 'required|string',
+            'product_unit' => 'nullable|string',
+            'part_name' => 'nullable|string',
+            'type' => 'nullable|string',
+            'year' => 'required|integer|min:2020|max:2100',
+            'month' => 'required|integer|min:1|max:12',
+            'forecast_qty' => 'required|integer|min:0',
+            'working_days' => 'required|integer|min:1|max:31',
+        ]);
+
+        // Create or update forecast
+        $forecast = MonthlyForecast::updateOrCreate(
+            [
+                'sap_no' => $validated['sap_no'],
+                'year' => $validated['year'],
+                'month' => $validated['month'],
+            ],
+            [
+                'product_unit' => $validated['product_unit'] ?? '',
+                'part_name' => $validated['part_name'] ?? '',
+                'type' => $validated['type'] ?? '',
+                'forecast_qty' => $validated['forecast_qty'],
+                'working_days' => $validated['working_days'],
+            ]
+        );
+
+        Log::info('📊 Forecast created/updated', [
+            'sap_no' => $forecast->sap_no,
+            'forecast_qty' => $forecast->forecast_qty,
+            'working_days' => $forecast->working_days,
+            'qty_per_day' => $forecast->qty_per_day,
+        ]);
+
+        // STEP 1: Sync forecast ke Output Products (Product level)
+        $outputSyncResult = $this->syncForecastToOutputProducts($forecast);
+
+        // STEP 2: Sync dari Output Products ke Control Stock (Material level via BOM)
+        $stockSyncResult = $this->syncOutputProductToControlStockViaBOM($forecast);
+
+        return response()->json([
+            'success' => true,
+            'data' => $forecast->fresh(),
+            'sync_results' => [
+                'output_products' => $outputSyncResult,
+                'control_stock' => $stockSyncResult,
+            ],
+            'message' => "Forecast updated successfully!\n" .
+                        "Output Products synced: {$outputSyncResult['updated']} records\n" .
+                        "Control Stock synced: {$stockSyncResult['updated']} materials across {$stockSyncResult['products']} products"
+        ]);
+    } catch (\Exception $e) {
+        Log::error('❌ Forecast update error', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * STEP 1: Sync forecast to Output Products (Product level)
+ * Formula: Output Product qty_day = forecast_qty / working_days
+ */
+private function syncForecastToOutputProducts(MonthlyForecast $forecast): array
+{
+    $currentMonth = Carbon::create($forecast->year, $forecast->month, 1);
+    $startDate = $currentMonth->copy()->startOfMonth()->format('Y-m-d');
+    $endDate = $currentMonth->copy()->endOfMonth()->format('Y-m-d');
+
+    $qtyPerDay = $forecast->qty_per_day;
+
+    // Update semua Output Products dengan SAP NO yang sama dalam bulan ini
+    $updated = OutputProduct::where('sap_no', $forecast->sap_no)
+        ->whereBetween('stock_date', [$startDate, $endDate])
+        ->update([
+            'qty_day' => $qtyPerDay,
+            'forecast_qty' => $forecast->forecast_qty,
+            'working_days' => $forecast->working_days,
+            'sync_note' => "Synced from forecast: {$forecast->forecast_qty} / {$forecast->working_days} = {$qtyPerDay}",
+        ]);
+
+    Log::info('✅ STEP 1: Forecast → Output Products', [
+        'sap_no' => $forecast->sap_no,
+        'forecast_qty' => $forecast->forecast_qty,
+        'working_days' => $forecast->working_days,
+        'qty_per_day' => $qtyPerDay,
+        'updated_output_products' => $updated,
+        'date_range' => [$startDate, $endDate]
+    ]);
+
+    return [
+        'updated' => $updated,
+        'qty_per_day' => $qtyPerDay,
+        'date_range' => [$startDate, $endDate]
+    ];
+}
+
+private function syncOutputProductToControlStockViaBOM(MonthlyForecast $forecast): array
+{
+    $currentMonth = Carbon::create($forecast->year, $forecast->month, 1);
+    $startDate = $currentMonth->copy()->startOfMonth()->format('Y-m-d');
+    $endDate = $currentMonth->copy()->endOfMonth()->format('Y-m-d');
+
+    $outputProducts = OutputProduct::where('sap_no', $forecast->sap_no)
+        ->whereBetween('stock_date', [$startDate, $endDate])
+        ->with('materials')
+        ->get();
+
+    $totalMaterialsUpdated = 0;
+    $bomCalculations = [];
+
+    foreach ($outputProducts as $outputProduct) {
+        if ($outputProduct->materials->isEmpty()) {
+            Log::warning('⚠️ No BOM defined for output product', [
+                'output_id' => $outputProduct->id,
+                'sap_no' => $outputProduct->sap_no,
+            ]);
+            continue;
+        }
+
+        $outputQtyPerDay = $outputProduct->qty_day;
+
+        // Loop setiap material dalam BOM
+        foreach ($outputProduct->materials as $bomMaterial) {
+            // Formula: Material qty_day = Output qty_day × qty_per_unit
+            $materialQtyPerDay = $outputQtyPerDay * $bomMaterial->qty_per_unit;
+
+            // Update Control Stock untuk material ini
+            $updated = DailyStock::where('stock_date', $outputProduct->stock_date)
+                ->where(function($query) use ($bomMaterial) {
+                    $query->where('id_sap', $bomMaterial->sap_no)
+                          ->orWhere('sap_finish', $bomMaterial->sap_no);
+                })
+                ->update([
+                    'qty_day' => $materialQtyPerDay,
+                    'qty_day_from_forecast' => $materialQtyPerDay,
+                    'bom_calculation' => "Output {$outputProduct->sap_no}: {$outputQtyPerDay} × {$bomMaterial->qty_per_unit} = {$materialQtyPerDay}",
+                ]);
+
+            if ($updated > 0) {
+                $totalMaterialsUpdated += $updated;
+
+                $bomCalculations[] = [
+                    'material_sap' => $bomMaterial->sap_no,
+                    'output_qty_day' => $outputQtyPerDay,
+                    'qty_per_unit' => $bomMaterial->qty_per_unit,
+                    'material_qty_day' => $materialQtyPerDay,
+                    'formula' => "{$outputQtyPerDay} × {$bomMaterial->qty_per_unit} = {$materialQtyPerDay}",
+                ];
+
+                Log::info('✅ Material qty_day calculated', [
+                    'material_sap' => $bomMaterial->sap_no,
+                    'output_product' => $outputProduct->sap_no,
+                    'output_qty_day' => $outputQtyPerDay,
+                    'bom_qty_per_unit' => $bomMaterial->qty_per_unit,
+                    'material_qty_day' => $materialQtyPerDay,
+                    'updated_records' => $updated,
+                ]);
+            }
+        }
+    }
+
+    Log::info('✅ STEP 2: Output Products → Control Stock (via BOM)', [
+        'forecast_sap' => $forecast->sap_no,
+        'output_products_processed' => $outputProducts->count(),
+        'total_materials_updated' => $totalMaterialsUpdated,
+        'bom_calculations' => $bomCalculations,
+    ]);
+
+    return [
+        'products' => $outputProducts->count(),
+        'updated' => $totalMaterialsUpdated,
+        'calculations' => $bomCalculations,
+    ];
+}
+
+/**
+ * Bulk import forecasts from Excel/CSV
+ */
+public function forecastBulkImport(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'year' => 'required|integer',
+            'month' => 'required|integer|min:1|max:12',
+            'working_days' => 'required|integer|min:1|max:31',
+            'forecasts' => 'required|array',
+            'forecasts.*.sap_no' => 'required|string',
+            'forecasts.*.forecast_qty' => 'required|integer|min:0',
+            'forecasts.*.product_unit' => 'nullable|string',
+            'forecasts.*.type' => 'nullable|string',
+        ]);
+
+        $imported = 0;
+        $results = [];
+
+        foreach ($validated['forecasts'] as $forecastData) {
+            $forecast = MonthlyForecast::updateOrCreate(
+                [
+                    'sap_no' => $forecastData['sap_no'],
+                    'year' => $validated['year'],
+                    'month' => $validated['month'],
+                ],
+                [
+                    'forecast_qty' => $forecastData['forecast_qty'],
+                    'working_days' => $validated['working_days'],
+                    'product_unit' => $forecastData['product_unit'] ?? '',
+                    'type' => $forecastData['type'] ?? '',
+                ]
+            );
+
+            // Sync to Output Products and Control Stock
+            $outputSync = $this->syncForecastToOutputProducts($forecast);
+            $stockSync = $this->syncOutputProductToControlStockViaBOM($forecast);
+
+            $results[] = [
+                'sap_no' => $forecast->sap_no,
+                'qty_per_day' => $forecast->qty_per_day,
+                'output_synced' => $outputSync['updated'],
+                'materials_synced' => $stockSync['updated'],
+            ];
+
+            $imported++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'imported' => $imported,
+            'results' => $results,
+            'message' => "Successfully imported {$imported} forecasts and synced to Output Products & Control Stock"
+        ]);
+    } catch (\Exception $e) {
+        Log::error('❌ Bulk import error', [
+            'message' => $e->getMessage(),
+        ]);
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Delete forecast
+ */
+public function forecastDelete($id)
+{
+    try {
+        $forecast = MonthlyForecast::findOrFail($id);
+
+        Log::info('🗑️ Deleting forecast', [
+            'id' => $forecast->id,
+            'sap_no' => $forecast->sap_no,
+        ]);
+
+        $forecast->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Forecast deleted successfully'
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get forecast summary for a month
+ */
+public function forecastSummary(Request $request)
+{
+    $year = $request->input('year', now()->year);
+    $month = $request->input('month', now()->month);
+
+    $forecasts = MonthlyForecast::forMonth($year, $month)->get();
+
+    $summary = [
+        'total_forecasts' => $forecasts->count(),
+        'total_forecast_qty' => $forecasts->sum('forecast_qty'),
+        'avg_working_days' => $forecasts->avg('working_days'),
+        'total_qty_per_day' => $forecasts->sum('qty_per_day'),
+        'by_type' => $forecasts->groupBy('type')->map(function($group) {
+            return [
+                'count' => $group->count(),
+                'total_qty' => $group->sum('forecast_qty'),
+                'total_qty_per_day' => $group->sum('qty_per_day'),
+            ];
+        }),
+    ];
+
+    return response()->json([
+        'success' => true,
+        'summary' => $summary,
+    ]);
 }
 }
+
+
+
+
+
+

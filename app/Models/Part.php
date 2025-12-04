@@ -14,8 +14,9 @@ class Part extends Model
     protected $fillable = [
         'supplier_id',
         'part_code',
+        'id_sap',
+        'type_line',
         'part_name',
-        'product_image',
         'product_images',
         'description',
     ];

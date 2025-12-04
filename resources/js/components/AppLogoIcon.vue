@@ -20,7 +20,7 @@ const sizeClasses = computed(() => {
         sm: 'w-6 h-6',
         md: 'w-8 h-8',
         lg: 'w-12 h-12',
-        xl: 'w-16 h-16'
+        xl: 'w-32 h-32'
     };
     return sizes[props.size];
 });
@@ -28,7 +28,7 @@ const sizeClasses = computed(() => {
 
 <template>
     <img
-        src="/images/dharma-polimetal.png"
+        src="/images/dharma.png"
         alt="Dharma Logo"
         :class="[sizeClasses, className]"
         v-bind="$attrs"

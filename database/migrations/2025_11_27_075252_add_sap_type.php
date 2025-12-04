@@ -6,17 +6,18 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    public function up(): void
+    public function up()
     {
         Schema::table('parts', function (Blueprint $table) {
-            $table->json('product_images')->nullable()->after('product_image');
+            $table->string('id_sap')->nullable()->after('part_code');
+            $table->string('type_line')->nullable()->after('id_sap');
         });
     }
 
-    public function down(): void
+    public function down()
     {
         Schema::table('parts', function (Blueprint $table) {
-            $table->dropColumn('product_images');
+            $table->dropColumn(['id_sap', 'type_line']);
         });
     }
 };

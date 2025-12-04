@@ -26,7 +26,7 @@ interface StockData {
     out_shift3: number;
     ng_shift1: number;
     ng_shift2: number;
-    ng_shift3: number;
+    ng_unit: number;
     total_produksi: number;
     total_out: number;
     soh: number;
@@ -62,18 +62,14 @@ const stockData = ref<StockData[]>(props.stockData);
 const stockDataBL2 = ref<StockData[]>(props.stockDataBL2 || []);
 const savingRows = ref<Set<number>>(new Set());
 
-// Tab state
 const activeTab = ref<'BL1' | 'BL2'>('BL1');
 
-// Selection state for delete
 const selectedRows = ref<Set<number>>(new Set());
 
-// Computed current data based on active tab
 const currentStockData = computed(() =>
     activeTab.value === 'BL1' ? stockData.value : stockDataBL2.value
 );
 
-// Check if all rows selected
 const isAllSelected = computed(() =>
     selectedRows.value.size > 0 && selectedRows.value.size === currentStockData.value.length
 );
@@ -82,9 +78,8 @@ const negativeStockCount = computed(() => {
     return currentStockData.value.filter(stock => stock.stock_awal < 0 || stock.soh < 0).length;
 });
 
-// ==================== MULTIPLE FILES IMPORT ====================
 const showImportModal = ref(false);
-const importFiles = ref<File[]>([]); // ✅ Array untuk multiple files
+const importFiles = ref<File[]>([]);
 const importPreviewBL1 = ref<any[]>([]);
 const importPreviewBL2 = ref<any[]>([]);
 const isProcessing = ref(false);
@@ -100,7 +95,7 @@ let saveTimeouts: { [key: number]: ReturnType<typeof setTimeout> } = {};
 const calculateTotals = (stock: StockData) => {
     stock.total_produksi = (stock.produksi_shift1 || 0) + (stock.produksi_shift2 || 0) + (stock.produksi_shift3 || 0);
     stock.total_out = (stock.out_shift1 || 0) + (stock.out_shift2 || 0) + (stock.out_shift3 || 0);
-    stock.soh = (stock.stock_awal || 0) + stock.total_produksi - stock.total_out;
+    stock.soh = (stock.stock_awal || 0) + stock.total_produksi - stock.total_out + (stock.ng_shift1 || 0) + (stock.ng_shift2 || 0) + (stock.ng_unit || 0);
 };
 
 const autoSave = (stock: StockData, index: number) => {
@@ -134,7 +129,7 @@ const autoSave = (stock: StockData, index: number) => {
                 out_shift3: stock.out_shift3 || 0,
                 ng_shift1: stock.ng_shift1 || 0,
                 ng_shift2: stock.ng_shift2 || 0,
-                ng_shift3: stock.ng_shift3 || 0,
+                ng_unit: stock.ng_unit || 0,
                 bl_type: activeTab.value
             };
 
@@ -173,7 +168,7 @@ const addNewRow = async () => {
             out_shift3: 0,
             ng_shift1: 0,
             ng_shift2: 0,
-            ng_shift3: 0,
+            ng_unit: 0,
             bl_type: activeTab.value
         });
 
@@ -194,7 +189,7 @@ const addNewRow = async () => {
             out_shift3: 0,
             ng_shift1: 0,
             ng_shift2: 0,
-            ng_shift3: 0,
+            ng_unit: 0,
             total_produksi: 0,
             total_out: 0,
             soh: 0,
@@ -214,34 +209,6 @@ const addNewRow = async () => {
         alert('Error adding row: ' + (error.response?.data?.message || error.message));
     }
 };
-
-const deleteRow = async (index: number) => {
-    const stock = currentStockData.value[index];
-
-    if (!stock.id) {
-        if (activeTab.value === 'BL1') {
-            stockData.value.splice(index, 1);
-        } else {
-            stockDataBL2.value.splice(index, 1);
-        }
-        return;
-    }
-
-    if (confirm('Hapus baris ini?')) {
-        try {
-            await axios.delete(`/stock/${stock.id}`);
-            if (activeTab.value === 'BL1') {
-                stockData.value.splice(index, 1);
-            } else {
-                stockDataBL2.value.splice(index, 1);
-            }
-        } catch (error) {
-            console.error('Delete error:', error);
-        }
-    }
-};
-
-// ==================== DELETE FUNCTIONS ====================
 
 const toggleSelectAll = () => {
     if (isAllSelected.value) {
@@ -338,15 +305,12 @@ const deleteAllData = async () => {
     }
 };
 
-// ==================== MULTIPLE FILES HANDLER ====================
 const handleFileSelect = (event: Event) => {
     const target = event.target as HTMLInputElement;
     if (target.files && target.files.length > 0) {
-        // ✅ Convert FileList to Array (max 5 files)
         const filesArray = Array.from(target.files).slice(0, 5);
         importFiles.value = filesArray;
 
-        // ✅ Parse semua files
         parseMultipleCSVs(filesArray);
     }
 };
@@ -366,17 +330,14 @@ const removeFile = (index: number) => {
 const parseMultipleCSVs = async (files: File[]) => {
     isProcessing.value = true;
 
-    // Reset preview data
     const combinedGroupedBL1 = new Map<string, any>();
     const combinedGroupedBL2 = new Map<string, any>();
 
     try {
-        // ✅ Parse semua file secara sequential
         for (const file of files) {
             await parseSingleCSV(file, combinedGroupedBL1, combinedGroupedBL2);
         }
 
-        // Convert Map to Array
         const previewBL1 = Array.from(combinedGroupedBL1.values()).map(item => ({
             ...item,
             total: item.shift1 + item.shift2 + item.shift3
@@ -417,8 +378,6 @@ const parseMultipleCSVs = async (files: File[]) => {
     }
 };
 
-// LANJUTAN DARI BAGIAN 1...
-
 const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Map<string, any>): Promise<void> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -428,30 +387,25 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                 const text = e.target?.result as string;
                 const lines = text.split('\n');
 
-                // ✅ STRATEGI 1: Cari header dengan pattern yang lebih spesifik
                 let headerRow = -1;
                 let materialCol = -1;
                 let descCol = -1;
                 let qty1Col = -1;
                 let qty2Col = -1;
 
-                // Scan 15 baris pertama untuk header
                 for (let i = 0; i < Math.min(15, lines.length); i++) {
                     const line = lines[i];
                     const cols = parseCSVLine(line);
 
-                    // Cari kolom Material Number
                     for (let j = 0; j < cols.length; j++) {
                         const cell = cols[j].toLowerCase().trim();
 
-                        // Deteksi Material Number column
                         if (cell === 'material number' || cell === 'material' || cell === 'part name') {
                             materialCol = j;
                             descCol = j + 1;
                             headerRow = i;
                         }
 
-                        // Deteksi QTY columns
                         if (cell === 'qty' || cell.includes('cycle') && cell.includes('qty')) {
                             if (qty1Col === -1) {
                                 qty1Col = j;
@@ -464,7 +418,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                     if (materialCol !== -1 && qty1Col !== -1) break;
                 }
 
-                // ✅ STRATEGI 2: Fallback - Analisis struktur data
                 if (materialCol === -1) {
                     console.warn('⚠️ Header tidak terdeteksi, gunakan pattern analysis');
 
@@ -483,7 +436,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                     }
                 }
 
-                // ✅ STRATEGI 3: Deteksi QTY columns berdasarkan POSISI dan TYPE
                 if (qty1Col === -1) {
                     console.warn('⚠️ QTY column tidak terdeteksi dari header');
 
@@ -535,14 +487,12 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                     file: file.name
                 });
 
-                // ✅ VALIDASI
                 if (materialCol === -1 || qty1Col === -1) {
                     console.error('❌ Failed to detect columns in file:', file.name);
-                    resolve(); // Continue to next file
+                    resolve();
                     return;
                 }
 
-                // ✅ PARSING DATA
                 const startRow = headerRow !== -1 ? headerRow + 2 : 0;
 
                 for (let i = startRow; i < lines.length; i++) {
@@ -556,7 +506,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                     const materialNumber = columns[materialCol]?.trim();
                     const materialDesc = columns[descCol]?.trim() || '';
 
-                    // ✅ FILTER
                     if (!materialNumber ||
                         materialNumber === 'Material Number' ||
                         materialNumber === 'PART NAME' ||
@@ -567,7 +516,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                         continue;
                     }
 
-                    // ✅ EXTRACT QTY
                     const qty1Raw = columns[qty1Col]?.trim() || '';
                     const qty2Raw = qty2Col !== -1 ? (columns[qty2Col]?.trim() || '') : '';
 
@@ -592,7 +540,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
 
                     console.log(`✅ Valid row: Material=${materialNumber}, Shift1=${qty1}, Shift2=${qty2}`);
 
-                    // ✅ MATCHING LOGIC
                     const existingStockBL1 = stockData.value.find(s =>
                         s.bl_type === 'BL1' && (
                             s.id_sap === materialNumber ||
@@ -611,7 +558,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                         )
                     );
 
-                    // Grouping BL1
                     if (existingStockBL1) {
                         if (!groupedBL1.has(materialNumber)) {
                             groupedBL1.set(materialNumber, {
@@ -634,7 +580,6 @@ const parseSingleCSV = (file: File, groupedBL1: Map<string, any>, groupedBL2: Ma
                         }
                     }
 
-                    // Grouping BL2
                     if (existingStockBL2) {
                         if (!groupedBL2.has(materialNumber)) {
                             groupedBL2.set(materialNumber, {
@@ -754,7 +699,7 @@ const confirmImport = async () => {
                             out_shift3: stockData.value[stockIndex].out_shift3,
                             ng_shift1: stockData.value[stockIndex].ng_shift1,
                             ng_shift2: stockData.value[stockIndex].ng_shift2,
-                            ng_shift3: stockData.value[stockIndex].ng_shift3,
+                            ng_unit: stockData.value[stockIndex].ng_unit,
                         });
 
                         if (response.data.data && response.data.data.id) {
@@ -805,7 +750,7 @@ const confirmImport = async () => {
                             out_shift3: stockDataBL2.value[stockIndex].out_shift3,
                             ng_shift1: stockDataBL2.value[stockIndex].ng_shift1,
                             ng_shift2: stockDataBL2.value[stockIndex].ng_shift2,
-                            ng_shift3: stockDataBL2.value[stockIndex].ng_shift3,
+                            ng_unit: stockDataBL2.value[stockIndex].ng_unit,
                         });
 
                         if (response.data.data && response.data.data.id) {
@@ -940,7 +885,7 @@ const closeImportModal = () => {
                                     />
                                 </th>
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border w-12" rowspan="2">NO</th>
-                                <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border" rowspan="2">SAP<br>FINISH</th>
+                                <!-- <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border" rowspan="2">SAP<br>FINISH</th> -->
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border" rowspan="2">ID SAP</th>
                                 <th class="px-2 py-2 text-left font-semibold border-r border-sidebar-border" rowspan="2">Material Name</th>
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border" rowspan="2">Part NO</th>
@@ -951,9 +896,10 @@ const closeImportModal = () => {
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border w-20" rowspan="2">Stock<br>Awal</th>
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border bg-green-50 dark:bg-green-900/20" colspan="4">Produksi {{ activeTab }}</th>
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border bg-red-50 dark:bg-red-900/20" colspan="4">OUT</th>
-                                <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20" colspan="3">NG Single</th>
+                                <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20" colspan="2">NG Single</th>
+                                <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20" rowspan="2">NG Unit</th>
                                 <th class="px-2 py-2 text-center font-semibold border-r border-sidebar-border w-20" rowspan="2">SOH</th>
-                                <th class="px-2 py-2 text-center font-semibold w-12" rowspan="2">Act</th>
+                                <!-- <th class="px-2 py-2 text-center font-semibold w-12" rowspan="2">Act</th> -->
                             </tr>
                             <tr class="border-b border-sidebar-border">
                                 <th class="px-2 py-1 text-center text-xs border-r border-sidebar-border bg-green-50 dark:bg-green-900/20 w-16">Shift 1</th>
@@ -968,7 +914,6 @@ const closeImportModal = () => {
 
                                 <th class="px-2 py-1 text-center text-xs border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20 w-16">Shift 1</th>
                                 <th class="px-2 py-1 text-center text-xs border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20 w-16">Shift 2</th>
-                                <th class="px-2 py-1 text-center text-xs border-r border-sidebar-border bg-yellow-50 dark:bg-yellow-900/20 w-16">Shift 3</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -992,14 +937,14 @@ const closeImportModal = () => {
                                 </td>
                                 <td class="px-2 py-1 text-center border-r border-sidebar-border">{{ index + 1 }}</td>
 
-                                <td class="px-1 py-1 border-r border-sidebar-border">
+                                <!-- <td class="px-1 py-1 border-r border-sidebar-border">
                                     <input
                                         v-model="stock.sap_finish"
                                         @input="autoSave(stock, index)"
                                         type="text"
                                         class="w-full min-w-[140px] text-center text-xs rounded border-0 px-1 py-0.5 focus:ring-1 focus:ring-blue-500 dark:bg-sidebar"
                                     />
-                                </td>
+                                </td> -->
                                 <td class="px-1 py-1 border-r border-sidebar-border">
                                     <input
                                         v-model="stock.id_sap"
@@ -1162,7 +1107,7 @@ const closeImportModal = () => {
                                 </td>
                                 <td class="px-1 py-1 border-r border-sidebar-border bg-yellow-50/50 dark:bg-yellow-900/10">
                                     <input
-                                        v-model.number="stock.ng_shift3"
+                                        v-model.number="stock.ng_unit"
                                         @input="autoSave(stock, index)"
                                         type="number"
                                         min="0"
@@ -1184,7 +1129,7 @@ const closeImportModal = () => {
                                     />
                                 </td>
 
-                                <td class="px-2 py-1 text-center">
+                                <!-- <td class="px-2 py-1 text-center">
                                     <button
                                         @click="deleteRow(index)"
                                         class="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
@@ -1192,7 +1137,7 @@ const closeImportModal = () => {
                                     >
                                         <Trash2 class="w-3 h-3" />
                                     </button>
-                                </td>
+                                </td> -->
                             </tr>
 
                             <tr v-if="currentStockData.length === 0">
@@ -1230,7 +1175,6 @@ const closeImportModal = () => {
                 </div>
             </div>
 
-            <!-- ==================== IMPORT MODAL WITH MULTIPLE FILES ==================== -->
             <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] flex flex-col">
                     <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
@@ -1240,7 +1184,6 @@ const closeImportModal = () => {
                         </button>
                     </div>
                     <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                        <!-- ✅ MULTIPLE FILE UPLOAD AREA -->
                         <div class="space-y-2">
                             <label class="flex-1 flex items-center justify-center px-4 py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition">
                                 <div class="text-center">
@@ -1253,7 +1196,6 @@ const closeImportModal = () => {
                                 <input type="file" accept=".csv" multiple @change="handleFileSelect" class="hidden" />
                             </label>
 
-                            <!-- ✅ DISPLAY SELECTED FILES -->
                             <div v-if="importFiles.length > 0" class="space-y-2">
                                 <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">Selected Files ({{ importFiles.length }}/5):</p>
                                 <div class="grid grid-cols-1 gap-2">
@@ -1279,7 +1221,6 @@ const closeImportModal = () => {
                             </div>
                         </div>
 
-                        <!-- SUMMARY -->
                         <div v-if="importPreviewBL1.length > 0 || importPreviewBL2.length > 0" class="grid grid-cols-2 gap-4">
                             <div class="border-2 border-blue-200 dark:border-blue-800 rounded-lg p-4">
                                 <h3 class="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-3">BL1 Summary</h3>
@@ -1317,7 +1258,6 @@ const closeImportModal = () => {
                             </div>
                         </div>
 
-                        <!-- PREVIEW TABLES -->
                         <div v-if="importPreviewBL1.length > 0 || importPreviewBL2.length > 0" class="grid grid-cols-2 gap-4">
                             <div v-if="importPreviewBL1.length > 0" class="border border-blue-200 dark:border-blue-800 rounded-lg overflow-hidden">
                                 <div class="bg-blue-100 dark:bg-blue-900/30 px-3 py-2">
@@ -1407,7 +1347,6 @@ const closeImportModal = () => {
                             <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Processing {{ importFiles.length }} file(s)...</p>
                         </div>
 
-                        <!-- DEBUG INFO -->
                         <div v-if="importPreviewBL1.length > 0 || importPreviewBL2.length > 0" class="text-xs bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-200 dark:border-gray-700">
                             <p class="font-semibold mb-2 text-gray-700 dark:text-gray-300">📊 Debug Info:</p>
                             <div class="space-y-1 text-gray-600 dark:text-gray-400">
@@ -1426,7 +1365,6 @@ const closeImportModal = () => {
                         </div>
                     </div>
 
-                    <!-- Footer -->
                     <div class="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
                         <div class="text-xs text-gray-600 dark:text-gray-400">
                             <p v-if="importSummaryBL1.matched > 0 || importSummaryBL2.matched > 0">

@@ -21,10 +21,17 @@ defineProps<{
 
 <template>
     <AuthBase
-        title="Log in to your account"
-        description="Enter your email and password below to log in"
     >
         <Head title="Log in" />
+         <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-900 mb-1">
+                    4W Production
+                </h1>
+                <div class="h-0.5 w-32 mx-auto bg-gradient-to-r from-blue-600 via-green-500 to-blue-600 rounded-full mb-2"></div>
+                <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    PT Dharma Polimetal Tbk
+                </p>
+            </div>
 
         <div
             v-if="status"

@@ -56,7 +56,6 @@ const editingOutput = ref<OutputData | null>(null);
 const modalType = ref('');
 const modalPenanggungJawab = ref('');
 
-// Import modal states - UPDATED FOR MULTIPLE FILES
 const showImportModal = ref(false);
 const importFiles = ref<File[]>([]);
 const importPreview = ref<any[]>([]);
@@ -64,10 +63,8 @@ const isProcessing = ref(false);
 const importSummary = ref({ total: 0, matched: 0, unmatched: 0 });
 const currentProcessingFile = ref<string>('');
 
-// Selection for delete
 const selectedRows = ref<Set<number>>(new Set());
 
-// BOM Modal states
 const showBomModal = ref(false);
 const selectedOutputForBom = ref<OutputData | null>(null);
 const bomMaterials = ref<Material[]>([]);
@@ -413,7 +410,6 @@ const getGlobalIndex = (item: OutputData) => {
     return outputData.value.findIndex(i => i === item);
 };
 
-// ==================== DELETE FUNCTIONS ====================
 const toggleSelectAll = () => {
     if (isAllSelected.value) {
         selectedRows.value.clear();
@@ -496,7 +492,6 @@ const deleteAllData = async () => {
     }
 };
 
-// ==================== BOM FUNCTIONS ====================
 const openBomModal = async (output: OutputData) => {
     if (!output.id) {
         alert('⚠️ Simpan data output terlebih dahulu sebelum mengelola BOM');
@@ -615,15 +610,12 @@ const closeBomModal = () => {
     showMaterialDropdown.value = false;
 };
 
-// ==================== IMPORT BSTB FUNCTIONS (UPDATED FOR MULTIPLE FILES) ====================
 const handleFileSelect = (event: Event) => {
     const target = event.target as HTMLInputElement;
     if (target.files && target.files.length > 0) {
-        // Limit to 5 files
         const filesArray = Array.from(target.files).slice(0, 5);
         importFiles.value = filesArray;
 
-        // Parse all files sequentially
         parseAllCSVFiles();
     }
 };
@@ -637,14 +629,10 @@ const parseAllCSVFiles = async () => {
     for (let fileIndex = 0; fileIndex < importFiles.value.length; fileIndex++) {
         const file = importFiles.value[fileIndex];
         currentProcessingFile.value = `Processing ${fileIndex + 1}/${importFiles.value.length}: ${file.name}`;
-
         await parseCSV(file);
-
-        // Small delay between files for UI feedback
         await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Calculate final summary
     importSummary.value = {
         total: importPreview.value.length,
         matched: importPreview.value.filter(i => i.matched).length,
@@ -655,7 +643,6 @@ const parseAllCSVFiles = async () => {
     isProcessing.value = false;
 };
 
-// Helper function untuk parse CSV line
 function parseCSVLine(line: string): string[] {
     const columns: string[] = [];
     let currentCell = '';
@@ -687,14 +674,12 @@ const parseCSV = (file: File): Promise<void> => {
 
                 const grouped = new Map<string, any>();
 
-                // ✅ STRATEGI 1: Cari header dengan pattern spesifik
                 let headerRow = -1;
                 let materialCol = -1;
                 let descCol = -1;
                 let qty1Col = -1;
                 let qty2Col = -1;
 
-                // Scan 15 baris pertama untuk header
                 for (let i = 0; i < Math.min(15, lines.length); i++) {
                     const line = lines[i];
                     const cols = parseCSVLine(line);
@@ -702,14 +687,12 @@ const parseCSV = (file: File): Promise<void> => {
                     for (let j = 0; j < cols.length; j++) {
                         const cell = cols[j].toLowerCase().trim();
 
-                        // Deteksi Material Number column
                         if (cell === 'material number' || cell === 'material' || cell === 'part name') {
                             materialCol = j;
                             descCol = j + 1;
                             headerRow = i;
                         }
 
-                        // Deteksi QTY columns
                         if (cell === 'qty' || (cell.includes('cycle') && cell.includes('qty'))) {
                             if (qty1Col === -1) {
                                 qty1Col = j;
@@ -722,7 +705,6 @@ const parseCSV = (file: File): Promise<void> => {
                     if (materialCol !== -1 && qty1Col !== -1) break;
                 }
 
-                // ✅ STRATEGI 2: Fallback - Analisis struktur data
                 if (materialCol === -1) {
                     console.warn('⚠️ Header tidak terdeteksi, gunakan pattern analysis');
 
@@ -730,7 +712,6 @@ const parseCSV = (file: File): Promise<void> => {
                         const cols = parseCSVLine(lines[i]);
 
                         for (let j = 0; j < Math.min(10, cols.length); j++) {
-                            // Pattern: A + digit, atau pure numbers 5+ digit
                             if (/^(A[0-9]|[0-9]{5,})/.test(cols[j])) {
                                 materialCol = j;
                                 descCol = j + 1;
@@ -742,7 +723,6 @@ const parseCSV = (file: File): Promise<void> => {
                     }
                 }
 
-                // ✅ STRATEGI 3: Deteksi QTY columns berdasarkan POSISI dan TYPE
                 if (qty1Col === -1) {
                     console.warn('⚠️ QTY column tidak terdeteksi dari header');
 
@@ -752,7 +732,6 @@ const parseCSV = (file: File): Promise<void> => {
                     for (let i = dataStartRow; i < Math.min(dataStartRow + 10, lines.length); i++) {
                         const cols = parseCSVLine(lines[i]);
 
-                        // Cek kolom 9-20 (range umum untuk QTY)
                         for (let j = 9; j < Math.min(20, cols.length); j++) {
                             const val = cols[j].trim();
 
@@ -794,14 +773,12 @@ const parseCSV = (file: File): Promise<void> => {
                     headerRow
                 });
 
-                // ✅ VALIDASI
                 if (materialCol === -1 || qty1Col === -1) {
                     alert(`❌ Gagal mendeteksi struktur CSV di file: ${file.name}\n\nPastikan file mengandung:\n- Kolom Material Number/SAP NO\n- Kolom QTY (minimal 1)`);
                     resolve();
                     return;
                 }
 
-                // ✅ PARSING DATA dengan kolom dinamis
                 const startRow = headerRow !== -1 ? headerRow + 2 : 0;
 
                 for (let i = startRow; i < lines.length; i++) {
@@ -810,13 +787,10 @@ const parseCSV = (file: File): Promise<void> => {
 
                     const columns = parseCSVLine(line);
 
-                    // Pastikan ada cukup kolom
                     if (columns.length <= Math.max(materialCol, descCol, qty1Col, qty2Col || 0)) continue;
 
                     const materialNumber = columns[materialCol]?.trim();
-                    const materialDesc = columns[descCol]?.trim() || '';
 
-                    // ✅ FILTER: Skip header, empty, atau row tidak valid
                     if (!materialNumber ||
                         materialNumber.length < 5 ||
                         materialNumber === 'Material Number' ||
@@ -829,14 +803,12 @@ const parseCSV = (file: File): Promise<void> => {
                         continue;
                     }
 
-                    // ✅ EXTRACT QTY
                     const qty1Raw = columns[qty1Col]?.trim() || '';
                     const qty2Raw = qty2Col !== -1 ? (columns[qty2Col]?.trim() || '') : '';
 
                     let qty1 = 0;
                     let qty2 = 0;
 
-                    // Parse QTY1
                     if (qty1Raw && !qty1Raw.includes(':') && !qty1Raw.includes('/')) {
                         const cleaned = qty1Raw.replace(/\s/g, '').replace(/,/g, '');
                         const parsed = parseInt(cleaned);
@@ -845,7 +817,6 @@ const parseCSV = (file: File): Promise<void> => {
                         }
                     }
 
-                    // Parse QTY2
                     if (qty2Raw && !qty2Raw.includes(':') && !qty2Raw.includes('/')) {
                         const cleaned = qty2Raw.replace(/\s/g, '').replace(/,/g, '');
                         const parsed = parseInt(cleaned);
@@ -854,10 +825,8 @@ const parseCSV = (file: File): Promise<void> => {
                         }
                     }
 
-                    // ✅ VALIDASI: Hanya proses jika ada QTY valid
                     if (qty1 === 0 && qty2 === 0) continue;
 
-                    // ✅ MATCH dengan Output Product berdasarkan SAP NO
                     const existingOutput = outputData.value.find(o =>
                         o.sap_no && materialNumber &&
                         o.sap_no.trim().toUpperCase() === materialNumber.trim().toUpperCase()
@@ -884,7 +853,6 @@ const parseCSV = (file: File): Promise<void> => {
                         const totalQty = qty1 + qty2;
 
                         if (totalQty > 0) {
-                            // ✅ GROUPING: Distribusi ke shift berdasarkan urutan
                             if (existing.shift1 === 0) {
                                 existing.shift1 = totalQty;
                             } else if (existing.shift2 === 0) {
@@ -896,7 +864,6 @@ const parseCSV = (file: File): Promise<void> => {
                     }
                 }
 
-                // ✅ Convert Map to Array dan append ke preview
                 const preview = Array.from(grouped.values())
                     .filter(item => item.matched)
                     .map(item => ({
@@ -905,26 +872,16 @@ const parseCSV = (file: File): Promise<void> => {
                         sourceFile: file.name
                     }));
 
-                // Append to existing preview (for multiple files)
                 importPreview.value.push(...preview);
-
-                console.log('✅ Parsed Output BSTB:', {
-                    file: file.name,
-                    parsed: preview.length,
-                    totalSoFar: importPreview.value.length,
-                    detectedColumns: { materialCol, qty1Col, qty2Col }
-                });
 
                 resolve();
             } catch (error) {
-                console.error('❌ Parse error:', error);
                 alert(`Error parsing ${file.name}: ` + error);
                 resolve();
             }
         };
 
         reader.onerror = () => {
-            console.error('❌ File read error');
             resolve();
         };
 
@@ -998,7 +955,6 @@ const confirmImport = async () => {
         alert(`Berhasil import ${updatedCount} records ke Output Products!\n\nData telah disinkronkan ke Control Stock.`);
         closeImportModal();
     } catch (error) {
-        console.error('Import error:', error);
         alert('Error saat import data: ' + error);
     } finally {
         isProcessing.value = false;
@@ -1007,10 +963,10 @@ const confirmImport = async () => {
 
 const closeImportModal = () => {
     showImportModal.value = false;
-    importFiles.value = [];  // ✅ CORRECT: empty array
+    importFiles.value = [];
     importPreview.value = [];
     importSummary.value = { total: 0, matched: 0, unmatched: 0 };
-    currentProcessingFile.value = '';  // ✅ Reset progress text juga
+    currentProcessingFile.value = '';
 };
 </script>
 
@@ -1374,7 +1330,6 @@ const closeImportModal = () => {
             </div>
         </div>
 
-        <!-- Edit Modal -->
         <div
             v-if="showModal"
             class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
@@ -1436,15 +1391,12 @@ const closeImportModal = () => {
                 </div>
             </div>
         </div>
-
-        <!-- BOM Modal -->
         <div
             v-if="showBomModal"
             class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
             @click.self="closeBomModal"
         >
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
-                <!-- Header -->
                 <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                     <div>
                         <h2 class="text-lg font-semibold flex items-center gap-2">
@@ -1460,15 +1412,12 @@ const closeImportModal = () => {
                     </button>
                 </div>
 
-                <!-- Content -->
                 <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                    <!-- Loading State -->
                     <div v-if="isLoadingBom" class="text-center py-8">
                         <Loader class="w-8 h-8 animate-spin mx-auto text-blue-600" />
                         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading materials...</p>
                     </div>
 
-                    <!-- Add Material Section -->
                     <div v-else class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-900">
                         <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
                             <Search class="w-4 h-4" />
@@ -1484,7 +1433,6 @@ const closeImportModal = () => {
                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 dark:bg-gray-800"
                             />
 
-                            <!-- Dropdown -->
                             <div
                                 v-if="showMaterialDropdown && availableMaterials.length > 0"
                                 class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto"
@@ -1518,7 +1466,6 @@ const closeImportModal = () => {
                             </div>
                     </div>
 
-                    <!-- Materials List -->
                     <div v-if="bomMaterials.length > 0" class="border border-purple-200 dark:border-purple-800 rounded-lg overflow-hidden">
                         <div class="bg-purple-100 dark:bg-purple-900/30 px-3 py-2">
                             <h3 class="text-sm font-semibold text-purple-700 dark:text-purple-300">
@@ -1580,7 +1527,6 @@ const closeImportModal = () => {
                         </div>
                     </div>
 
-                    <!-- Empty State -->
                     <div v-else class="text-center py-12 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
                         <Package class="w-12 h-12 mx-auto text-gray-400 mb-3" />
                         <p class="text-sm text-gray-600 dark:text-gray-400">No materials added yet</p>
@@ -1588,7 +1534,6 @@ const closeImportModal = () => {
                     </div>
                 </div>
 
-                <!-- Footer -->
                 <div class="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
                     <div class="text-xs text-gray-600 dark:text-gray-400">
                         <p v-if="bomMaterials.length > 0">
@@ -1616,7 +1561,6 @@ const closeImportModal = () => {
             </div>
         </div>
 
-        <!-- Import BSTB Modal - UPDATED FOR MULTIPLE FILES -->
         <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[90vh] flex flex-col">
                 <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
@@ -1630,7 +1574,6 @@ const closeImportModal = () => {
                 </div>
 
                 <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                    <!-- File Upload Area - UPDATED -->
                     <div class="space-y-2">
                         <label class="flex-1 flex items-center justify-center px-4 py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition">
                             <div class="text-center">
@@ -1649,7 +1592,6 @@ const closeImportModal = () => {
                             <input type="file" accept=".csv" multiple @change="handleFileSelect" class="hidden" />
                         </label>
 
-                        <!-- File List Display -->
                         <div v-if="importFiles.length > 0" class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
                             <div class="flex items-center justify-between mb-2">
                                 <h4 class="text-xs font-semibold text-blue-700 dark:text-blue-300">Selected Files ({{ importFiles.length }}/5)</h4>
@@ -1664,7 +1606,6 @@ const closeImportModal = () => {
                         </div>
                     </div>
 
-                    <!-- Summary Box -->
                     <div v-if="importPreview.length > 0" class="border-2 border-green-200 dark:border-green-800 rounded-lg p-4">
                         <h3 class="text-sm font-semibold text-green-600 dark:text-green-400 mb-3">📊 Summary</h3>
                         <div class="grid grid-cols-3 gap-2">
@@ -1683,7 +1624,6 @@ const closeImportModal = () => {
                         </div>
                     </div>
 
-                    <!-- Preview Table -->
                     <div v-if="importPreview.length > 0" class="border border-green-200 dark:border-green-800 rounded-lg overflow-hidden">
                         <div class="bg-green-100 dark:bg-green-900/30 px-3 py-2">
                             <h3 class="text-sm font-semibold text-green-700 dark:text-green-300">Preview - Matched Data ({{ importPreview.length }} items)</h3>
@@ -1753,23 +1693,9 @@ const closeImportModal = () => {
                             </table>
                         </div>
                     </div>
-
-                    <!-- Processing Indicator -->
                     <div v-if="isProcessing" class="text-center py-8">
                         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                         <p class="mt-2 text-sm font-medium text-blue-600 dark:text-blue-400">{{ currentProcessingFile || 'Processing CSV...' }}</p>
-                    </div>
-
-                    <!-- Info Box -->
-                    <div v-if="importPreview.length > 0" class="text-xs bg-blue-50 dark:bg-blue-900/20 p-3 rounded border border-blue-200 dark:border-blue-700">
-                        <p class="font-semibold text-blue-700 dark:text-blue-300">ℹ️ Import akan:</p>
-                        <ul class="mt-2 space-y-1 text-blue-600 dark:text-blue-400 list-disc list-inside">
-                            <li>Mengisi kolom OUT Shift 1, 2, 3 di Output Products</li>
-                            <li>Otomatis menyinkronkan ke Control Stock (BL1 & BL2)</li>
-                            <li>Mengalikan dengan Qty/Unit untuk update Control Stock</li>
-                            <li>QTY dari BSTB (Cycle 1 + Cycle 2) akan dijumlah per baris</li>
-                            <li><strong>Data dari {{ importFiles.length }} file akan digabungkan</strong></li>
-                        </ul>
                     </div>
                 </div>
 

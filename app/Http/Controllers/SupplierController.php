@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class SupplierController extends Controller
 {
@@ -54,6 +55,24 @@ class SupplierController extends Controller
 
         return redirect()->back();
     }
+
+public function import(Request $request)
+{
+    $request->validate([
+        'suppliers' => 'required|array',
+        'suppliers.*.supplier_code' => 'required|string',
+        'suppliers.*.supplier_name' => 'required|string',
+    ]);
+
+    foreach ($request->suppliers as $supplierData) {
+        Supplier::updateOrCreate(
+            ['supplier_code' => $supplierData['supplier_code']],
+            $supplierData
+        );
+    }
+
+    return redirect()->back();
+}
 
     public function destroy(Supplier $supplier)
     {

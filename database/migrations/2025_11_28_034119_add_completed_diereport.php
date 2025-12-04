@@ -8,15 +8,15 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('ng_reports', function (Blueprint $table) {
-            $table->json('ng_images')->nullable()->after('ng_image');
+        Schema::table('die_shop_reports', function (Blueprint $table) {
+            $table->timestamp('completed_at')->nullable()->after('status');
         });
     }
 
     public function down(): void
     {
-        Schema::table('ng_reports', function (Blueprint $table) {
-            $table->dropColumn('ng_images');
+        Schema::table('die_shop_reports', function (Blueprint $table) {
+            $table->dropColumn('completed_at');
         });
     }
 };

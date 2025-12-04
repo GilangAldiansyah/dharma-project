@@ -12,12 +12,17 @@ import { Form, Head } from '@inertiajs/vue3';
 </script>
 
 <template>
-    <AuthBase
-        title="Create an account"
-        description="Enter your details below to create your account"
-    >
+    <AuthBase>
         <Head title="Register" />
-
+         <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-900 mb-1">
+                    4W Production
+                </h1>
+                <div class="h-0.5 w-32 mx-auto bg-gradient-to-r from-blue-600 via-green-500 to-blue-600 rounded-full mb-2"></div>
+                <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    PT Dharma Polimetal Tbk
+                </p>
+            </div>
         <Form
             v-bind="store.form()"
             :reset-on-success="['password', 'password_confirmation']"

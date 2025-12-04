@@ -26,6 +26,7 @@ class DailyStock extends Model
         'out_shift3',
         'ng_shift1',
         'ng_shift2',
+        'ng_unit'
     ];
 
     protected $casts = [
@@ -58,6 +59,11 @@ class DailyStock extends Model
 
     public function getSohAttribute()
     {
-        return $this->stock_awal + $this->total_produksi - $this->total_out;
+        return ($this->stock_awal ?? 0)
+            + $this->total_produksi
+            - $this->total_out
+            + ($this->ng_shift1 ?? 0)
+            + ($this->ng_shift2 ?? 0)
+            + ($this->ng_unit ?? 0);
     }
 }
