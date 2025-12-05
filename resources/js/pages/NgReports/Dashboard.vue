@@ -796,7 +796,6 @@ onUnmounted(() => {
                             <p class="font-medium">Tidak ada data untuk periode ini</p>
                         </div>
 
-                        <!-- Tooltip via Teleport -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredSupplierBar !== null"
@@ -822,7 +821,6 @@ onUnmounted(() => {
                 </div>
                 <!-- Table View -->
                 <div v-if="viewMode === 'table'" id="table-section" class="p-6 space-y-6">
-                    <!-- Daily Trend Table -->
                     <div v-if="dailyTrend.length > 0">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -870,7 +868,6 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <!-- Parts Table -->
                     <div>
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -931,7 +928,6 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <!-- Suppliers Table -->
                     <div>
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -988,7 +984,6 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <!-- Footer Actions -->
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm">
                 <div class="text-gray-600 dark:text-gray-400">
                     <span class="font-medium">Terakhir diperbarui:</span>

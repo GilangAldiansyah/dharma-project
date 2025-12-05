@@ -30,7 +30,12 @@ const sizeClasses = computed(() => {
     <img
         src="/images/dharma.png"
         alt="Dharma Logo"
-        :class="[sizeClasses, className]"
+        :class="[
+            sizeClasses,
+            'object-contain',
+            'dark:brightness-150 dark:contrast-125',
+            className
+        ]"
         v-bind="$attrs"
     />
 </template>

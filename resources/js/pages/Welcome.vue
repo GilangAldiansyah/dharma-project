@@ -81,7 +81,6 @@ const colorSchemes: Record<ColorType, {
     <Head title="Pilih Sistem" />
 
     <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 relative overflow-hidden">
-        <!-- Decorative Background Elements -->
         <div class="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
             <div class="absolute top-0 left-1/4 w-96 h-96 bg-blue-200 rounded-full blur-3xl"></div>
             <div class="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-200 rounded-full blur-3xl"></div>
@@ -89,17 +88,15 @@ const colorSchemes: Record<ColorType, {
         </div>
 
         <div class="container mx-auto px-4 py-12 relative z-10">
-            <!-- Header -->
             <div class="text-center mb-12">
                 <h1 class="text-5xl md:text-6xl font-bold text-slate-900 mb-4 px-4">
                     Welcome
                 </h1>
                 <p class="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto px-4">
-                    Pilih sistem yang ingin Anda akses untuk memulai pengalaman yang lebih produktif
+                    Pilih sistem yang ingin Anda akses
                 </p>
             </div>
 
-            <!-- Systems Grid -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto mb-12">
                 <div
                     v-for="system in systems"
@@ -113,15 +110,12 @@ const colorSchemes: Record<ColorType, {
                     @mouseleave="hoveredCard = null"
                     @click="selectedSystem = system.id"
                 >
-                    <!-- Glow Effect -->
                     <div :class="[
                         'absolute -inset-0.5 bg-gradient-to-r rounded-2xl blur opacity-0 group-hover:opacity-60 transition duration-300',
                         colorSchemes[system.color].gradient
                     ]"></div>
 
-                    <!-- Card -->
                     <div class="relative bg-white rounded-2xl border-2 border-slate-200 overflow-hidden hover:border-slate-300 transition-all duration-300 shadow-lg hover:shadow-xl h-full flex flex-col">
-                        <!-- Header Section -->
                         <div :class="[
                             'p-6 relative overflow-hidden',
                             colorSchemes[system.color].headerBg
@@ -151,7 +145,6 @@ const colorSchemes: Record<ColorType, {
                                 {{ system.description }}
                             </p>
 
-                            <!-- Stats -->
                             <div v-if="system.stats" class="flex items-center gap-4 mt-4 pt-4 border-t border-slate-300/50">
                                 <div>
                                     <p class="text-xs text-slate-600 font-medium">Active Users</p>
@@ -165,9 +158,7 @@ const colorSchemes: Record<ColorType, {
                             </div>
                         </div>
 
-                        <!-- Content Section -->
                         <div class="p-6 flex-1 flex flex-col">
-                            <!-- Features -->
                             <div class="space-y-3 mb-6 flex-1">
                                 <div
                                     v-for="(feature, idx) in system.features"
@@ -186,7 +177,6 @@ const colorSchemes: Record<ColorType, {
                                 </div>
                             </div>
 
-                            <!-- Button -->
                             <Link
                                 :href="system.route"
                                 :class="[
@@ -207,14 +197,13 @@ const colorSchemes: Record<ColorType, {
                 </div>
             </div>
 
-            <!-- Footer -->
             <div class="text-center space-y-4">
                 <div class="flex items-center justify-center gap-2 text-slate-600 text-sm">
                     <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                     <span class="font-medium">All systems operational</span>
                 </div>
                 <p class="text-sm text-slate-500">
-                    Copyright © 2025 | 4 Wheel Production - All Rights Reserved
+                    Copyright © 2025 | 4 Wheel Departement - All Rights Reserved
                 </p>
             </div>
         </div>

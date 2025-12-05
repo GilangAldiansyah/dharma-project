@@ -780,8 +780,10 @@ public function getAvailableMaterials(Request $request)
     ]);
     }
 
+
+    //forecast
     public function forecastIndex(Request $request)
-{
+    {
     $year = $request->input('year', now()->year);
     $month = $request->input('month', now()->month);
 
@@ -790,7 +792,6 @@ public function getAvailableMaterials(Request $request)
         ->orderBy('sap_no')
         ->get();
 
-    // Get unique SAP numbers from Output Products
     $availableSapNumbers = OutputProduct::select('sap_no', 'product_unit', 'type')
         ->distinct()
         ->whereNotNull('sap_no')
@@ -811,11 +812,6 @@ public function getAvailableMaterials(Request $request)
         ],
     ]);
 }
-
-/**
- * Update or create forecast
- * Alur: Forecast → Output Products → Control Stock (via BOM)
- */
 public function forecastUpdate(Request $request)
 {
     try {
@@ -831,7 +827,6 @@ public function forecastUpdate(Request $request)
             'working_days' => 'required|integer|min:1|max:31',
         ]);
 
-        // Create or update forecast
         $forecast = MonthlyForecast::updateOrCreate(
             [
                 'sap_no' => $validated['sap_no'],
@@ -847,17 +842,8 @@ public function forecastUpdate(Request $request)
             ]
         );
 
-        Log::info('📊 Forecast created/updated', [
-            'sap_no' => $forecast->sap_no,
-            'forecast_qty' => $forecast->forecast_qty,
-            'working_days' => $forecast->working_days,
-            'qty_per_day' => $forecast->qty_per_day,
-        ]);
-
-        // STEP 1: Sync forecast ke Output Products (Product level)
         $outputSyncResult = $this->syncForecastToOutputProducts($forecast);
 
-        // STEP 2: Sync dari Output Products ke Control Stock (Material level via BOM)
         $stockSyncResult = $this->syncOutputProductToControlStockViaBOM($forecast);
 
         return response()->json([
@@ -872,21 +858,12 @@ public function forecastUpdate(Request $request)
                         "Control Stock synced: {$stockSyncResult['updated']} materials across {$stockSyncResult['products']} products"
         ]);
     } catch (\Exception $e) {
-        Log::error('❌ Forecast update error', [
-            'message' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ]);
         return response()->json([
             'success' => false,
             'message' => $e->getMessage()
         ], 500);
     }
 }
-
-/**
- * STEP 1: Sync forecast to Output Products (Product level)
- * Formula: Output Product qty_day = forecast_qty / working_days
- */
 private function syncForecastToOutputProducts(MonthlyForecast $forecast): array
 {
     $currentMonth = Carbon::create($forecast->year, $forecast->month, 1);
@@ -904,23 +881,12 @@ private function syncForecastToOutputProducts(MonthlyForecast $forecast): array
             'working_days' => $forecast->working_days,
             'sync_note' => "Synced from forecast: {$forecast->forecast_qty} / {$forecast->working_days} = {$qtyPerDay}",
         ]);
-
-    Log::info('✅ STEP 1: Forecast → Output Products', [
-        'sap_no' => $forecast->sap_no,
-        'forecast_qty' => $forecast->forecast_qty,
-        'working_days' => $forecast->working_days,
-        'qty_per_day' => $qtyPerDay,
-        'updated_output_products' => $updated,
-        'date_range' => [$startDate, $endDate]
-    ]);
-
     return [
         'updated' => $updated,
         'qty_per_day' => $qtyPerDay,
         'date_range' => [$startDate, $endDate]
     ];
 }
-
 private function syncOutputProductToControlStockViaBOM(MonthlyForecast $forecast): array
 {
     $currentMonth = Carbon::create($forecast->year, $forecast->month, 1);
@@ -946,12 +912,9 @@ private function syncOutputProductToControlStockViaBOM(MonthlyForecast $forecast
 
         $outputQtyPerDay = $outputProduct->qty_day;
 
-        // Loop setiap material dalam BOM
         foreach ($outputProduct->materials as $bomMaterial) {
-            // Formula: Material qty_day = Output qty_day × qty_per_unit
             $materialQtyPerDay = $outputQtyPerDay * $bomMaterial->qty_per_unit;
 
-            // Update Control Stock untuk material ini
             $updated = DailyStock::where('stock_date', $outputProduct->stock_date)
                 ->where(function($query) use ($bomMaterial) {
                     $query->where('id_sap', $bomMaterial->sap_no)
@@ -973,36 +936,15 @@ private function syncOutputProductToControlStockViaBOM(MonthlyForecast $forecast
                     'material_qty_day' => $materialQtyPerDay,
                     'formula' => "{$outputQtyPerDay} × {$bomMaterial->qty_per_unit} = {$materialQtyPerDay}",
                 ];
-
-                Log::info('✅ Material qty_day calculated', [
-                    'material_sap' => $bomMaterial->sap_no,
-                    'output_product' => $outputProduct->sap_no,
-                    'output_qty_day' => $outputQtyPerDay,
-                    'bom_qty_per_unit' => $bomMaterial->qty_per_unit,
-                    'material_qty_day' => $materialQtyPerDay,
-                    'updated_records' => $updated,
-                ]);
             }
         }
     }
-
-    Log::info('✅ STEP 2: Output Products → Control Stock (via BOM)', [
-        'forecast_sap' => $forecast->sap_no,
-        'output_products_processed' => $outputProducts->count(),
-        'total_materials_updated' => $totalMaterialsUpdated,
-        'bom_calculations' => $bomCalculations,
-    ]);
-
     return [
         'products' => $outputProducts->count(),
         'updated' => $totalMaterialsUpdated,
         'calculations' => $bomCalculations,
     ];
 }
-
-/**
- * Bulk import forecasts from Excel/CSV
- */
 public function forecastBulkImport(Request $request)
 {
     try {
@@ -1035,7 +977,6 @@ public function forecastBulkImport(Request $request)
                 ]
             );
 
-            // Sync to Output Products and Control Stock
             $outputSync = $this->syncForecastToOutputProducts($forecast);
             $stockSync = $this->syncOutputProductToControlStockViaBOM($forecast);
 
@@ -1056,28 +997,16 @@ public function forecastBulkImport(Request $request)
             'message' => "Successfully imported {$imported} forecasts and synced to Output Products & Control Stock"
         ]);
     } catch (\Exception $e) {
-        Log::error('❌ Bulk import error', [
-            'message' => $e->getMessage(),
-        ]);
         return response()->json([
             'success' => false,
             'message' => $e->getMessage()
         ], 500);
     }
 }
-
-/**
- * Delete forecast
- */
 public function forecastDelete($id)
 {
     try {
         $forecast = MonthlyForecast::findOrFail($id);
-
-        Log::info('🗑️ Deleting forecast', [
-            'id' => $forecast->id,
-            'sap_no' => $forecast->sap_no,
-        ]);
 
         $forecast->delete();
 
@@ -1093,9 +1022,86 @@ public function forecastDelete($id)
     }
 }
 
-/**
- * Get forecast summary for a month
- */
+public function forecastCopy(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'from_year' => 'required|integer|min:2020|max:2100',
+            'from_month' => 'required|integer|min:1|max:12',
+            'to_year' => 'required|integer|min:2020|max:2100',
+            'to_month' => 'required|integer|min:1|max:12',
+        ]);
+
+        // Validasi tidak boleh copy ke bulan yang sama
+        if ($validated['from_year'] == $validated['to_year'] &&
+            $validated['from_month'] == $validated['to_month']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak dapat menyalin dari bulan yang sama'
+            ], 422);
+        }
+
+        // Ambil data forecast dari bulan sumber
+        $sourceForecasts = MonthlyForecast::forMonth($validated['from_year'], $validated['from_month'])->get();
+
+        if ($sourceForecasts->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak ada data forecast di bulan sumber'
+            ], 404);
+        }
+
+        $copied = 0;
+        $syncResults = [];
+
+        foreach ($sourceForecasts as $sourceForecast) {
+            // Copy forecast ke bulan target
+            $newForecast = MonthlyForecast::updateOrCreate(
+                [
+                    'sap_no' => $sourceForecast->sap_no,
+                    'year' => $validated['to_year'],
+                    'month' => $validated['to_month'],
+                ],
+                [
+                    'product_unit' => $sourceForecast->product_unit,
+                    'part_name' => $sourceForecast->part_name,
+                    'type' => $sourceForecast->type,
+                    'forecast_qty' => $sourceForecast->forecast_qty,
+                    'working_days' => $sourceForecast->working_days,
+                ]
+            );
+
+            // Sync ke Output Products dan Control Stock
+            $outputSync = $this->syncForecastToOutputProducts($newForecast);
+            $stockSync = $this->syncOutputProductToControlStockViaBOM($newForecast);
+
+            $syncResults[] = [
+                'sap_no' => $newForecast->sap_no,
+                'output_synced' => $outputSync['updated'],
+                'materials_synced' => $stockSync['updated'],
+            ];
+
+            $copied++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'copied' => $copied,
+            'sync_results' => $syncResults,
+            'message' => "Successfully copied {$copied} forecasts and synced to Output Products & Control Stock"
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Copy forecast error', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
 public function forecastSummary(Request $request)
 {
     $year = $request->input('year', now()->year);

@@ -47,6 +47,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/forecast/bulk-import', [StockController::class, 'forecastBulkImport'])->name('forecast.bulk-import');
     Route::delete('/forecast/{id}', [StockController::class, 'forecastDelete'])->name('forecast.delete');
     Route::get('/forecast/summary', [StockController::class, 'forecastSummary'])->name('forecast.summary');
+    Route::post('/forecast/copy', [StockController::class, 'forecastCopy'])->name('forecast.copy');
 
     // NG Reports System
     Route::get('/ng-reports', [NgReportController::class, 'index'])->name('ng-reports.index');

@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
-import { Plus, Trash2, Save, TrendingUp, Loader, Search, Calendar, X } from 'lucide-vue-next';
+import { Plus, Trash2, Save, TrendingUp, Loader, Search, Calendar, X, Copy } from 'lucide-vue-next';
 import axios from 'axios';
 
 interface MonthlyForecast {
@@ -44,6 +44,10 @@ const showAddModal = ref(false);
 const searchQuery = ref('');
 const showBulkWorkingDaysModal = ref(false);
 const bulkWorkingDays = ref(20);
+const showCopyModal = ref(false);
+const copyFromYear = ref(props.selectedYear);
+const copyFromMonth = ref(props.selectedMonth);
+const copyingData = ref(false);
 
 const newForecast = ref({
     sap_no: '',
@@ -264,6 +268,39 @@ const closeAddModal = () => {
         working_days: 20
     };
 };
+
+const copyFromOtherMonth = async () => {
+    if (copyFromYear.value === selectedYear.value && copyFromMonth.value === selectedMonth.value) {
+        alert('⚠️ Tidak dapat menyalin dari bulan yang sama!');
+        return;
+    }
+
+    if (!confirm(`Salin semua forecast dari ${props.months[copyFromMonth.value]} ${copyFromYear.value} ke ${props.months[selectedMonth.value]} ${selectedYear.value}?\n\nData yang ada akan ditimpa!`)) {
+        return;
+    }
+
+    copyingData.value = true;
+
+    try {
+        const response = await axios.post('/forecast/copy', {
+            from_year: copyFromYear.value,
+            from_month: copyFromMonth.value,
+            to_year: selectedYear.value,
+            to_month: selectedMonth.value,
+        });
+
+        if (response.data.success) {
+            showCopyModal.value = false;
+            alert(`✅ Berhasil menyalin ${response.data.copied} forecast!\n\n📊 Synced to Output Products & Control Stock via BOM`);
+
+            changeDate();
+        }
+    } catch (error: any) {
+        alert('❌ Error: ' + (error.response?.data?.message || error.message));
+    } finally {
+        copyingData.value = false;
+    }
+};
 </script>
 
 <template>
@@ -282,6 +319,13 @@ const closeAddModal = () => {
                         </p>
                     </div>
                     <div class="flex gap-2 flex-wrap justify-end">
+                        <button
+                            @click="showCopyModal = true"
+                            class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition"
+                        >
+                            <Copy class="w-4 h-4" />
+                            Copy dari Bulan Lain
+                        </button>
                         <button
                             @click="showBulkWorkingDaysModal = true"
                             :disabled="forecasts.length === 0"
@@ -524,6 +568,71 @@ const closeAddModal = () => {
                 <div class="bg-gray-50 dark:bg-gray-900 p-6 flex justify-end gap-3">
                     <button @click="showBulkWorkingDaysModal = false" class="px-5 py-2.5 border rounded-lg hover:bg-gray-100">Cancel</button>
                     <button @click="applyBulkWorkingDays" class="px-5 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showCopyModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" @click.self="showCopyModal = false">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md">
+                <div class="p-6 border-b">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <Copy class="w-6 h-6 text-indigo-600" />
+                        Copy Data Forecast
+                    </h3>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border-l-4 border-blue-500">
+                        <div class="text-sm font-medium text-blue-900 dark:text-blue-300">Target:</div>
+                        <div class="text-lg font-bold text-blue-700 dark:text-blue-400 mt-1">
+                            {{ months[selectedMonth] }} {{ selectedYear }}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Salin dari Bulan</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Year</label>
+                                <select
+                                    v-model="copyFromYear"
+                                    class="w-full px-3 py-2.5 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="2024">2024</option>
+                                    <option value="2025">2025</option>
+                                    <option value="2026">2026</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Month</label>
+                                <select
+                                    v-model="copyFromMonth"
+                                    class="w-full px-3 py-2.5 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option v-for="(name, num) in months" :key="num" :value="num">{{ name }}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-900 p-6 flex justify-end gap-3">
+                    <button
+                        @click="showCopyModal = false"
+                        :disabled="copyingData"
+                        class="px-5 py-2.5 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        @click="copyFromOtherMonth"
+                        :disabled="copyingData"
+                        class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        <Loader v-if="copyingData" class="w-4 h-4 animate-spin" />
+                        <Copy v-else class="w-4 h-4" />
+                        {{ copyingData ? 'Copying...' : 'Copy Data' }}
+                    </button>
                 </div>
             </div>
         </div>
