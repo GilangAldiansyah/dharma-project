@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
@@ -56,13 +56,18 @@ class AuthController extends Controller
             'token' => $token,
         ], 201);
     }
-
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
             'message' => 'Logged out successfully'
+        ], 200);
+    }
+    public function user(Request $request)
+    {
+        return response()->json([
+            'user' => $request->user()
         ], 200);
     }
 }
