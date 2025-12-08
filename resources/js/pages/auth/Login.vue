@@ -31,7 +31,7 @@ const togglePasswordVisibility = () => {
         <Head title="Log in" />
         <div class="text-center mb-8">
             <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                4W Production
+                4W Departement
             </h1>
             <div class="h-0.5 w-32 mx-auto bg-gradient-to-r from-blue-600 via-green-500 to-blue-600 rounded-full mb-2"></div>
             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">

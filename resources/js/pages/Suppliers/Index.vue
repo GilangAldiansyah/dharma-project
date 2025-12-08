@@ -133,7 +133,6 @@ const handleFileUpload = (event: Event) => {
                 return;
             }
 
-            // Proses data mulai dari baris setelah header
             for (let i = headerIndex + 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
@@ -288,7 +287,6 @@ const removeImportRow = (index: number) => {
                     </table>
                 </div>
 
-                <!-- Pagination -->
                 <div v-if="suppliers.last_page > 1" class="px-4 py-3 border-t border-sidebar-border bg-gray-50 dark:bg-sidebar-accent flex items-center justify-between">
                     <div class="text-sm text-gray-600 dark:text-gray-400">
                         Halaman {{ suppliers.current_page }} dari {{ suppliers.last_page }}
@@ -313,7 +311,6 @@ const removeImportRow = (index: number) => {
             </div>
         </div>
 
-        <!-- Modal Tambah/Edit -->
         <div v-if="showModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-2xl w-full p-6">
                 <h2 class="text-xl font-semibold mb-4">{{ editMode ? 'Edit' : 'Tambah' }} Supplier</h2>

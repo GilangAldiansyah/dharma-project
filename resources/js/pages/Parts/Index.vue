@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { Plus, Edit, Trash2, Search, Image as ImageIcon, X, Upload } from 'lucide-vue-next';
 
 interface Part {
@@ -27,16 +27,22 @@ interface Props {
         last_page: number;
     };
     suppliers: Array<{ id: number; supplier_name: string; supplier_code: string }>;
+    filters?: {
+        search?: string;
+        supplier?: number;
+        type_line?: string;
+    };
 }
 
 const props = defineProps<Props>();
 
+// State Management
 const showModal = ref(false);
 const showImportModal = ref(false);
 const editMode = ref(false);
-const searchQuery = ref('');
-const filterSupplier = ref(0);
-const filterTypeLine = ref('');
+const searchQuery = ref(props.filters?.search || '');
+const filterSupplier = ref(props.filters?.supplier || 0);
+const filterTypeLine = ref(props.filters?.type_line || '');
 const imagePreviews = ref<string[]>([]);
 const imagePreviewsNew = ref<string[]>([]);
 const showImageModal = ref(false);
@@ -44,9 +50,10 @@ const selectedImages = ref<string[]>([]);
 const currentImageIndex = ref(0);
 const importData = ref<any[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
+const showPageJump = ref(false);
+const jumpToPage = ref(1);
 
 const form = useForm({
-    _method: 'PUT',
     id: 0,
     supplier_id: 0,
     part_code: '',
@@ -56,6 +63,31 @@ const form = useForm({
     product_images: [] as File[],
     existing_images: [] as string[],
     description: '',
+});
+
+const totalPages = computed(() => props.parts.last_page);
+const currentPage = computed(() => props.parts.current_page);
+
+const getPageNumbers = computed(() => {
+    const pages = [];
+    const total = totalPages.value;
+    const current = currentPage.value;
+
+    if (total <= 7) {
+        for (let i = 1; i <= total; i++) {
+            pages.push(i);
+        }
+    } else {
+        if (current <= 3) {
+            pages.push(1, 2, 3, 4, '...', total);
+        } else if (current >= total - 2) {
+            pages.push(1, '...', total - 3, total - 2, total - 1, total);
+        } else {
+            pages.push(1, '...', current - 1, current, current + 1, '...', total);
+        }
+    }
+
+    return pages;
 });
 
 const openModal = (part?: Part) => {
@@ -71,7 +103,6 @@ const openModal = (part?: Part) => {
 
         form.product_images = [];
         form.existing_images = [];
-
         imagePreviews.value = [];
         imagePreviewsNew.value = [];
 
@@ -166,7 +197,7 @@ const search = () => {
     router.get('/parts', {
         search: searchQuery.value,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined // ✅ TAMBAH INI
+        type_line: filterTypeLine.value || undefined
     }, { preserveState: true });
 };
 
@@ -174,7 +205,7 @@ const filterBySupplier = () => {
     router.get('/parts', {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined // ✅ TAMBAH INI
+        type_line: filterTypeLine.value || undefined
     }, { preserveState: true });
 };
 
@@ -191,6 +222,28 @@ const resetFilters = () => {
     filterSupplier.value = 0;
     filterTypeLine.value = '';
     router.get('/parts', {}, { preserveState: true });
+};
+
+const goToPage = (page: number | string) => {
+    if (page === '...') return;
+
+    router.get('/parts', {
+        page: page,
+        search: searchQuery.value || undefined,
+        supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
+        type_line: filterTypeLine.value || undefined
+    }, { preserveState: true });
+};
+
+const handlePageJump = () => {
+    const page = parseInt(jumpToPage.value.toString());
+    if (page >= 1 && page <= totalPages.value) {
+        goToPage(page);
+        showPageJump.value = false;
+        jumpToPage.value = 1;
+    } else {
+        alert(`Halaman harus antara 1 dan ${totalPages.value}`);
+    }
 };
 
 const viewImages = (part: Part) => {
@@ -224,20 +277,16 @@ const openImportModal = () => {
 const handleFileUpload = (event: Event) => {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
-
     if (!file) return;
 
     const reader = new FileReader();
-
     reader.onload = (e) => {
         try {
             const text = e.target?.result as string;
             const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
             const parts: any[] = [];
             const partSet = new Set<string>();
 
-            // Deteksi delimiter
             let delimiter = ',';
             if (lines[0]?.includes(';')) delimiter = ';';
             else if (lines[0]?.includes('\t')) delimiter = '\t';
@@ -248,28 +297,21 @@ const handleFileUpload = (event: Event) => {
             let typeLineColumnIndex = -1;
             let vendorColumnIndex = -1;
 
-            // ✅ Cari header dengan kolom baru
             for (let i = 0; i < Math.min(20, lines.length); i++) {
                 const columns = lines[i].split(delimiter).map(col => col.trim().replace(/^"|"$/g, ''));
-
                 const idSapIdx = columns.findIndex(col => {
                     const upper = col.toUpperCase();
                     return upper === 'ID SAP' || upper === 'IDSAP' || upper.includes('ID SAP');
                 });
-
                 const nameIdx = columns.findIndex(col => {
                     const upper = col.toUpperCase();
                     return (upper.includes('NAME') && upper.includes('MATERIAL')) ||
-                           upper === 'MATERIAL NAME' ||
-                           upper === 'PART NAME' ||
-                           upper.includes('MATERIAL');
+                           upper === 'MATERIAL NAME' || upper === 'PART NAME' || upper.includes('MATERIAL');
                 });
-
                 const typeLineIdx = columns.findIndex(col => {
                     const upper = col.toUpperCase();
                     return upper === 'TYPE LINE' || upper === 'TYPELINE' || upper.includes('TYPE LINE');
                 });
-
                 const vendorIdx = columns.findIndex(col => {
                     const upper = col.toUpperCase();
                     return upper.includes('VENDOR') || upper.includes('SUPPLIER');
@@ -290,66 +332,34 @@ const handleFileUpload = (event: Event) => {
                 return;
             }
 
-            // Parse data rows
-            let processedRows = 0;
-            let skippedRows = 0;
-
             for (let i = headerIndex + 1; i < lines.length; i++) {
                 const line = lines[i].trim();
-                if (!line) {
-                    skippedRows++;
-                    continue;
-                }
+                if (!line) continue;
 
-                const columns = line.split(delimiter).map(col =>
-                    col.trim().replace(/^"|"$/g, '').trim()
-                );
-
+                const columns = line.split(delimiter).map(col => col.trim().replace(/^"|"$/g, '').trim());
                 const idSap = idSapColumnIndex !== -1 ? (columns[idSapColumnIndex] || '') : '';
                 const partName = columns[nameColumnIndex] || '';
                 const typeLine = typeLineColumnIndex !== -1 ? (columns[typeLineColumnIndex] || '') : '';
                 const vendor = columns[vendorColumnIndex] || '';
 
-                // Skip jika nama part kosong
-                if (!partName || partName === '') {
-                    skippedRows++;
-                    continue;
-                }
-
-                // Skip duplikat
-                if (partSet.has(partName.toUpperCase())) {
-                    skippedRows++;
-                    continue;
-                }
-
+                if (!partName || partName === '') continue;
+                if (partSet.has(partName.toUpperCase())) continue;
                 partSet.add(partName.toUpperCase());
 
-                // ✅ Generate part code
                 let partCode = '';
-
-                // Strategi 1: Gunakan ID SAP jika ada
                 if (idSap && idSap.length >= 5) {
-                    partCode = idSap
-                        .toUpperCase()
-                        .replace(/[^A-Z0-9]/g, '')
-                        .substring(0, 20);
+                    partCode = idSap.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 20);
                 } else {
                     const capsAndNumbers = partName.match(/[A-Z0-9]/g);
                     if (capsAndNumbers && capsAndNumbers.length >= 8) {
                         partCode = capsAndNumbers.join('').substring(0, 20);
                     } else {
-                        partCode = partName
-                            .toUpperCase()
-                            .replace(/[^A-Z0-9]/g, '')
-                            .substring(0, 20);
+                        partCode = partName.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 20);
                     }
                 }
 
                 if (partCode.length < 5) {
-                    partCode = partName
-                        .substring(0, 20)
-                        .replace(/\s+/g, '')
-                        .toUpperCase();
+                    partCode = partName.substring(0, 20).replace(/\s+/g, '').toUpperCase();
                 }
 
                 let finalPartCode = partCode;
@@ -363,11 +373,8 @@ const handleFileUpload = (event: Event) => {
                     const supplierNameUpper = s.supplier_name.toUpperCase();
                     const supplierCodeUpper = s.supplier_code?.toUpperCase() || '';
                     const vendorUpper = vendor.toUpperCase();
-
-                    return supplierNameUpper === vendorUpper ||
-                           supplierCodeUpper === vendorUpper ||
-                           supplierNameUpper.includes(vendorUpper) ||
-                           vendorUpper.includes(supplierNameUpper);
+                    return supplierNameUpper === vendorUpper || supplierCodeUpper === vendorUpper ||
+                           supplierNameUpper.includes(vendorUpper) || vendorUpper.includes(supplierNameUpper);
                 });
 
                 parts.push({
@@ -379,31 +386,24 @@ const handleFileUpload = (event: Event) => {
                     supplier_name: vendor || '-',
                     description: ''
                 });
-
-                processedRows++;
             }
 
             importData.value = parts;
 
             if (parts.length === 0) {
-                alert('Tidak ada data part ditemukan. Pastikan:\n1. File CSV memiliki header NAME MATERIAL\n2. Ada data di bawah header\n3. Kolom NAME MATERIAL tidak kosong');
+                alert('Tidak ada data part ditemukan.');
             } else {
                 const noSupplier = parts.filter(p => p.supplier_id === 0).length;
                 if (noSupplier > 0) {
                     alert(`✓ ${parts.length} parts berhasil dibaca\n⚠ ${noSupplier} parts belum memiliki supplier yang cocok`);
                 }
             }
-
         } catch (error) {
             console.error('Error parsing file:', error);
-            alert('Error membaca file: ' + error + '\n\nPastikan file dalam format CSV UTF-8 atau TXT Tab-delimited');
+            alert('Error membaca file: ' + error);
         }
     };
-
-    reader.onerror = () => {
-        alert('Error membaca file. Pastikan file tidak rusak.');
-    };
-
+    reader.onerror = () => alert('Error membaca file. Pastikan file tidak rusak.');
     reader.readAsText(file, 'UTF-8');
 };
 
@@ -420,21 +420,17 @@ const submitImport = () => {
         }
     }
 
-    router.post('/parts/import', {
-        parts: importData.value
-    }, {
+    router.post('/parts/import', { parts: importData.value }, {
         preserveScroll: true,
         onSuccess: () => {
             showImportModal.value = false;
             importData.value = [];
-            if (fileInput.value) {
-                fileInput.value.value = '';
-            }
+            if (fileInput.value) fileInput.value.value = '';
             alert('Data berhasil diimport!');
         },
         onError: (errors) => {
             console.error('Import errors:', errors);
-            alert('Terjadi kesalahan saat import data. Lihat console untuk detail.');
+            alert('Terjadi kesalahan saat import data.');
         }
     });
 };
@@ -443,11 +439,11 @@ const removeImportRow = (index: number) => {
     importData.value.splice(index, 1);
 };
 </script>
-
 <template>
     <Head title="Master Parts" />
     <AppLayout :breadcrumbs="[{ title: 'Master Parts', href: '/parts' }]">
         <div class="p-4 space-y-4">
+            <!-- Search & Filter Section -->
             <div class="flex justify-between items-center">
                 <div class="flex-1 max-w-3xl">
                     <div class="flex gap-2 items-center">
@@ -468,7 +464,6 @@ const removeImportRow = (index: number) => {
                                 {{ supplier.supplier_name }}
                             </option>
                         </select>
-
                         <select
                             v-model="filterTypeLine"
                             @change="filterByTypeLine"
@@ -481,12 +476,7 @@ const removeImportRow = (index: number) => {
                             <option value="2TQ/2MU/TG4">2TQ/2MU/TG4</option>
                             <option value="C">C</option>
                         </select>
-
-                        <button
-                            @click="search"
-                            class="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
-                            title="Cari"
-                        >
+                        <button @click="search" class="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md" title="Cari">
                             <Search class="w-5 h-5" />
                         </button>
                         <button
@@ -517,13 +507,13 @@ const removeImportRow = (index: number) => {
                 </div>
             </div>
 
+            <!-- Table Section -->
             <div class="border border-sidebar-border rounded-lg overflow-hidden bg-white dark:bg-sidebar">
                 <div class="overflow-x-auto">
                     <table class="w-full">
                         <thead class="bg-gray-50 dark:bg-sidebar-accent border-b border-sidebar-border">
                             <tr>
                                 <th class="px-4 py-3 text-left text-sm font-semibold">Gambar</th>
-                                <!-- <th class="px-4 py-3 text-left text-sm font-semibold">Kode Part</th> -->
                                 <th class="px-4 py-3 text-left text-sm font-semibold">ID SAP</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold">Nama Part</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold">Type Line</th>
@@ -532,17 +522,10 @@ const removeImportRow = (index: number) => {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr
-                                v-for="part in parts.data"
-                                :key="part.id"
-                                class="border-b border-sidebar-border hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
-                            >
+                            <tr v-for="part in parts.data" :key="part.id" class="border-b border-sidebar-border hover:bg-gray-50 dark:hover:bg-sidebar-accent/50">
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-1">
-                                        <div
-                                            class="relative cursor-pointer group"
-                                            @click="viewImages(part)"
-                                        >
+                                        <div class="relative cursor-pointer group" @click="viewImages(part)">
                                             <img
                                                 v-if="part.product_images && part.product_images.length > 0"
                                                 :src="`/storage/${part.product_images[0]}`"
@@ -551,37 +534,28 @@ const removeImportRow = (index: number) => {
                                             <div v-else class="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
                                                 <ImageIcon class="w-6 h-6 text-gray-400" />
                                             </div>
-
                                             <div
                                                 v-if="part.product_images && part.product_images.length > 1"
                                                 class="absolute -top-1 -right-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full font-semibold"
                                             >
                                                 +{{ part.product_images.length - 1 }}
                                             </div>
-
                                             <div class="absolute inset-0 bg-black/50 rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                 <span class="text-white text-xs">Lihat</span>
                                             </div>
                                         </div>
                                     </div>
                                 </td>
-                                <!-- <td class="px-4 py-3 text-sm font-medium">{{ part.part_code }}</td> -->
                                 <td class="px-4 py-3 text-sm">{{ part.id_sap || '-' }}</td>
                                 <td class="px-4 py-3 text-sm">{{ part.part_name }}</td>
                                 <td class="px-4 py-3 text-sm">{{ part.type_line || '-' }}</td>
                                 <td class="px-4 py-3 text-sm">{{ part.supplier.supplier_name }}</td>
                                 <td class="px-4 py-3">
                                     <div class="flex items-center justify-center gap-2">
-                                        <button
-                                            @click="openModal(part)"
-                                            class="p-1 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900 rounded"
-                                        >
+                                        <button @click="openModal(part)" class="p-1 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900 rounded">
                                             <Edit class="w-4 h-4" />
                                         </button>
-                                        <button
-                                            @click="deletePart(part.id)"
-                                            class="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
-                                        >
+                                        <button @click="deletePart(part.id)" class="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded">
                                             <Trash2 class="w-4 h-4" />
                                         </button>
                                     </div>
@@ -597,50 +571,56 @@ const removeImportRow = (index: number) => {
                         <div class="text-sm text-gray-600 dark:text-gray-400">
                             Halaman {{ parts.current_page }} dari {{ parts.last_page }}
                         </div>
-                        <div class="flex gap-1">
-                            <button
-                                v-if="parts.current_page > 2"
-                                @click="router.get('/parts', {
-                                    page: 1,
-                                    search: searchQuery,
-                                    supplier: filterSupplier > 0 ? filterSupplier : undefined,
-                                    type_line: filterTypeLine || undefined
-                                })"
-                                class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar text-sm"
-                            >
-                                1
-                            </button>
-                            <span v-if="parts.current_page > 3" class="px-2 py-1 text-gray-500">...</span>
-
-                            <button
-                                v-if="parts.current_page > 1"
-                                @click="router.get('/parts', { page: parts.current_page - 1, search: searchQuery, supplier: filterSupplier > 0 ? filterSupplier : undefined })"
-                                class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar text-sm"
-                            >
-                                {{ parts.current_page - 1 }}
-                            </button>
-
-                            <button class="px-3 py-1 rounded bg-blue-600 text-white text-sm font-semibold">
-                                {{ parts.current_page }}
-                            </button>
-
-                            <button
-                                v-if="parts.current_page < parts.last_page"
-                                @click="router.get('/parts', { page: parts.current_page + 1, search: searchQuery, supplier: filterSupplier > 0 ? filterSupplier : undefined })"
-                                class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar text-sm"
-                            >
-                                {{ parts.current_page + 1 }}
-                            </button>
-
-                            <span v-if="parts.current_page < parts.last_page - 2" class="px-2 py-1 text-gray-500">...</span>
-
-                            <button
-                                v-if="parts.current_page < parts.last_page - 1"
-                                @click="router.get('/parts', { page: parts.last_page, search: searchQuery, supplier: filterSupplier > 0 ? filterSupplier : undefined })"
-                                class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar text-sm"
-                            >
-                                {{ parts.last_page }}
-                            </button>
+                        <div class="flex items-center gap-3">
+                            <!-- Jump to Page -->
+                            <div class="relative">
+                                <button
+                                    @click="showPageJump = !showPageJump"
+                                    class="px-3 py-1 text-sm border border-sidebar-border rounded hover:bg-sidebar flex items-center gap-2"
+                                >
+                                    <span>Ke Halaman</span>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                                <div v-if="showPageJump" class="absolute right-0 bottom-full mb-2 bg-white dark:bg-sidebar-accent border border-sidebar-border rounded-lg shadow-lg p-3 z-10 min-w-[200px]">
+                                    <div class="text-xs font-medium mb-2 text-gray-600 dark:text-gray-400">Langsung ke halaman</div>
+                                    <div class="flex gap-2">
+                                        <input
+                                            v-model="jumpToPage"
+                                            type="number"
+                                            :min="1"
+                                            :max="totalPages"
+                                            @keyup.enter="handlePageJump"
+                                            class="flex-1 px-2 py-1 text-sm border border-sidebar-border rounded dark:bg-sidebar"
+                                            :placeholder="`1-${totalPages}`"
+                                        />
+                                        <button @click="handlePageJump" class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+                                            Go
+                                        </button>
+                                    </div>
+                                    <button @click="showPageJump = false" class="absolute top-1 right-1 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded">
+                                        <X class="w-3 h-3" />
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- Page Numbers -->
+                            <div class="flex gap-1">
+                                <button
+                                    v-for="(page, index) in getPageNumbers"
+                                    :key="index"
+                                    @click="goToPage(page)"
+                                    :disabled="page === '...'"
+                                    class="px-3 py-1 rounded text-sm transition-colors"
+                                    :class="{
+                                        'bg-blue-600 text-white font-semibold': page === currentPage,
+                                        'border border-sidebar-border hover:bg-sidebar': page !== currentPage && page !== '...',
+                                        'cursor-default text-gray-400': page === '...'
+                                    }"
+                                >
+                                    {{ page }}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -653,174 +633,79 @@ const removeImportRow = (index: number) => {
                 <form @submit.prevent="submit" class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium mb-1">Supplier *</label>
-                        <select
-                            v-model="form.supplier_id"
-                            required
-                            class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                        >
+                        <select v-model="form.supplier_id" required class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent">
                             <option value="0" disabled>Pilih Supplier</option>
-                            <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
-                                {{ supplier.supplier_name }}
-                            </option>
+                            <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">{{ supplier.supplier_name }}</option>
                         </select>
                     </div>
-
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium mb-1">Kode Part *</label>
-                            <input
-                                v-model="form.part_code"
-                                type="text"
-                                required
-                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                            />
+                            <input v-model="form.part_code" type="text" required class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-1">ID SAP</label>
-                            <input
-                                v-model="form.id_sap"
-                                type="text"
-                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                            />
+                            <input v-model="form.id_sap" type="text" class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
                         </div>
                     </div>
-
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium mb-1">Nama Part *</label>
-                            <input
-                                v-model="form.part_name"
-                                type="text"
-                                required
-                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                            />
+                            <input v-model="form.part_name" type="text" required class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-1">Type Line</label>
-                            <input
-                                v-model="form.type_line"
-                                type="text"
-                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                            />
+                            <input v-model="form.type_line" type="text" class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
                         </div>
                     </div>
-
                     <div>
-                        <label class="block text-sm font-medium mb-1">
-                            Gambar Produk
-                            <span class="text-xs text-gray-500 font-normal">(Bisa pilih lebih dari 1)</span>
-                        </label>
-
+                        <label class="block text-sm font-medium mb-1">Gambar Produk <span class="text-xs text-gray-500 font-normal">(Bisa pilih lebih dari 1)</span></label>
                         <div v-if="imagePreviews.length > 0 || imagePreviewsNew.length > 0" class="mb-3">
                             <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm text-gray-600">
-                                    {{ imagePreviews.length + imagePreviewsNew.length }} gambar
-                                </span>
-                                <button
-                                    type="button"
-                                    @click="clearAllImages"
-                                    class="text-xs text-red-600 hover:text-red-800 flex items-center gap-1"
-                                >
-                                    <Trash2 class="w-3 h-3" />
-                                    Hapus Semua
+                                <span class="text-sm text-gray-600">{{ imagePreviews.length + imagePreviewsNew.length }} gambar</span>
+                                <button type="button" @click="clearAllImages" class="text-xs text-red-600 hover:text-red-800 flex items-center gap-1">
+                                    <Trash2 class="w-3 h-3" />Hapus Semua
                                 </button>
                             </div>
-
                             <div class="grid grid-cols-4 gap-2">
-                                <div
-                                    v-for="(preview, index) in imagePreviews"
-                                    :key="'existing-' + index"
-                                    class="relative group"
-                                >
-                                    <img
-                                        :src="preview"
-                                        class="w-full h-24 object-cover rounded border-2"
-                                        :class="index === 0 ? 'border-blue-500' : 'border-gray-300'"
-                                    />
-                                    <button
-                                        type="button"
-                                        @click="removeImage(index)"
-                                        class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
+                                <div v-for="(preview, index) in imagePreviews" :key="'existing-' + index" class="relative group">
+                                    <img :src="preview" class="w-full h-24 object-cover rounded border-2" :class="index === 0 ? 'border-blue-500' : 'border-gray-300'" />
+                                    <button type="button" @click="removeImage(index)" class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <X class="w-4 h-4" />
                                     </button>
-                                    <div v-if="index === 0" class="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded">
-                                        Utama
-                                    </div>
-                                    <div v-if="index < form.existing_images.length" class="absolute top-1 left-1 bg-green-600 text-white text-[10px] px-2 py-0.5 rounded">
-                                        ✓
-                                    </div>
+                                    <div v-if="index === 0" class="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded">Utama</div>
+                                    <div v-if="index < form.existing_images.length" class="absolute top-1 left-1 bg-green-600 text-white text-[10px] px-2 py-0.5 rounded">✓</div>
                                 </div>
-
-                                <div
-                                    v-for="(preview, index) in imagePreviewsNew"
-                                    :key="'new-' + index"
-                                    class="relative group"
-                                >
-                                    <img
-                                        :src="preview"
-                                        class="w-full h-24 object-cover rounded border-2 border-orange-500"
-                                    />
-                                    <button
-                                        type="button"
-                                        @click="removeImage(imagePreviews.length + index)"
-                                        class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
+                                <div v-for="(preview, index) in imagePreviewsNew" :key="'new-' + index" class="relative group">
+                                    <img :src="preview" class="w-full h-24 object-cover rounded border-2 border-orange-500" />
+                                    <button type="button" @click="removeImage(imagePreviews.length + index)" class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <X class="w-4 h-4" />
                                     </button>
-                                    <div class="absolute bottom-1 left-1 bg-orange-600 text-white text-[10px] px-2 py-0.5 rounded">
-                                        Baru
-                                    </div>
+                                    <div class="absolute bottom-1 left-1 bg-orange-600 text-white text-[10px] px-2 py-0.5 rounded">Baru</div>
                                 </div>
                             </div>
                         </div>
-
-                        <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            @change="handleImagesChange"
-                            class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                        />
-
-                        <p class="text-xs text-gray-500 mt-1">
-                            {{ editMode ? 'Gambar baru akan ditambahkan ke gambar existing. Klik X untuk hapus gambar tertentu.' : 'Gambar pertama akan dijadikan foto utama' }}
-                        </p>
+                        <input type="file" accept="image/*" multiple @change="handleImagesChange" class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
+                        <p class="text-xs text-gray-500 mt-1">{{ editMode ? 'Gambar baru akan ditambahkan ke gambar existing. Klik X untuk hapus gambar tertentu.' : 'Gambar pertama akan dijadikan foto utama' }}</p>
                     </div>
-
                     <div>
                         <label class="block text-sm font-medium mb-1">Deskripsi</label>
-                        <textarea
-                            v-model="form.description"
-                            rows="3"
-                            class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                        ></textarea>
+                        <textarea v-model="form.description" rows="3" class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"></textarea>
                     </div>
-
                     <div class="flex gap-2 justify-end pt-4">
-                        <button
-                            type="button"
-                            @click="showModal = false"
-                            class="px-4 py-2 border rounded-md hover:bg-gray-100 dark:hover:bg-sidebar-accent"
-                        >
-                            Batal
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="form.processing"
-                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                        >
+                        <button type="button" @click="showModal = false" class="px-4 py-2 border rounded-md hover:bg-gray-100 dark:hover:bg-sidebar-accent">Batal</button>
+                        <button type="submit" :disabled="form.processing" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
                             {{ form.processing ? 'Menyimpan...' : (editMode ? 'Update' : 'Simpan') }}
                         </button>
                     </div>
                 </form>
             </div>
         </div>
+
         <!-- Import Modal -->
         <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-6xl w-full p-6 max-h-[90vh] overflow-auto">
                 <h2 class="text-xl font-semibold mb-4">Import Parts dari Excel</h2>
-
                 <div class="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-md">
                     <p class="text-sm font-semibold mb-2">Cara Import:</p>
                     <ol class="text-sm space-y-1 list-decimal list-inside">
@@ -831,26 +716,15 @@ const removeImportRow = (index: number) => {
                         <li>Supplier akan otomatis di-match berdasarkan nama vendor</li>
                     </ol>
                 </div>
-
                 <div class="mb-4">
                     <label class="block text-sm font-medium mb-2">Pilih File CSV/TXT</label>
-                    <input
-                        ref="fileInput"
-                        type="file"
-                        accept=".csv,.txt"
-                        @change="handleFileUpload"
-                        class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                    />
+                    <input ref="fileInput" type="file" accept=".csv,.txt" @change="handleFileUpload" class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent" />
                 </div>
-
                 <div v-if="importData.length > 0" class="space-y-4">
                     <div class="bg-green-50 dark:bg-green-900/20 p-3 rounded-md">
                         <p class="text-sm font-medium">✓ {{ importData.length }} parts ditemukan dan siap diimport</p>
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            Parts tanpa supplier yang valid akan dilewati atau bisa dipilih manual
-                        </p>
+                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Parts tanpa supplier yang valid akan dilewati atau bisa dipilih manual</p>
                     </div>
-
                     <div class="border border-sidebar-border rounded-lg overflow-hidden">
                         <div class="overflow-x-auto max-h-96">
                             <table class="w-full text-sm">
@@ -866,61 +740,21 @@ const removeImportRow = (index: number) => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr
-                                        v-for="(item, index) in importData"
-                                        :key="index"
-                                        class="border-b border-sidebar-border"
-                                        :class="item.supplier_id === 0 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''"
-                                    >
+                                    <tr v-for="(item, index) in importData" :key="index" class="border-b border-sidebar-border" :class="item.supplier_id === 0 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''">
                                         <td class="px-3 py-2">{{ index + 1 }}</td>
+                                        <td class="px-3 py-2"><input v-model="item.part_code" type="text" class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs" /></td>
+                                        <td class="px-3 py-2"><input v-model="item.id_sap" type="text" class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs" /></td>
+                                        <td class="px-3 py-2"><input v-model="item.part_name" type="text" class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs" /></td>
+                                        <td class="px-3 py-2"><input v-model="item.type_line" type="text" class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs" /></td>
                                         <td class="px-3 py-2">
-                                            <input
-                                                v-model="item.part_code"
-                                                type="text"
-                                                class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs"
-                                            />
-                                        </td>
-                                        <td class="px-3 py-2">
-                                            <input
-                                                v-model="item.id_sap"
-                                                type="text"
-                                                class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs"
-                                            />
-                                        </td>
-                                        <td class="px-3 py-2">
-                                            <input
-                                                v-model="item.part_name"
-                                                type="text"
-                                                class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs"
-                                            />
-                                        </td>
-                                        <td class="px-3 py-2">
-                                            <input
-                                                v-model="item.type_line"
-                                                type="text"
-                                                class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs"
-                                            />
-                                        </td>
-                                        <td class="px-3 py-2">
-                                            <select
-                                                v-model="item.supplier_id"
-                                                class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs"
-                                                :class="item.supplier_id === 0 ? 'border-yellow-500' : ''"
-                                            >
+                                            <select v-model="item.supplier_id" class="w-full px-2 py-1 rounded border border-sidebar-border dark:bg-sidebar text-xs" :class="item.supplier_id === 0 ? 'border-yellow-500' : ''">
                                                 <option value="0">Pilih Supplier</option>
-                                                <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
-                                                    {{ supplier.supplier_name }}
-                                                </option>
+                                                <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">{{ supplier.supplier_name }}</option>
                                             </select>
-                                            <span v-if="item.supplier_name && item.supplier_id === 0" class="text-xs text-yellow-600">
-                                                ({{ item.supplier_name }} tidak ditemukan)
-                                            </span>
+                                            <span v-if="item.supplier_name && item.supplier_id === 0" class="text-xs text-yellow-600">({{ item.supplier_name }} tidak ditemukan)</span>
                                         </td>
                                         <td class="px-3 py-2 text-center">
-                                            <button
-                                                @click="removeImportRow(index)"
-                                                class="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
-                                            >
+                                            <button @click="removeImportRow(index)" class="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded">
                                                 <Trash2 class="w-4 h-4" />
                                             </button>
                                         </td>
@@ -930,66 +764,37 @@ const removeImportRow = (index: number) => {
                         </div>
                     </div>
                 </div>
-
                 <div class="flex gap-2 justify-end pt-4">
-                    <button
-                        type="button"
-                        @click="showImportModal = false"
-                        class="px-4 py-2 border rounded-md hover:bg-gray-100 dark:hover:bg-sidebar-accent"
-                    >
-                        Batal
-                    </button>
-                    <button
-                        v-if="importData.length > 0"
-                        @click="submitImport"
-                        class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                    >
+                    <button type="button" @click="showImportModal = false" class="px-4 py-2 border rounded-md hover:bg-gray-100 dark:hover:bg-sidebar-accent">Batal</button>
+                    <button v-if="importData.length > 0" @click="submitImport" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
                         Import {{ importData.length }} Parts
                     </button>
                 </div>
             </div>
         </div>
+
         <!-- Image Gallery Modal -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/95 flex items-center justify-center z-50 p-4">
             <div class="relative max-w-5xl w-full">
-                <button
-                    @click="showImageModal = false"
-                    class="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white rounded-full p-3 transition-all z-50 shadow-lg"
-                >
+                <button @click="showImageModal = false" class="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white rounded-full p-3 transition-all z-50 shadow-lg">
                     <X class="w-6 h-6" />
                 </button>
-
                 <div class="relative">
-                    <img
-                        :src="selectedImages[currentImageIndex]"
-                        class="w-full h-auto max-h-[80vh] object-contain rounded-lg"
-                    />
-
-                    <button
-                        v-if="currentImageIndex > 0"
-                        @click="prevImage"
-                        class="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-black rounded-full p-3"
-                    >
+                    <img :src="selectedImages[currentImageIndex]" class="w-full h-auto max-h-[80vh] object-contain rounded-lg" />
+                    <button v-if="currentImageIndex > 0" @click="prevImage" class="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-black rounded-full p-3">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
                         </svg>
                     </button>
-
-                    <button
-                        v-if="currentImageIndex < selectedImages.length - 1"
-                        @click="nextImage"
-                        class="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-black rounded-full p-3"
-                    >
+                    <button v-if="currentImageIndex < selectedImages.length - 1" @click="nextImage" class="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-black rounded-full p-3">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                         </svg>
                     </button>
-
                     <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full text-sm">
                         {{ currentImageIndex + 1 }} / {{ selectedImages.length }}
                     </div>
                 </div>
-
                 <div v-if="selectedImages.length > 1" class="flex gap-2 justify-center mt-4 overflow-x-auto">
                     <img
                         v-for="(image, index) in selectedImages"
@@ -1005,3 +810,14 @@ const removeImportRow = (index: number) => {
     </AppLayout>
 </template>
 
+<style scoped>
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+.overflow-x-auto::-webkit-scrollbar { height: 8px; }
+.overflow-x-auto::-webkit-scrollbar-track { background: #f1f1f1; }
+.overflow-x-auto::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+.overflow-x-auto::-webkit-scrollbar-thumb:hover { background: #555; }
+</style>

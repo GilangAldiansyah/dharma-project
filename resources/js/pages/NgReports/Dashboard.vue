@@ -59,32 +59,26 @@ const viewMode = ref<'bar' | 'table'>('bar');
 const showFilterModal = ref(false);
 const isLoading = ref(false);
 
-// Tooltip state
 const hoveredTrendBar = ref<number | null>(null);
 const hoveredPartBar = ref<number | null>(null);
 const hoveredSupplierBar = ref<number | null>(null);
 const tooltipPosition = ref({ top: '0px', left: '0px' });
 
-// Update tooltip position
 const updateTooltipPosition = (event: MouseEvent) => {
     const x = event.clientX;
     const y = event.clientY;
-
-    // Position tooltip above cursor
     tooltipPosition.value = {
         top: `${y - 120}px`,
         left: `${x}px`,
     };
 };
 
-// Clear hovers on mouse leave
 const clearHover = () => {
     hoveredTrendBar.value = null;
     hoveredPartBar.value = null;
     hoveredSupplierBar.value = null;
 };
 
-// Quick date filters
 const setQuickFilter = (type: 'today' | 'week' | 'month' | 'year') => {
     const now = new Date();
 
@@ -159,7 +153,7 @@ const maxTrendValue = computed(() =>
 const getBarHeight = (value: number, max: number) => {
     if (value === 0) return 0;
     const percentage = (value / max) * 100;
-    return Math.max(percentage, 5); // Minimum 5% height for visibility
+    return Math.max(percentage, 5);
 };
 
 const scrollToTable = () => {
@@ -225,11 +219,9 @@ const dateRangeText = computed(() => {
 });
 
 const exportData = () => {
-    // Placeholder for export functionality
     alert('Fitur export akan segera tersedia');
 };
 
-// Add/remove mousemove listener
 onMounted(() => {
     document.addEventListener('mousemove', updateTooltipPosition);
 });
@@ -244,7 +236,6 @@ onUnmounted(() => {
         { title: 'Dashboard NG', href: '/ng-reports/dashboard' }
     ]">
         <div class="p-4 sm:p-6 space-y-6">
-            <!-- Header Section -->
             <div class="bg-gradient-to-r from-red-600 to-orange-600 rounded-xl shadow-lg p-6 text-white">
                 <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                     <div>
@@ -288,9 +279,7 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- Quick Stats Cards -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <!-- Total NG Card -->
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6 hover:shadow-lg transition-shadow">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
@@ -315,7 +304,6 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- Parts Affected Card -->
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6 hover:shadow-lg transition-shadow">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
@@ -336,7 +324,6 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- Suppliers Card -->
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6 hover:shadow-lg transition-shadow">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
@@ -358,7 +345,6 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- Status Distribution -->
             <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
                 <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                     <CheckCircle class="w-5 h-5 text-green-600" />
@@ -396,9 +382,7 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <!-- Critical Parts & Suppliers -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- Top 5 Critical Parts -->
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -445,7 +429,6 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- Top 5 Critical Suppliers -->
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -489,7 +472,6 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <!-- View Mode Tabs -->
             <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border overflow-hidden">
                 <div class="flex border-b border-sidebar-border">
                     <button
@@ -518,9 +500,7 @@ onUnmounted(() => {
                     </button>
                 </div>
 
-                <!-- Bar Chart View -->
                 <div v-if="viewMode === 'bar'" class="p-6 space-y-8">
-                    <!-- Daily Trend Chart -->
                     <div v-if="dailyTrend.length > 0" class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -532,7 +512,7 @@ onUnmounted(() => {
                             </span>
                         </div>
                         <div class="relative bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm" style="height: 400px;">
-                            <!-- Y-axis labels -->
+
                             <div class="absolute left-0 top-6 bottom-20 w-12 flex flex-col justify-between text-right text-xs text-gray-600 dark:text-gray-400 pr-2">
                                 <div>{{ maxTrendValue }}</div>
                                 <div>{{ Math.floor(maxTrendValue * 0.75) }}</div>
@@ -541,10 +521,8 @@ onUnmounted(() => {
                                 <div>0</div>
                             </div>
 
-                            <!-- Chart area -->
                             <div class="absolute left-14 right-4 top-6 bottom-20 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
                                 <div class="relative h-full" :style="{ width: `${Math.max(dailyTrend.length * 70, 100)}%`, minWidth: '100%' }">
-                                    <!-- Grid lines -->
                                     <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
                                         <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
                                         <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -552,11 +530,7 @@ onUnmounted(() => {
                                         <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
                                         <div class="h-0.5 bg-gray-400 dark:bg-gray-600"></div>
                                     </div>
-
-                                    <!-- Y-axis line -->
                                     <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-400 dark:bg-gray-600"></div>
-
-                                    <!-- Bars -->
                                     <div class="absolute left-0 right-0 top-0 bottom-0 flex items-end justify-start gap-2 px-2 pb-1">
                                         <div
                                             v-for="(item, index) in dailyTrend"
@@ -580,7 +554,6 @@ onUnmounted(() => {
                                 </div>
                             </div>
 
-                            <!-- X-axis labels -->
                             <div class="absolute left-14 right-4 bottom-0 h-16 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
                                 <div class="h-full flex items-start justify-start gap-2 px-2 pt-2" :style="{ width: `${Math.max(dailyTrend.length * 70, 100)}%`, minWidth: '100%' }">
                                     <div
@@ -597,7 +570,6 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <!-- Tooltip via Teleport -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredTrendBar !== null"
@@ -616,7 +588,6 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
-                    <!-- Part NG Chart -->
                     <div class="bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/10 dark:to-pink-900/10 rounded-xl p-6 border border-red-200 dark:border-red-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -628,7 +599,6 @@ onUnmounted(() => {
                             </span>
                         </div>
                         <div v-if="ngByPart.length > 0" class="relative bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm" style="height: 450px;">
-                            <!-- Y-axis -->
                             <div class="absolute left-0 top-6 bottom-20 w-12 flex flex-col justify-between text-right text-xs text-gray-600 dark:text-gray-400 pr-2">
                                 <div>{{ maxPartValue }}</div>
                                 <div>{{ Math.floor(maxPartValue * 0.75) }}</div>
@@ -639,7 +609,6 @@ onUnmounted(() => {
 
                             <div class="absolute left-14 right-4 top-6 bottom-20 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
                                 <div class="relative h-full" :style="{ width: `${Math.max(ngByPart.length * 90, 100)}%`, minWidth: '100%' }">
-                                    <!-- Grid -->
                                     <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
                                         <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
                                         <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -648,8 +617,6 @@ onUnmounted(() => {
                                         <div class="h-0.5 bg-gray-400 dark:bg-gray-600"></div>
                                     </div>
                                     <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-400 dark:bg-gray-600"></div>
-
-                                    <!-- Bars -->
                                     <div class="absolute left-0 right-0 top-0 bottom-0 flex items-end justify-start gap-3 px-2 pb-1">
                                         <div
                                             v-for="(item, index) in ngByPart"
@@ -674,7 +641,6 @@ onUnmounted(() => {
                                 </div>
                             </div>
 
-                            <!-- X-axis -->
                             <div class="absolute left-14 right-4 bottom-0 h-16 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
                                 <div class="h-full flex items-start justify-start gap-3 px-2 pt-2" :style="{ width: `${Math.max(ngByPart.length * 90, 100)}%`, minWidth: '100%' }">
                                     <div
@@ -694,7 +660,6 @@ onUnmounted(() => {
                             <p class="font-medium">Tidak ada data untuk periode ini</p>
                         </div>
 
-                        <!-- Tooltip via Teleport -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredPartBar !== null"

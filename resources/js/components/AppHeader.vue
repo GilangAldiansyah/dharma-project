@@ -31,7 +31,6 @@ import {
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
-import { dashboard } from '@/routes';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
 import { BookOpen, Folder, LayoutGrid, Menu, Search } from 'lucide-vue-next';
@@ -60,13 +59,36 @@ const activeItemStyles = computed(
             : '',
 );
 
-const mainNavItems: NavItem[] = [
+const dashboardUrl = computed(() => {
+    const currentUrl = page.url;
+
+    if (currentUrl.startsWith('/dashboard') ||
+        currentUrl.startsWith('/output') ||
+        currentUrl.startsWith('/stock') ||
+        currentUrl.startsWith('/forecast')) {
+        return '/dashboard';
+    }
+
+    if (currentUrl.startsWith('/ng-reports') ||
+        currentUrl.startsWith('/suppliers') ||
+        currentUrl.startsWith('/parts')) {
+        return '/ng-reports/dashboard';
+    }
+
+    if (currentUrl.startsWith('/die-shop')) {
+        return '/die-shop-dashboard';
+    }
+
+    return '/welcome';
+});
+
+const mainNavItems = computed<NavItem[]>(() => [
     {
         title: 'Dashboard',
-        href: dashboard(),
+        href: dashboardUrl.value,
         icon: LayoutGrid,
     },
-];
+]);
 
 const rightNavItems: NavItem[] = [
     {
@@ -86,7 +108,6 @@ const rightNavItems: NavItem[] = [
     <div>
         <div class="border-b border-sidebar-border/80">
             <div class="mx-auto flex h-16 items-center px-4 md:max-w-7xl">
-                <!-- Mobile Menu -->
                 <div class="lg:hidden">
                     <Sheet>
                         <SheetTrigger :as-child="true">
@@ -148,11 +169,10 @@ const rightNavItems: NavItem[] = [
                     </Sheet>
                 </div>
 
-                <Link :href="dashboard()" class="flex items-center gap-x-2">
+                <Link :href="dashboardUrl" class="flex items-center gap-x-2">
                     <AppLogo />
                 </Link>
 
-                <!-- Desktop Menu -->
                 <div class="hidden h-full lg:flex lg:flex-1">
                     <NavigationMenu class="ml-10 flex h-full items-stretch">
                         <NavigationMenuList

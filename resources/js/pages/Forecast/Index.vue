@@ -78,7 +78,7 @@ const changeDate = () => {
 };
 
 const calculateQtyPerDay = (forecastQty: number, workingDays: number): number => {
-    return workingDays > 0 ? Math.round((forecastQty / workingDays) * 100) / 100 : 0;
+    return workingDays > 0 ? Math.round(forecastQty / workingDays) : 0;
 };
 
 const handleForecastChange = (index: number, field: string, value: any) => {
@@ -302,7 +302,6 @@ const copyFromOtherMonth = async () => {
     }
 };
 </script>
-
 <template>
     <Head title="Forecast Management" />
     <AppLayout :breadcrumbs="[{ title: 'Forecast Management', href: '/forecast' }]">
@@ -572,6 +571,7 @@ const copyFromOtherMonth = async () => {
             </div>
         </div>
 
+        <!-- Copy Modal -->
         <div v-if="showCopyModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" @click.self="showCopyModal = false">
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md">
                 <div class="p-6 border-b">

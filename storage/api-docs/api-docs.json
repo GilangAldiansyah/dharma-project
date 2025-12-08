@@ -1,0 +1,296 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Dharma Polimetal API Documentation",
+        "description": "API documentation for NG Reporting & Stock Control System",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "/api",
+            "description": "API Server"
+        }
+    ],
+    "paths": {
+        "/suppliers": {
+            "get": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Get all suppliers",
+                "operationId": "a312198d95c0fda9a7107dd7c683368a",
+                "responses": {
+                    "200": {
+                        "description": "List of suppliers"
+                    }
+                }
+            }
+        },
+        "/parts": {
+            "get": {
+                "tags": [
+                    "Parts"
+                ],
+                "summary": "Get all parts with supplier relation",
+                "operationId": "3f0ee72fce24e9cea4b6a3a5a87278a3",
+                "responses": {
+                    "200": {
+                        "description": "List of parts"
+                    }
+                }
+            }
+        },
+        "/ng-reports": {
+            "get": {
+                "tags": [
+                    "NG Reports"
+                ],
+                "summary": "Get all NG reports with relations",
+                "operationId": "4046f313f810240594ed8fb2f6e52db1",
+                "responses": {
+                    "200": {
+                        "description": "List of NG Reports"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "NG Reports"
+                ],
+                "summary": "Create a new NG report (single or multiple images)",
+                "operationId": "9f29c994089abb35935e2f8ac31282e9",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "part_id",
+                                    "ng_image",
+                                    "reported_by"
+                                ],
+                                "properties": {
+                                    "part_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "ng_image": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "ng_images": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "format": "binary"
+                                        }
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Crack on surface"
+                                    },
+                                    "reported_by": {
+                                        "type": "string",
+                                        "example": "John Doe"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "NG report created successfully"
+                    }
+                }
+            }
+        },
+        "/ng-reports/{id}": {
+            "delete": {
+                "tags": [
+                    "NG Reports"
+                ],
+                "summary": "Delete an NG report along with its images",
+                "operationId": "9747768c19f389fc134f4102c8ab7e24",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID of NG report",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 10
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "NG report deleted successfully"
+                    },
+                    "404": {
+                        "description": "NG report not found"
+                    }
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "User login",
+                "operationId": "99d66635c4992aeaa6aa44ff653d0563",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "password123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Login successful"
+                    },
+                    "401": {
+                        "description": "Invalid credentials"
+                    }
+                }
+            }
+        },
+        "/auth/register": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "User registration",
+                "operationId": "08136088c4862c313b35d6518bab8d3a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "email",
+                                    "password",
+                                    "password_confirmation"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "John Doe"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "example": "john@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "password123"
+                                    },
+                                    "password_confirmation": {
+                                        "type": "string",
+                                        "example": "password123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Registration successful"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Logout user (requires token)",
+                "operationId": "6abf3b64a4bc7838d56346f05a5153af",
+                "responses": {
+                    "200": {
+                        "description": "Logged out successfully"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/auth/user": {
+            "get": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Get authenticated user",
+                "operationId": "32d03117b496ae02c2543b61438d24ad",
+                "responses": {
+                    "200": {
+                        "description": "User profile"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "bearerFormat": "JWT",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Authentication",
+            "description": "User Authentication & Authorization"
+        },
+        {
+            "name": "Suppliers",
+            "description": "Suppliers"
+        },
+        {
+            "name": "Parts",
+            "description": "Parts"
+        },
+        {
+            "name": "NG Reports",
+            "description": "NG Reports"
+        }
+    ]
+}

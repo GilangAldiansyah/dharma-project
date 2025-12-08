@@ -8,8 +8,46 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * @OA\Tag(
+ *     name="Authentication",
+ *     description="User Authentication & Authorization"
+ * )
+ *
+ * @OA\SecurityScheme(
+ *     securityScheme="BearerAuth",
+ *     type="http",
+ *     scheme="bearer",
+ *     bearerFormat="JWT"
+ * )
+ */
 class AuthController extends Controller
 {
+    /**
+     * @OA\Post(
+     *     path="/auth/login",
+     *     summary="User login",
+     *     tags={"Authentication"},
+     *
+     *     @OA\RequestBody(
+     *          required=true,
+     *          @OA\JsonContent(
+     *               required={"email","password"},
+     *               @OA\Property(property="email", type="string", example="user@example.com"),
+     *               @OA\Property(property="password", type="string", example="password123")
+     *          )
+     *     ),
+     *
+     *     @OA\Response(
+     *          response=200,
+     *          description="Login successful"
+     *     ),
+     *     @OA\Response(
+     *          response=401,
+     *          description="Invalid credentials"
+     *     )
+     * )
+     */
     public function login(Request $request)
     {
         $request->validate([
@@ -26,7 +64,7 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // Optional: Revoke old tokens
+        // Optional: revoke old tokens
         // $user->tokens()->delete();
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -39,6 +77,33 @@ class AuthController extends Controller
         ], 200);
     }
 
+    /**
+     * @OA\Post(
+     *     path="/auth/register",
+     *     summary="User registration",
+     *     tags={"Authentication"},
+     *
+     *     @OA\RequestBody(
+     *          required=true,
+     *          @OA\JsonContent(
+     *               required={"name","email","password","password_confirmation"},
+     *               @OA\Property(property="name", type="string", example="John Doe"),
+     *               @OA\Property(property="email", type="string", example="john@example.com"),
+     *               @OA\Property(property="password", type="string", example="password123"),
+     *               @OA\Property(property="password_confirmation", type="string", example="password123")
+     *          )
+     *     ),
+     *
+     *     @OA\Response(
+     *          response=201,
+     *          description="Registration successful"
+     *     ),
+     *     @OA\Response(
+     *          response=422,
+     *          description="Validation error"
+     *     )
+     * )
+     */
     public function register(Request $request)
     {
         try {
@@ -62,13 +127,17 @@ class AuthController extends Controller
                 'user' => $user,
                 'token' => $token,
             ], 201);
+
         } catch (\Illuminate\Validation\ValidationException $e) {
+
             return response()->json([
                 'success' => false,
                 'message' => 'Validation error',
                 'errors' => $e->errors(),
             ], 422);
+
         } catch (\Exception $e) {
+
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed',
@@ -76,6 +145,20 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * @OA\Post(
+     *     path="/auth/logout",
+     *     summary="Logout user (requires token)",
+     *     tags={"Authentication"},
+     *     security={{"BearerAuth":{}}},
+     *
+     *     @OA\Response(
+     *          response=200,
+     *          description="Logged out successfully"
+     *     )
+     * )
+     */
     public function logout(Request $request)
     {
         try {
@@ -85,7 +168,9 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Logged out successfully'
             ], 200);
+
         } catch (\Exception $e) {
+
             return response()->json([
                 'success' => false,
                 'message' => 'Logout failed',
@@ -94,6 +179,19 @@ class AuthController extends Controller
         }
     }
 
+    /**
+     * @OA\Get(
+     *     path="/auth/user",
+     *     summary="Get authenticated user",
+     *     tags={"Authentication"},
+     *     security={{"BearerAuth":{}}},
+     *
+     *     @OA\Response(
+     *          response=200,
+     *          description="User profile"
+     *     )
+     * )
+     */
     public function user(Request $request)
     {
         return response()->json([

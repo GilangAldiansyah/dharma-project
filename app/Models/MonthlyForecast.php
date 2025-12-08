@@ -23,7 +23,7 @@ class MonthlyForecast extends Model
         'month' => 'integer',
         'forecast_qty' => 'integer',
         'working_days' => 'integer',
-        'qty_per_day' => 'decimal:2',
+        'qty_per_day' => 'integer',
     ];
 
     public function calculateQtyPerDay(): float

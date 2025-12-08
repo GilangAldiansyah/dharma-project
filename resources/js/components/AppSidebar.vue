@@ -38,6 +38,7 @@ interface NavGroup {
     icon: any;
     items: NavItem[];
     routes: string[];
+    dashboardRoute: string;
 }
 
 const page = usePage();
@@ -46,7 +47,8 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Control Stock System',
         icon: Package,
-        routes: ['/dashboard', '/output', '/stock', '/forecast'],
+        routes: ['/dashboard', '/output', '/stock', '/forecast', '/settings'],
+        dashboardRoute: '/dashboard',
         items: [
             {
                 title: 'Dashboard',
@@ -74,6 +76,7 @@ const allNavGroups: NavGroup[] = [
         title: 'NG System',
         icon: AlertTriangle,
         routes: ['/ng-reports', '/suppliers', '/parts'],
+        dashboardRoute: '/ng-reports/dashboard',
         items: [
             {
                 title: 'Dashboard NG',
@@ -85,7 +88,7 @@ const allNavGroups: NavGroup[] = [
                 href: '/ng-reports',
                 icon: AlertTriangle,
             },
-             {
+            {
                 title: 'Master Suppliers',
                 href: '/suppliers',
                 icon: Users,
@@ -101,6 +104,7 @@ const allNavGroups: NavGroup[] = [
         title: 'Die Shop System',
         icon: Wrench,
         routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts'],
+        dashboardRoute: '/die-shop-dashboard',
         items: [
             {
                 title: 'Dashboard Die Shop',
@@ -139,6 +143,13 @@ const currentSystem = computed(() => {
     return null;
 });
 
+const logoHref = computed(() => {
+    if (currentSystem.value) {
+        return currentSystem.value.dashboardRoute;
+    }
+    return '/welcome';
+});
+
 const footerNavItems: NavItem[] = [
     {
         title: 'Home',
@@ -159,7 +170,7 @@ const footerNavItems: NavItem[] = [
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link href="/welcome">
+                        <Link :href="logoHref">
                             <AppLogo />
                         </Link>
                     </SidebarMenuButton>
