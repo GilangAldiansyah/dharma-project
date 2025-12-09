@@ -42,7 +42,6 @@ class DieShopReportController extends Controller
 
         $reports = $query->latest('report_date')->paginate(15);
 
-        // Add duration calculation for each report
         $reports->getCollection()->transform(function ($report) {
             $report->duration_value = $report->calculateDuration();
             $report->duration_unit = $report->getDurationUnit();
@@ -85,7 +84,6 @@ class DieShopReportController extends Controller
             'spareparts.*.notes' => 'nullable|string',
         ]);
 
-        // Handle photo uploads
         $photoPaths = [];
         if ($request->hasFile('photos')) {
             foreach ($request->file('photos') as $photo) {
@@ -97,20 +95,17 @@ class DieShopReportController extends Controller
         $validated['photos'] = $photoPaths;
         $validated['created_by'] = auth()->id();
 
-        // Set empty string for null values to avoid database constraint errors
         $validated['repair_process'] = $validated['repair_process'] ?: '';
         $validated['problem_description'] = $validated['problem_description'] ?: '';
         $validated['cause'] = $validated['cause'] ?: '';
         $validated['repair_action'] = $validated['repair_action'] ?: '';
 
-        // Set completed_at if status is completed
         if ($validated['status'] === 'completed') {
             $validated['completed_at'] = now();
         }
 
         $report = DieShopReport::create($validated);
 
-        // Create spareparts if any
         if (!empty($validated['spareparts'])) {
             foreach ($validated['spareparts'] as $sparepart) {
                 $report->spareparts()->create($sparepart);
@@ -166,10 +161,8 @@ class DieShopReportController extends Controller
             'spareparts.*.notes' => 'nullable|string',
         ]);
 
-        // Handle existing photos (from existing_photos field)
         $photoPaths = $validated['existing_photos'] ?? [];
 
-        // Handle new photo uploads
         if ($request->hasFile('photos')) {
             foreach ($request->file('photos') as $photo) {
                 $path = $photo->store('die-shop/photos', 'public');
@@ -177,7 +170,6 @@ class DieShopReportController extends Controller
             }
         }
 
-        // Delete removed photos from storage
         $oldPhotos = $dieShopReport->photos ?? [];
         $removedPhotos = array_diff($oldPhotos, $photoPaths);
         foreach ($removedPhotos as $removedPhoto) {
@@ -186,19 +178,16 @@ class DieShopReportController extends Controller
 
         $validated['photos'] = $photoPaths;
 
-        // Set completed_at when status changes to completed
         if ($validated['status'] === 'completed' && $dieShopReport->status !== 'completed') {
             $validated['completed_at'] = now();
         }
 
-        // Clear completed_at if status is changed from completed
         if ($validated['status'] !== 'completed' && $dieShopReport->status === 'completed') {
             $validated['completed_at'] = null;
         }
 
         $dieShopReport->update($validated);
 
-        // Update spareparts
         if (isset($validated['spareparts'])) {
             $dieShopReport->spareparts()->delete();
             foreach ($validated['spareparts'] as $sparepart) {
@@ -212,7 +201,6 @@ class DieShopReportController extends Controller
 
     public function destroy(DieShopReport $dieShopReport)
     {
-        // Delete photos from storage
         if ($dieShopReport->photos) {
             foreach ($dieShopReport->photos as $photo) {
                 Storage::disk('public')->delete($photo);

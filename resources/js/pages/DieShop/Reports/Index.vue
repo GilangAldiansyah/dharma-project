@@ -112,12 +112,10 @@ const getDurationColor = (report: DieShopReport) => {
         // Less than 1 hour is very fast
         return 'text-green-600 dark:text-green-400';
     } else if (report.duration_unit === 'jam') {
-        // Less than 24 hours is fast
         return report.duration_value <= 12
             ? 'text-green-600 dark:text-green-400'
             : 'text-yellow-600 dark:text-yellow-400';
     } else {
-        // Days
         if (report.duration_value <= 1) {
             return 'text-green-600 dark:text-green-400';
         } else if (report.duration_value <= 3) {
@@ -140,15 +138,13 @@ const formatDate = (date: string) => {
 <template>
     <Head title="Laporan Die Shop" />
     <AppLayout :breadcrumbs="[
-        { title: 'Die Shop System', href: '#' },
         { title: 'Laporan Perbaikan', href: '/die-shop-reports' }
     ]">
         <div class="p-4 space-y-4">
-            <!-- Header -->
             <div class="flex justify-between items-center">
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <FileText class="w-6 h-6 text-blue-600" />
-                    Laporan Perbaikan Die
+                    Laporan Corrective
                 </h1>
                 <Link
                     href="/die-shop-reports/create"
@@ -159,7 +155,6 @@ const formatDate = (date: string) => {
                 </Link>
             </div>
 
-            <!-- Search & Filters -->
             <div class="space-y-3">
                 <div class="flex gap-2 items-center">
                     <div class="flex-1 max-w-md">
@@ -183,7 +178,6 @@ const formatDate = (date: string) => {
                     </button>
                 </div>
 
-                <!-- Advanced Filters -->
                 <div v-if="showFilters" class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div>
@@ -237,7 +231,6 @@ const formatDate = (date: string) => {
                 </div>
             </div>
 
-            <!-- Table -->
             <div class="border border-sidebar-border rounded-lg overflow-hidden bg-white dark:bg-sidebar">
                 <div class="overflow-x-auto">
                     <table class="w-full">

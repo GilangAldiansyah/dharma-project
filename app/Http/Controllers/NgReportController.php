@@ -51,6 +51,25 @@ class NgReportController extends Controller
             ->take(15)
             ->values();
 
+        // NG By Type - count semua type yang dipilih (bisa multiple)
+        $ngByType = NgReport::whereBetween('reported_at', [$start, $end])
+            ->get()
+            ->pluck('ng_types')
+            ->flatten()
+            ->countBy()
+            ->map(function ($count, $type) {
+                $typeLabels = [
+                    'fungsi' => 'Fungsi',
+                    'dimensi' => 'Dimensi',
+                    'tampilan' => 'Tampilan',
+                ];
+                return [
+                    'type' => $typeLabels[$type] ?? $type,
+                    'total' => $count,
+                ];
+            })
+            ->values();
+
         $totalNg = NgReport::whereBetween('reported_at', [$start, $end])->count();
         $openNg = NgReport::whereBetween('reported_at', [$start, $end])
             ->where('status', NgReport::STATUS_OPEN)
@@ -99,6 +118,7 @@ class NgReportController extends Controller
         return Inertia::render('NgReports/Dashboard', [
             'ngByPart' => $ngByPart,
             'ngBySupplier' => $ngBySupplier,
+            'ngByType' => $ngByType,
             'summary' => [
                 'total_ng' => $totalNg,
                 'open_ng' => $openNg,
@@ -140,6 +160,10 @@ class NgReportController extends Controller
             $query->where('status', $request->status);
         }
 
+        if ($request->filled('ng_type') && $request->ng_type !== 'all') {
+            $query->whereJsonContains('ng_types', $request->ng_type);
+        }
+
         $reports = $query->latest('reported_at')->paginate(10)->withQueryString();
 
         $parts = Part::with('supplier')
@@ -152,6 +176,7 @@ class NgReportController extends Controller
             'filters' => [
                 'search' => $request->search ?? '',
                 'status' => $request->status ?? 'all',
+                'ng_type' => $request->ng_type ?? 'all',
             ],
         ]);
     }
@@ -160,6 +185,8 @@ class NgReportController extends Controller
     {
         $validated = $request->validate([
             'part_id' => 'required|exists:parts,id',
+            'ng_types' => 'required|array|min:1',
+            'ng_types.*' => 'required|in:fungsi,dimensi,tampilan',
             'ng_images.*' => 'required|image|max:2048',
             'notes' => 'nullable|string',
             'reported_by' => 'required|string',

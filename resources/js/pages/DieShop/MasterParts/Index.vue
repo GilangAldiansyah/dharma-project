@@ -95,7 +95,6 @@ const search = () => {
 <template>
     <Head title="Master Die Parts" />
     <AppLayout :breadcrumbs="[
-        { title: 'Die Shop System', href: '#' },
         { title: 'Master Die Parts', href: '/die-parts' }
     ]">
         <div class="p-4 space-y-4">

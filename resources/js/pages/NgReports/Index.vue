@@ -3,11 +3,12 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
-import { Plus, Trash2, Search, Image as ImageIcon, X, FileText, Upload, CheckCircle, Clock, AlertCircle, Download, XCircle } from 'lucide-vue-next';
+import { Plus, Trash2, Search, Image as ImageIcon, X, FileText, Upload, CheckCircle, Clock, AlertCircle, Download, XCircle, Wrench, Ruler, Eye } from 'lucide-vue-next';
 
 interface NgReport {
     id: number;
     report_number: string;
+    ng_types: ('fungsi' | 'dimensi' | 'tampilan')[];
     ng_images: string[];
     notes: string;
     reported_by: string;
@@ -50,6 +51,7 @@ interface Props {
     filters: {
         search: string;
         status: string;
+        ng_type: string;
     };
 }
 
@@ -59,6 +61,7 @@ const showModal = ref(false);
 const showPicaModal = ref(false);
 const searchQuery = ref(props.filters.search);
 const statusFilter = ref(props.filters.status);
+const ngTypeFilter = ref(props.filters.ng_type);
 const ngImagePreviews = ref<string[]>([]);
 const okImagePreviews = ref<string[]>([]);
 const showImageModal = ref(false);
@@ -75,6 +78,7 @@ const partSearchInputRef = ref<HTMLInputElement | null>(null);
 
 const form = useForm({
     part_id: 0,
+    ng_types: [] as ('fungsi' | 'dimensi' | 'tampilan')[],
     ng_images: [] as File[],
     notes: '',
     reported_by: '',
@@ -88,7 +92,41 @@ const picaForm = useForm({
 watch(() => props.filters, (newFilters) => {
     searchQuery.value = newFilters.search;
     statusFilter.value = newFilters.status;
+    ngTypeFilter.value = newFilters.ng_type;
 }, { deep: true });
+
+const getNgTypeConfig = (type: string) => {
+    const configs: Record<string, {
+        label: string;
+        icon: any;
+        bgClass: string;
+        textClass: string;
+        borderClass: string;
+    }> = {
+        fungsi: {
+            label: 'Fungsi',
+            icon: Wrench,
+            bgClass: 'bg-purple-100 dark:bg-purple-900/30',
+            textClass: 'text-purple-700 dark:text-purple-400',
+            borderClass: 'border-purple-300 dark:border-purple-700'
+        },
+        dimensi: {
+            label: 'Dimensi',
+            icon: Ruler,
+            bgClass: 'bg-blue-100 dark:bg-blue-900/30',
+            textClass: 'text-blue-700 dark:text-blue-400',
+            borderClass: 'border-blue-300 dark:border-blue-700'
+        },
+        tampilan: {
+            label: 'Tampilan',
+            icon: Eye,
+            bgClass: 'bg-orange-100 dark:bg-orange-900/30',
+            textClass: 'text-orange-700 dark:text-orange-400',
+            borderClass: 'border-orange-300 dark:border-orange-700'
+        }
+    };
+    return configs[type] || configs.fungsi;
+};
 
 const getStatusConfig = (status: string) => {
     const configs: Record<string, {
@@ -125,7 +163,6 @@ const getStatusConfig = (status: string) => {
 
 const filteredParts = computed(() => {
     if (!partSearchQuery.value) return props.parts;
-
     const query = partSearchQuery.value.toLowerCase();
     return props.parts.filter(part =>
         part.part_name.toLowerCase().includes(query) ||
@@ -189,6 +226,7 @@ watch(() => form.part_id, (newPartId) => {
 
 const openModal = () => {
     form.reset();
+    form.ng_types = [];
     ngImagePreviews.value = [];
     okImagePreviews.value = [];
     selectedPart.value = null;
@@ -204,11 +242,9 @@ const openPicaModal = (report: NgReport) => {
 const handleNgImagesChange = (e: Event) => {
     const target = e.target as HTMLInputElement;
     const files = target.files;
-
     if (files) {
         form.ng_images = [];
         ngImagePreviews.value = [];
-
         Array.from(files).forEach(file => {
             form.ng_images.push(file);
             ngImagePreviews.value.push(URL.createObjectURL(file));
@@ -236,11 +272,17 @@ const removeNgImage = (index: number) => {
 };
 
 const submit = () => {
+    if (form.ng_types.length === 0) {
+        alert('Pilih minimal 1 jenis NG');
+        return;
+    }
+
     form.post('/ng-reports', {
         preserveScroll: true,
         onSuccess: () => {
             showModal.value = false;
             form.reset();
+            form.ng_types = [];
             ngImagePreviews.value = [];
             okImagePreviews.value = [];
             selectedPart.value = null;
@@ -250,7 +292,6 @@ const submit = () => {
 
 const submitPica = () => {
     if (!selectedReport.value) return;
-
     picaForm.post(`/ng-reports/${selectedReport.value.id}/upload-pica`, {
         preserveScroll: true,
         onSuccess: () => {
@@ -276,7 +317,8 @@ const deleteReport = (id: number) => {
 const search = () => {
     router.get('/ng-reports', {
         search: searchQuery.value,
-        status: statusFilter.value
+        status: statusFilter.value,
+        ng_type: ngTypeFilter.value
     }, {
         preserveState: true,
         preserveScroll: true
@@ -360,6 +402,16 @@ const viewNotes = (notes: string) => {
                         </div>
                     </div>
                     <select
+                        v-model="ngTypeFilter"
+                        @change="search"
+                        class="px-4 py-2.5 rounded-lg border border-sidebar-border dark:bg-sidebar-accent min-w-[160px]"
+                    >
+                        <option value="all">Semua Jenis NG</option>
+                        <option value="fungsi">Fungsi</option>
+                        <option value="dimensi">Dimensi</option>
+                        <option value="tampilan">Tampilan</option>
+                    </select>
+                    <select
                         v-model="statusFilter"
                         @change="search"
                         class="px-4 py-2.5 rounded-lg border border-sidebar-border dark:bg-sidebar-accent min-w-[160px]"
@@ -386,6 +438,7 @@ const viewNotes = (notes: string) => {
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">No. Laporan</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Part</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Supplier</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Jenis NG</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Foto NG</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Foto Referensi</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Status</th>
@@ -419,6 +472,24 @@ const viewNotes = (notes: string) => {
                                 </td>
 
                                 <td class="px-4 py-4 text-sm">{{ report.part.supplier.supplier_name }}</td>
+
+                                <td class="px-4 py-4">
+                                    <div class="flex flex-wrap justify-center gap-1.5">
+                                        <div
+                                            v-for="type in report.ng_types"
+                                            :key="type"
+                                            :class="[
+                                                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border',
+                                                getNgTypeConfig(type).bgClass,
+                                                getNgTypeConfig(type).textClass,
+                                                getNgTypeConfig(type).borderClass
+                                            ]"
+                                        >
+                                            <component :is="getNgTypeConfig(type).icon" class="w-3 h-3" />
+                                            {{ getNgTypeConfig(type).label }}
+                                        </div>
+                                    </div>
+                                </td>
 
                                 <td class="px-4 py-4">
                                     <div class="flex justify-center">
@@ -498,9 +569,6 @@ const viewNotes = (notes: string) => {
                                             <FileText class="w-4 h-4" />
                                             Lihat PICA
                                         </a>
-                                        <!-- <div class="text-xs text-gray-500">
-                                            {{ report.pica_uploaded_by }}
-                                        </div> -->
                                         <button
                                             v-if="report.status === 'pica_submitted'"
                                             @click="cancelPica(report.id)"
@@ -546,7 +614,6 @@ const viewNotes = (notes: string) => {
                             </tr>
                         </tbody>
                     </table>
-                    <!-- Pagination -->
                     <div v-if="reports.last_page > 1" class="px-4 py-4 border-t border-sidebar-border bg-gray-50 dark:bg-sidebar-accent">
                         <div class="flex items-center justify-between">
                             <div class="text-sm text-gray-600 dark:text-gray-400">
@@ -574,6 +641,7 @@ const viewNotes = (notes: string) => {
                 </div>
             </div>
         </div>
+        <!-- Modal Lapor NG -->
         <div v-if="showModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-6xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between mb-6">
@@ -590,6 +658,7 @@ const viewNotes = (notes: string) => {
                 </div>
 
                 <form @submit.prevent="submit" class="space-y-6">
+                    <!-- Part Selection -->
                     <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
                             Pilih Part <span class="text-red-500">*</span>
@@ -611,7 +680,6 @@ const viewNotes = (notes: string) => {
                                 v-if="showPartDropdown"
                                 class="absolute z-50 w-full mt-2 bg-white dark:bg-sidebar rounded-lg shadow-2xl border border-sidebar-border max-h-96 overflow-hidden"
                             >
-
                                 <div class="p-3 border-b border-sidebar-border bg-gray-50 dark:bg-sidebar-accent sticky top-0">
                                     <div class="relative">
                                         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -654,7 +722,7 @@ const viewNotes = (notes: string) => {
                                             </div>
                                         </div>
                                         <div v-if="form.part_id === part.id" class="text-red-600 dark:text-red-400">
-                                            <Check class="w-5 h-5" />
+                                            <CheckCircle class="w-5 h-5" />
                                         </div>
                                     </button>
                                 </div>
@@ -667,6 +735,119 @@ const viewNotes = (notes: string) => {
                         </p>
                     </div>
 
+                    <!-- NG TYPE SELECTION -->
+                           <div>
+                        <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                            Jenis NG <span class="text-red-500">*</span>
+                            <span class="text-xs font-normal text-gray-500 ml-2">(Bisa pilih lebih dari 1)</span>
+                        </label>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <!-- Fungsi -->
+                            <label
+                                class="relative flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
+                                :class="form.ng_types.includes('fungsi') ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-sidebar-border'"
+                            >
+                                <input
+                                    type="checkbox"
+                                    v-model="form.ng_types"
+                                    value="fungsi"
+                                    class="sr-only"
+                                />
+                                <div class="flex items-center justify-center w-10 h-10 rounded-lg" :class="form.ng_types.includes('fungsi') ? 'bg-purple-100 dark:bg-purple-900/40' : 'bg-gray-100 dark:bg-gray-800'">
+                                    <Wrench :class="form.ng_types.includes('fungsi') ? 'text-purple-600 dark:text-purple-400' : 'text-gray-400'" class="w-5 h-5" />
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-semibold text-sm" :class="form.ng_types.includes('fungsi') ? 'text-purple-700 dark:text-purple-400' : 'text-gray-900 dark:text-white'">
+                                        Fungsi
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                        Tidak berfungsi dengan baik
+                                    </div>
+                                </div>
+                                <div v-if="form.ng_types.includes('fungsi')" class="absolute top-2 right-2">
+                                    <CheckCircle class="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                                </div>
+                            </label>
+
+                            <!-- Dimensi -->
+                            <label
+                                class="relative flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
+                                :class="form.ng_types.includes('dimensi') ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-sidebar-border'"
+                            >
+                                <input
+                                    type="checkbox"
+                                    v-model="form.ng_types"
+                                    value="dimensi"
+                                    class="sr-only"
+                                />
+                                <div class="flex items-center justify-center w-10 h-10 rounded-lg" :class="form.ng_types.includes('dimensi') ? 'bg-blue-100 dark:bg-blue-900/40' : 'bg-gray-100 dark:bg-gray-800'">
+                                    <Ruler :class="form.ng_types.includes('dimensi') ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'" class="w-5 h-5" />
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-semibold text-sm" :class="form.ng_types.includes('dimensi') ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-white'">
+                                        Dimensi
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                        Ukuran tidak sesuai standar
+                                    </div>
+                                </div>
+                                <div v-if="form.ng_types.includes('dimensi')" class="absolute top-2 right-2">
+                                    <CheckCircle class="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                                </div>
+                            </label>
+
+                            <!-- Tampilan -->
+                            <label
+                                class="relative flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
+                                :class="form.ng_types.includes('tampilan') ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20' : 'border-sidebar-border'"
+                            >
+                                <input
+                                    type="checkbox"
+                                    v-model="form.ng_types"
+                                    value="tampilan"
+                                    class="sr-only"
+                                />
+                                <div class="flex items-center justify-center w-10 h-10 rounded-lg" :class="form.ng_types.includes('tampilan') ? 'bg-orange-100 dark:bg-orange-900/40' : 'bg-gray-100 dark:bg-gray-800'">
+                                    <Eye :class="form.ng_types.includes('tampilan') ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'" class="w-5 h-5" />
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-semibold text-sm" :class="form.ng_types.includes('tampilan') ? 'text-orange-700 dark:text-orange-400' : 'text-gray-900 dark:text-white'">
+                                        Tampilan
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                        Cacat visual, warna, dll
+                                    </div>
+                                </div>
+                                <div v-if="form.ng_types.includes('tampilan')" class="absolute top-2 right-2">
+                                    <CheckCircle class="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Selected Types Summary -->
+                        <div v-if="form.ng_types.length > 0" class="mt-3 flex items-center gap-2 flex-wrap">
+                            <span class="text-xs text-gray-600 dark:text-gray-400">Dipilih:</span>
+                            <span v-for="type in form.ng_types" :key="type" :class="[
+                                'inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium',
+                                type === 'fungsi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                                type === 'dimensi' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                            ]">
+                                <component :is="type === 'fungsi' ? Wrench : type === 'dimensi' ? Ruler : Eye" class="w-3 h-3" />
+                                {{ type === 'fungsi' ? 'Fungsi' : type === 'dimensi' ? 'Dimensi' : 'Tampilan' }}
+                            </span>
+                        </div>
+
+                        <!-- Validation Error -->
+                        <p v-if="form.errors.ng_types" class="text-xs text-red-600 dark:text-red-400 mt-2">
+                            {{ form.errors.ng_types }}
+                        </p>
+                        <p v-else-if="form.ng_types.length === 0" class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                            Minimal pilih 1 jenis NG
+                        </p>
+                    </div>
+
+                    <!-- Visual Comparison -->
                     <div class="bg-gradient-to-br from-red-50 via-white to-green-50 dark:from-red-900/10 dark:via-sidebar dark:to-green-900/10 rounded-xl p-6 border-2 border-dashed border-gray-300 dark:border-gray-700">
                         <div class="flex items-center justify-center gap-3 mb-6">
                             <div class="h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent flex-1"></div>
@@ -678,6 +859,7 @@ const viewNotes = (notes: string) => {
                         </div>
 
                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- NG Images -->
                             <div class="bg-white dark:bg-sidebar rounded-xl p-5 shadow-sm border border-red-200 dark:border-red-900/50">
                                 <label class="block text-sm font-semibold mb-3 flex items-center gap-2">
                                     <div class="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
@@ -724,6 +906,7 @@ const viewNotes = (notes: string) => {
                                 </div>
                             </div>
 
+                            <!-- OK Reference Images -->
                             <div class="bg-white dark:bg-sidebar rounded-xl p-5 shadow-sm border border-green-200 dark:border-green-900/50">
                                 <label class="block text-sm font-semibold mb-3 flex items-center gap-2">
                                     <div class="w-3 h-3 bg-green-600 rounded-full"></div>
@@ -760,6 +943,7 @@ const viewNotes = (notes: string) => {
                         </div>
                     </div>
 
+                    <!-- Notes -->
                     <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
                             Keterangan Masalah
@@ -772,6 +956,7 @@ const viewNotes = (notes: string) => {
                         ></textarea>
                     </div>
 
+                    <!-- Reporter Name -->
                     <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
                             Nama Pelapor <span class="text-red-500">*</span>
@@ -785,6 +970,7 @@ const viewNotes = (notes: string) => {
                         />
                     </div>
 
+                    <!-- Form Actions -->
                     <div class="flex gap-3 justify-end pt-6 border-t border-sidebar-border">
                         <button
                             type="button"
@@ -809,6 +995,9 @@ const viewNotes = (notes: string) => {
                 </form>
             </div>
         </div>
+        <!-- LANJUTAN DARI BAGIAN 2 -->
+
+        <!-- PICA Modal -->
         <div v-if="showPicaModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-2xl w-full p-6 shadow-2xl">
                 <div class="flex items-center justify-between mb-6">
@@ -918,6 +1107,7 @@ const viewNotes = (notes: string) => {
             </div>
         </div>
 
+        <!-- Image Viewer Modal -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/95 flex items-center justify-center z-50 p-4">
             <div class="relative max-w-6xl w-full h-full flex flex-col py-8">
                 <button
@@ -952,6 +1142,7 @@ const viewNotes = (notes: string) => {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                         </svg>
                     </button>
+
                     <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full text-sm font-semibold">
                         {{ currentImageIndex + 1 }} / {{ selectedImages.length }}
                     </div>
@@ -969,42 +1160,45 @@ const viewNotes = (notes: string) => {
                 </div>
             </div>
         </div>
-        <!-- Modal Deskripsi Masalah -->
-<div v-if="showNotesModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white dark:bg-sidebar rounded-xl max-w-2xl w-full p-6 shadow-2xl">
-        <div class="flex items-center justify-between mb-6">
-            <div>
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Deskripsi Masalah</h2>
-                <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Detail permasalahan pada produk</p>
-            </div>
-            <button
-                @click="showNotesModal = false"
-                class="p-2 hover:bg-gray-100 dark:hover:bg-sidebar-accent rounded-lg transition-colors"
-            >
-                <X class="w-6 h-6" />
-            </button>
-        </div>
 
-        <div class="bg-gray-50 dark:bg-sidebar-accent rounded-lg p-6 border border-sidebar-border">
-            <div class="flex items-start gap-3">
-                <div class="bg-red-100 dark:bg-red-900/30 p-3 rounded-lg">
-                    <FileText class="w-6 h-6 text-red-600 dark:text-red-400" />
+        <!-- Notes Modal -->
+        <div v-if="showNotesModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-sidebar rounded-xl max-w-2xl w-full p-6 shadow-2xl">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Deskripsi Masalah</h2>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Detail permasalahan pada produk</p>
+                    </div>
+                    <button
+                        @click="showNotesModal = false"
+                        class="p-2 hover:bg-gray-100 dark:hover:bg-sidebar-accent rounded-lg transition-colors"
+                    >
+                        <X class="w-6 h-6" />
+                    </button>
                 </div>
-                <div class="flex-1">
-                    <p class="text-sm text-gray-900 dark:text-white whitespace-pre-wrap leading-relaxed">{{ selectedNotes }}</p>
+
+                <div class="bg-gray-50 dark:bg-sidebar-accent rounded-lg p-6 border border-sidebar-border">
+                    <div class="flex items-start gap-3">
+                        <div class="bg-red-100 dark:bg-red-900/30 p-3 rounded-lg">
+                            <FileText class="w-6 h-6 text-red-600 dark:text-red-400" />
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-sm text-gray-900 dark:text-white whitespace-pre-wrap leading-relaxed">{{ selectedNotes }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end mt-6 pt-4 border-t border-sidebar-border">
+                    <button
+                        @click="showNotesModal = false"
+                        class="px-6 py-2.5 bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-sidebar-accent/80 rounded-lg transition-colors font-medium"
+                    >
+                        Tutup
+                    </button>
                 </div>
             </div>
         </div>
-
-        <div class="flex justify-end mt-6 pt-4 border-t border-sidebar-border">
-            <button
-                @click="showNotesModal = false"
-                class="px-6 py-2.5 bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-sidebar-accent/80 rounded-lg transition-colors font-medium"
-            >
-                Tutup
-            </button>
-        </div>
-    </div>
-</div>
     </AppLayout>
 </template>
+
+

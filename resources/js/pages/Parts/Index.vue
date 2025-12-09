@@ -27,6 +27,7 @@ interface Props {
         last_page: number;
     };
     suppliers: Array<{ id: number; supplier_name: string; supplier_code: string }>;
+    typeLines: string[];
     filters?: {
         search?: string;
         supplier?: number;
@@ -470,11 +471,9 @@ const removeImportRow = (index: number) => {
                             class="rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar min-w-[150px]"
                         >
                             <option value="">Semua Type Line</option>
-                            <option value="TG4">TG4</option>
-                            <option value="2TQ/TG4">2TQ/TG4</option>
-                            <option value="2TQ/2MU/2SJ/TG4">2TQ/2MU/2SJ/TG4</option>
-                            <option value="2TQ/2MU/TG4">2TQ/2MU/TG4</option>
-                            <option value="C">C</option>
+                            <option v-for="typeLine in typeLines" :key="typeLine" :value="typeLine">
+                                {{ typeLine }}
+                            </option>
                         </select>
                         <button @click="search" class="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md" title="Cari">
                             <Search class="w-5 h-5" />

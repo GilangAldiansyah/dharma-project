@@ -137,7 +137,6 @@ const yAxisLabels = computed(() => {
 <template>
     <Head title="Dashboard Die Shop" />
     <AppLayout :breadcrumbs="[
-        { title: 'Die Shop System', href: '#' },
         { title: 'Dashboard', href: '/die-shop-dashboard' }
     ]">
         <div class="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -222,7 +221,6 @@ const yAxisLabels = computed(() => {
                     <div class="h-1 bg-gradient-to-r from-gray-400 to-gray-500"></div>
                 </div>
 
-                <!-- In Progress -->
                 <div class="group bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden border border-gray-200 dark:border-gray-700">
                     <div class="p-6">
                         <div class="flex items-start justify-between mb-4">
@@ -245,7 +243,6 @@ const yAxisLabels = computed(() => {
                     <div class="h-1 bg-gradient-to-r from-yellow-400 to-yellow-500"></div>
                 </div>
 
-                <!-- Completed -->
                 <div class="group bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden border border-gray-200 dark:border-gray-700">
                     <div class="p-6">
                         <div class="flex items-start justify-between mb-4">
@@ -268,7 +265,6 @@ const yAxisLabels = computed(() => {
                     <div class="h-1 bg-gradient-to-r from-green-500 to-green-600"></div>
                 </div>
             </div>
-            <!-- Activity Type & Additional Stats -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 rounded-xl p-5 border border-red-200 dark:border-red-800 hover:shadow-md transition-shadow">
                     <div class="flex items-center justify-between mb-3">
@@ -318,9 +314,7 @@ const yAxisLabels = computed(() => {
                     <p class="text-xs text-indigo-600 dark:text-indigo-500 mt-1">Total aktif</p>
                 </div>
             </div>
-            <!-- Charts Section -->
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <!-- Monthly Trend - Improved Stacked Bar Chart -->
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
                     <div class="p-6 border-b border-gray-200 dark:border-gray-700">
                         <div class="flex items-center justify-between">
@@ -331,7 +325,6 @@ const yAxisLabels = computed(() => {
                                 </h2>
                                 <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Data bulan ini</p>
                             </div>
-                            <!-- Legend -->
                             <div class="flex items-center gap-4 text-xs">
                                 <div class="flex items-center gap-2">
                                     <div class="w-3 h-3 bg-red-500 rounded"></div>
@@ -348,21 +341,17 @@ const yAxisLabels = computed(() => {
                     <div class="p-6">
                         <div v-if="monthlyTrend.length > 0" class="relative">
                             <div class="flex gap-4">
-                                <!-- Y-axis -->
                                 <div class="flex flex-col justify-between text-right pr-2 py-2" style="min-width: 32px;">
                                     <div v-for="label in yAxisLabels" :key="label" class="text-xs text-gray-500 dark:text-gray-400 leading-none">
                                         {{ label }}
                                     </div>
                                 </div>
 
-                                <!-- Chart Area -->
                                 <div class="flex-1 relative">
-                                    <!-- Grid lines -->
                                     <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
                                         <div v-for="i in 5" :key="i" class="border-t border-gray-200 dark:border-gray-700"></div>
                                     </div>
 
-                                    <!-- Bars -->
                                     <div class="relative h-64 flex items-end justify-between gap-1 px-2">
                                         <div
                                             v-for="(trend, index) in monthlyTrend"
@@ -372,9 +361,7 @@ const yAxisLabels = computed(() => {
                                             @mouseleave="hoveredBar = null"
                                         >
                                             <div class="relative w-full flex flex-col justify-end min-h-0">
-                                                <!-- Stacked Bars -->
                                                 <template v-if="trend.corrective > 0 || trend.preventive > 0">
-                                                    <!-- Corrective (bottom) -->
                                                     <div
                                                         v-if="trend.corrective > 0"
                                                         class="w-full bg-red-500 hover:bg-red-600 transition-all duration-200 rounded-t cursor-pointer"
@@ -384,7 +371,6 @@ const yAxisLabels = computed(() => {
                                                         }"
                                                     ></div>
 
-                                                    <!-- Preventive (top) -->
                                                     <div
                                                         v-if="trend.preventive > 0"
                                                         class="w-full bg-blue-500 hover:bg-blue-600 transition-all duration-200 cursor-pointer"
@@ -395,8 +381,6 @@ const yAxisLabels = computed(() => {
                                                         }"
                                                     ></div>
                                                 </template>
-
-                                                <!-- Tooltip -->
                                                 <div
                                                     v-if="hoveredBar === index && (trend.corrective > 0 || trend.preventive > 0)"
                                                     class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg whitespace-nowrap z-10 pointer-events-none"
@@ -413,19 +397,16 @@ const yAxisLabels = computed(() => {
                                                     <div class="flex items-center gap-2 font-semibold mt-1 pt-1 border-t border-gray-600">
                                                         Total: {{ trend.corrective + trend.preventive }}
                                                     </div>
-                                                    <!-- Arrow -->
                                                     <div class="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
                                                 </div>
                                             </div>
 
-                                            <!-- X-axis label -->
                                             <div class="text-center mt-2 text-xs text-gray-600 dark:text-gray-400 font-medium">
                                                 {{ new Date(trend.date).getDate() }}
                                             </div>
                                         </div>
                                     </div>
 
-                                    <!-- X-axis line -->
                                     <div class="border-t-2 border-gray-300 dark:border-gray-600 mt-2"></div>
                                 </div>
                             </div>
@@ -437,7 +418,6 @@ const yAxisLabels = computed(() => {
                         </div>
                     </div>
                 </div>
-                <!-- Top Die Parts -->
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
                     <div class="p-6 border-b border-gray-200 dark:border-gray-700">
                         <div class="flex items-center justify-between">
@@ -462,7 +442,6 @@ const yAxisLabels = computed(() => {
                                 class="group relative bg-gradient-to-r from-gray-50 to-white dark:from-gray-700 dark:to-gray-750 hover:from-blue-50 hover:to-blue-100 dark:hover:from-blue-900/20 dark:hover:to-blue-800/20 rounded-lg p-4 transition-all duration-300 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-md"
                             >
                                 <div class="flex items-center gap-4">
-                                    <!-- Rank Badge -->
                                     <div class="flex-shrink-0">
                                         <div
                                             class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-lg"
@@ -480,7 +459,6 @@ const yAxisLabels = computed(() => {
                                         </div>
                                     </div>
 
-                                    <!-- Die Part Info -->
                                     <div class="flex-1 min-w-0">
                                         <div class="flex items-start justify-between gap-2">
                                             <div class="min-w-0 flex-1">
@@ -492,7 +470,6 @@ const yAxisLabels = computed(() => {
                                                 </p>
                                             </div>
 
-                                            <!-- Count Badge -->
                                             <div class="flex-shrink-0 text-right">
                                                 <div class="px-3 py-1 bg-blue-600 text-white rounded-full">
                                                     <p class="text-lg font-bold leading-none">{{ item.report_count }}</p>
@@ -501,7 +478,6 @@ const yAxisLabels = computed(() => {
                                             </div>
                                         </div>
 
-                                        <!-- Progress Bar -->
                                         <div class="mt-3">
                                             <div class="h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                                                 <div
@@ -528,7 +504,6 @@ const yAxisLabels = computed(() => {
                     </div>
                 </div>
             </div>
-            <!-- Recent Reports Table -->
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
                 <div class="p-6 border-b border-gray-200 dark:border-gray-700">
                     <div class="flex items-center justify-between">

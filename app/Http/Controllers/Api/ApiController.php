@@ -146,6 +146,8 @@ class ApiController extends Controller
         try {
             $validated = $request->validate([
                 'part_id' => 'required|exists:parts,id',
+                'ng_types' => 'required|array|min:1',
+            'ng_types.*' => 'required|in:fungsi,dimensi,tampilan',
                 'ng_image' => 'required|image|max:5120',
                 'ng_images' => 'nullable|array',
                 'ng_images.*' => 'image|max:5120',
@@ -167,6 +169,7 @@ class ApiController extends Controller
 
             $report = NgReport::create([
                 'part_id' => $validated['part_id'],
+                'ng_types' => $validated['ng_types'],
                 'ng_images' => $allImages,
                 'notes' => $validated['notes'] ?? null,
                 'reported_by' => $validated['reported_by'],

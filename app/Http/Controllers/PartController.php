@@ -14,17 +14,14 @@ class PartController extends Controller
     {
         $query = Part::with('supplier');
 
-        // ✅ Filter by Supplier
         if ($request->has('supplier') && $request->supplier) {
             $query->where('supplier_id', $request->supplier);
         }
 
-        // ✅ PERBAIKAN: Tambahkan filter Type Line
         if ($request->has('type_line') && $request->type_line) {
             $query->where('type_line', $request->type_line);
         }
 
-        // ✅ Search Query (sudah benar)
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
@@ -38,15 +35,22 @@ class PartController extends Controller
             });
         }
 
-        // ✅ PERBAIKAN: Gunakan distinct untuk menghindari duplikat
         $parts = $query->latest()->distinct()->paginate(10)->withQueryString();
 
-        $suppliers = Supplier::select('id', 'supplier_name', 'supplier_code')->get();
+        $suppliers = Supplier::select('id', 'supplier_name', 'supplier_code')->orderBy('supplier_name')->get();
+
+        $typeLines = Part::whereNotNull('type_line')
+                         ->where('type_line', '!=', '')
+                         ->distinct()
+                         ->orderBy('type_line')
+                         ->pluck('type_line')
+                         ->values()
+                         ->toArray();
 
         return Inertia::render('Parts/Index', [
             'parts' => $parts,
             'suppliers' => $suppliers,
-            // ✅ PERBAIKAN: Pass filter values ke frontend untuk maintain state
+            'typeLines' => $typeLines,
             'filters' => [
                 'search' => $request->search,
                 'supplier' => $request->supplier,
