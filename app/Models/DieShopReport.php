@@ -12,9 +12,9 @@ class DieShopReport extends Model
 
     protected $fillable = [
         'report_no',
-        'activity_type',
         'pic_name',
         'report_date',
+        'shift',
         'die_part_id',
         'repair_process',
         'problem_description',
@@ -61,74 +61,65 @@ class DieShopReport extends Model
 
         return $prefix . str_pad($sequence, 4, '0', STR_PAD_LEFT);
     }
-    public function calculateDuration()
+
+    /**
+     * Calculate duration in total seconds
+     */
+    public function calculateDurationSeconds()
     {
         if ($this->status !== 'completed' || !$this->completed_at) {
             return null;
         }
 
-        $diffInMinutes = $this->created_at->diffInMinutes($this->completed_at);
-        $diffInHours = $this->created_at->diffInHours($this->completed_at);
-        $diffInDays = $this->created_at->diffInDays($this->completed_at);
-
-        // Less than 1 hour: show in minutes
-        if ($diffInHours < 1) {
-            return $diffInMinutes;
-        }
-
-        if ($diffInDays < 1) {
-            return $diffInHours;
-        }
-
-        return $diffInDays;
+        return $this->created_at->diffInSeconds($this->completed_at);
     }
 
+    /**
+     * Get duration formatted as HH:MM:SS
+     */
     public function getDurationFormatted()
+    {
+        if ($this->status !== 'completed' || !$this->completed_at) {
+            return null;
+        }
+
+        $totalSeconds = $this->created_at->diffInSeconds($this->completed_at);
+
+        $hours = floor($totalSeconds / 3600);
+        $minutes = floor(($totalSeconds % 3600) / 60);
+        $seconds = $totalSeconds % 60;
+
+        return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+    }
+
+    /**
+     * Get human-readable duration
+     */
+    public function getDurationHuman()
     {
         if ($this->status !== 'completed' || !$this->completed_at) {
             return 'Belum selesai';
         }
 
-        $diffInMinutes = $this->created_at->diffInMinutes($this->completed_at);
-        $diffInHours = $this->created_at->diffInHours($this->completed_at);
-        $diffInDays = $this->created_at->diffInDays($this->completed_at);
+        $totalSeconds = $this->created_at->diffInSeconds($this->completed_at);
 
-        if ($diffInHours < 1) {
-            return $diffInMinutes . ' menit';
+        $days = floor($totalSeconds / 86400);
+        $hours = floor(($totalSeconds % 86400) / 3600);
+        $minutes = floor(($totalSeconds % 3600) / 60);
+
+        $parts = [];
+
+        if ($days > 0) {
+            $parts[] = $days . ' hari';
+        }
+        if ($hours > 0) {
+            $parts[] = $hours . ' jam';
+        }
+        if ($minutes > 0 || empty($parts)) {
+            $parts[] = $minutes . ' menit';
         }
 
-        if ($diffInDays < 1) {
-            $remainingMinutes = $diffInMinutes % 60;
-            if ($remainingMinutes > 0) {
-                return $diffInHours . ' jam ' . $remainingMinutes . ' menit';
-            }
-            return $diffInHours . ' jam';
-        }
-
-        $remainingHours = $diffInHours % 24;
-        if ($remainingHours > 0) {
-            return $diffInDays . ' hari ' . $remainingHours . ' jam';
-        }
-
-        return $diffInDays . ' hari';
-    }
-
-    public function getDurationUnit()
-    {
-        if ($this->status !== 'completed' || !$this->completed_at) {
-            return null;
-        }
-
-        $diffInHours = $this->created_at->diffInHours($this->completed_at);
-        $diffInDays = $this->created_at->diffInDays($this->completed_at);
-
-        if ($diffInHours < 1) {
-            return 'menit';
-        } elseif ($diffInDays < 1) {
-            return 'jam';
-        } else {
-            return 'hari';
-        }
+        return implode(' ', $parts);
     }
 
     public function diePart()

@@ -77,6 +77,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('die-shop-dashboard', [DieShopDashboardController::class, 'index'])->name('die-shop-dashboard');
     Route::resource('die-parts', DiePartController::class);
     Route::resource('die-shop-reports', DieShopReportController::class);
+    Route::post('die-shop-reports/{dieShopReport}/quick-complete', [DieShopReportController::class, 'quickComplete'])->name('die-shop-reports.quick-complete');
 
     Route::get('/esp32/monitor', [ESP32Controller::class, 'monitor'])->name('esp32.monitor');
     Route::get('/esp32/monitor/{device_id}', [ESP32Controller::class, 'detail'])->name('esp32.detail');

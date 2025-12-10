@@ -19,17 +19,18 @@ class DieShopReportController extends Controller
                 $q->where('report_no', 'like', "%{$request->search}%")
                   ->orWhere('pic_name', 'like', "%{$request->search}%")
                   ->orWhereHas('diePart', function ($q) use ($request) {
-                      $q->where('part_name', 'like', "%{$request->search}%");
+                      $q->where('part_name', 'like', "%{$request->search}%")
+                        ->orWhere('part_no', 'like', "%{$request->search}%");
                   });
             });
         }
 
-        if ($request->activity_type) {
-            $query->where('activity_type', $request->activity_type);
-        }
-
         if ($request->status) {
             $query->where('status', $request->status);
+        }
+
+        if ($request->shift) {
+            $query->where('shift', $request->shift);
         }
 
         if ($request->date_from) {
@@ -40,42 +41,37 @@ class DieShopReportController extends Controller
             $query->whereDate('report_date', '<=', $request->date_to);
         }
 
-        $reports = $query->latest('report_date')->paginate(15);
+        $reports = $query->latest('report_date')->latest('id')->paginate(15);
 
         $reports->getCollection()->transform(function ($report) {
-            $report->duration_value = $report->calculateDuration();
-            $report->duration_unit = $report->getDurationUnit();
             $report->duration_formatted = $report->getDurationFormatted();
+            $report->duration_human = $report->getDurationHuman();
             return $report;
         });
 
+        $dieParts = DiePart::where('status', 'active')
+            ->orderBy('part_no')
+            ->get(['id', 'part_no', 'part_name', 'location']);
+
         return Inertia::render('DieShop/Reports/Index', [
             'reports' => $reports,
-            'filters' => $request->only(['search', 'activity_type', 'status', 'date_from', 'date_to']),
-        ]);
-    }
-
-    public function create()
-    {
-        $dieParts = DiePart::where('status', 'active')->get();
-
-        return Inertia::render('DieShop/Reports/Create', [
             'dieParts' => $dieParts,
+            'filters' => $request->only(['search', 'status', 'shift', 'date_from', 'date_to']),
         ]);
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'activity_type' => 'required|in:corrective,preventive',
             'pic_name' => 'required|string|max:255',
+            'shift' => 'required|in:1,2',
             'report_date' => 'required|date',
             'die_part_id' => 'required|exists:die_parts,id',
             'repair_process' => 'nullable|string',
             'problem_description' => 'nullable|string',
             'cause' => 'nullable|string',
             'repair_action' => 'nullable|string',
-            'photos.*' => 'nullable|image|max:5120', // 5MB max
+            'photos.*' => 'nullable|image|max:5120',
             'status' => 'required|in:pending,in_progress,completed',
             'spareparts' => 'nullable|array',
             'spareparts.*.sparepart_name' => 'required|string',
@@ -93,8 +89,7 @@ class DieShopReportController extends Controller
         }
 
         $validated['photos'] = $photoPaths;
-        $validated['created_by'] = auth()->id();
-
+        $validated['created_by'] = $request->user()->id;
         $validated['repair_process'] = $validated['repair_process'] ?: '';
         $validated['problem_description'] = $validated['problem_description'] ?: '';
         $validated['cause'] = $validated['cause'] ?: '';
@@ -112,38 +107,14 @@ class DieShopReportController extends Controller
             }
         }
 
-        return redirect()->route('die-shop-reports.index')
-            ->with('success', 'Laporan Die Shop berhasil dibuat');
-    }
-
-    public function show(DieShopReport $dieShopReport)
-    {
-        $dieShopReport->load(['diePart', 'spareparts', 'creator']);
-        $dieShopReport->duration_value = $dieShopReport->calculateDuration();
-        $dieShopReport->duration_unit = $dieShopReport->getDurationUnit();
-        $dieShopReport->duration_formatted = $dieShopReport->getDurationFormatted();
-
-        return Inertia::render('DieShop/Reports/Show', [
-            'report' => $dieShopReport,
-        ]);
-    }
-
-    public function edit(DieShopReport $dieShopReport)
-    {
-        $dieShopReport->load('spareparts');
-        $dieParts = DiePart::where('status', 'active')->get();
-
-        return Inertia::render('DieShop/Reports/Edit', [
-            'report' => $dieShopReport,
-            'dieParts' => $dieParts,
-        ]);
+        return redirect()->back()->with('success', 'Laporan berhasil dibuat');
     }
 
     public function update(Request $request, DieShopReport $dieShopReport)
     {
         $validated = $request->validate([
-            'activity_type' => 'required|in:corrective,preventive',
             'pic_name' => 'required|string|max:255',
+            'shift' => 'required|in:1,2',
             'report_date' => 'required|date',
             'die_part_id' => 'required|exists:die_parts,id',
             'repair_process' => 'nullable|string',
@@ -177,6 +148,10 @@ class DieShopReportController extends Controller
         }
 
         $validated['photos'] = $photoPaths;
+        $validated['repair_process'] = $validated['repair_process'] ?: '';
+        $validated['problem_description'] = $validated['problem_description'] ?: '';
+        $validated['cause'] = $validated['cause'] ?: '';
+        $validated['repair_action'] = $validated['repair_action'] ?: '';
 
         if ($validated['status'] === 'completed' && $dieShopReport->status !== 'completed') {
             $validated['completed_at'] = now();
@@ -195,8 +170,17 @@ class DieShopReportController extends Controller
             }
         }
 
-        return redirect()->route('die-shop-reports.index')
-            ->with('success', 'Laporan Die Shop berhasil diupdate');
+        return redirect()->back()->with('success', 'Laporan berhasil diupdate');
+    }
+
+    public function quickComplete(DieShopReport $dieShopReport)
+    {
+        $dieShopReport->update([
+            'status' => 'completed',
+            'completed_at' => now(),
+        ]);
+
+        return redirect()->back()->with('success', 'Laporan ditandai selesai');
     }
 
     public function destroy(DieShopReport $dieShopReport)
@@ -209,7 +193,6 @@ class DieShopReportController extends Controller
 
         $dieShopReport->delete();
 
-        return redirect()->route('die-shop-reports.index')
-            ->with('success', 'Laporan Die Shop berhasil dihapus');
+        return redirect()->back()->with('success', 'Laporan berhasil dihapus');
     }
 }

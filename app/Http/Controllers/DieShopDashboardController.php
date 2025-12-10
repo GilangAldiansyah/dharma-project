@@ -26,10 +26,10 @@ class DieShopDashboardController extends Controller
                 ->where('status', 'in_progress')->count(),
             'completedReports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
                 ->where('status', 'completed')->count(),
-            'correctiveReports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
-                ->where('activity_type', 'corrective')->count(),
-            'preventiveReports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
-                ->where('activity_type', 'preventive')->count(),
+            'shift1Reports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
+                ->where('shift', '1')->count(),
+            'shift2Reports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
+                ->where('shift', '2')->count(),
             'totalSpareparts' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
                 ->withCount('spareparts')
                 ->get()
@@ -37,33 +37,36 @@ class DieShopDashboardController extends Controller
             'activeDieParts' => DiePart::where('status', 'active')->count(),
         ];
 
+        // Recent Reports
         $recentReports = DieShopReport::with(['diePart'])
             ->whereBetween('report_date', [$startDate, $endDate])
             ->latest('report_date')
             ->limit(10)
             ->get();
 
+        // Monthly Trend (by shift)
         $monthlyTrend = [];
         $currentDate = $startDate->copy();
 
         while ($currentDate->lte($endDate)) {
-            $corrective = DieShopReport::whereDate('report_date', $currentDate)
-                ->where('activity_type', 'corrective')
+            $shift1 = DieShopReport::whereDate('report_date', $currentDate)
+                ->where('shift', '1')
                 ->count();
 
-            $preventive = DieShopReport::whereDate('report_date', $currentDate)
-                ->where('activity_type', 'preventive')
+            $shift2 = DieShopReport::whereDate('report_date', $currentDate)
+                ->where('shift', '2')
                 ->count();
 
             $monthlyTrend[] = [
                 'date' => $currentDate->format('Y-m-d'),
-                'corrective' => $corrective,
-                'preventive' => $preventive,
+                'shift1' => $shift1,
+                'shift2' => $shift2,
             ];
 
             $currentDate->addDay();
         }
 
+        // Top Die Parts
         $topDieParts = DieShopReport::select('die_part_id', DB::raw('count(*) as report_count'))
             ->whereBetween('report_date', [$startDate, $endDate])
             ->with('diePart')
