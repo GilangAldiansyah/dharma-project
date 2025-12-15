@@ -9,8 +9,7 @@ import AppLogoIcon from '@/components/AppLogoIcon.vue';
         <AppLogoIcon class="size-5 fill-current text-gray-900" />
     </div>
     <div class="ml-1 grid flex-1 text-left text-sm">
-        <span class="mb-0.5 truncate leading-tight font-semibold"
-            >4W DEPARTEMENT</span
-        >
+        <span class="mb-0.5 truncate leading-tight font-semibold">4W DEPARTEMENT</span
+    >
     </div>
 </template>

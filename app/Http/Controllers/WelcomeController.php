@@ -49,6 +49,19 @@ class WelcomeController extends Controller
                         'Master Die Parts'
                     ]
                 ],
+                [
+                    'id' => 'esp32-monitor',
+                    'title' => 'ESP32 Monitor',
+                    'description' => 'Sistem monitoring real-time untuk ESP32 counter devices',
+                    'icon' => 'Bot',
+                    'color' => 'black',
+                    'route' => '/esp32/monitor',
+                    'features' => [
+                        'Real-time device monitoring',
+                        'Relay status control',
+                        'History logs & analytics'
+                    ],
+                ]
             ]
         ]);
     }

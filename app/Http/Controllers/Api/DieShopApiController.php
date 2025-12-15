@@ -48,8 +48,8 @@ class DieShopApiController extends Controller
             $query->where('status', $request->status);
         }
 
-        if ($request->has('activity_type')) {
-            $query->where('activity_type', $request->activity_type);
+        if ($request->has(key: 'shift')) {
+            $query->where('shift', $request->shift);
         }
 
         if ($request->has('date_from')) {
@@ -75,7 +75,7 @@ class DieShopApiController extends Controller
     public function createDieShopReport(Request $request)
     {
         $validated = $request->validate([
-            'activity_type' => 'required|in:corrective,preventive',
+            'shift' => 'required|in:1,2',
             'pic_name' => 'required|string|max:255',
             'report_date' => 'required|date',
             'die_part_id' => 'required|exists:die_parts,id',
@@ -147,7 +147,7 @@ class DieShopApiController extends Controller
         $report = DieShopReport::findOrFail($id);
 
         $validated = $request->validate([
-            'activity_type' => 'required|in:corrective,preventive',
+            'shift' => 'required|in:1,2',
             'pic_name' => 'required|string|max:255',
             'report_date' => 'required|date',
             'die_part_id' => 'required|exists:die_parts,id',
@@ -248,10 +248,6 @@ class DieShopApiController extends Controller
                 ->where('status', 'in_progress')->count(),
             'completed_reports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
                 ->where('status', 'completed')->count(),
-            'corrective_reports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
-                ->where('activity_type', 'corrective')->count(),
-            'preventive_reports' => DieShopReport::whereBetween('report_date', [$startDate, $endDate])
-                ->where('activity_type', 'preventive')->count(),
             'active_die_parts' => DiePart::where('status', 'active')->count(),
         ];
 

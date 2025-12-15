@@ -138,6 +138,7 @@ const refreshData = () => {
     });
 };
 
+// FUNGSI BARU UNTUK MENGHITUNG TINGGI BAR YANG BENAR
 const maxPartValue = computed(() =>
     Math.max(...props.ngByPart.map(item => item.total), 1)
 );
@@ -149,12 +150,6 @@ const maxSupplierValue = computed(() =>
 const maxTrendValue = computed(() =>
     Math.max(...props.dailyTrend.map(item => item.total), 1)
 );
-
-const getBarHeight = (value: number, max: number) => {
-    if (value === 0) return 0;
-    const percentage = (value / max) * 100;
-    return Math.max(percentage, 5);
-};
 
 const scrollToTable = () => {
     viewMode.value = 'table';
@@ -472,6 +467,8 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
+
+            <!-- CHART SECTION - REDESIGNED COMPLETELY -->
             <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border overflow-hidden">
                 <div class="flex border-b border-sidebar-border">
                     <button
@@ -500,7 +497,9 @@ onUnmounted(() => {
                     </button>
                 </div>
 
+                <!-- BAR CHART VIEW - COMPLETELY REDESIGNED -->
                 <div v-if="viewMode === 'bar'" class="p-6 space-y-8">
+                    <!-- Daily Trend Chart -->
                     <div v-if="dailyTrend.length > 0" class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -511,59 +510,25 @@ onUnmounted(() => {
                                 {{ dailyTrend.length }} hari
                             </span>
                         </div>
-                        <div class="relative bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm" style="height: 400px;">
 
-                            <div class="absolute left-0 top-6 bottom-20 w-12 flex flex-col justify-between text-right text-xs text-gray-600 dark:text-gray-400 pr-2">
-                                <div>{{ maxTrendValue }}</div>
-                                <div>{{ Math.floor(maxTrendValue * 0.75) }}</div>
-                                <div>{{ Math.floor(maxTrendValue * 0.5) }}</div>
-                                <div>{{ Math.floor(maxTrendValue * 0.25) }}</div>
-                                <div>0</div>
-                            </div>
-
-                            <div class="absolute left-14 right-4 top-6 bottom-20 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="relative h-full" :style="{ width: `${Math.max(dailyTrend.length * 70, 100)}%`, minWidth: '100%' }">
-                                    <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-0.5 bg-gray-400 dark:bg-gray-600"></div>
+                        <!-- SIMPLE BAR CHART -->
+                        <div class="bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm">
+                            <div class="space-y-2">
+                                <div v-for="(item, index) in dailyTrend" :key="index"
+                                     class="flex items-center gap-3"
+                                     @mouseenter="hoveredTrendBar = index"
+                                     @mouseleave="clearHover">
+                                    <div class="w-24 text-xs text-gray-600 dark:text-gray-400 font-medium truncate">
+                                        {{ item.date }}
                                     </div>
-                                    <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-400 dark:bg-gray-600"></div>
-                                    <div class="absolute left-0 right-0 top-0 bottom-0 flex items-end justify-start gap-2 px-2 pb-1">
-                                        <div
-                                            v-for="(item, index) in dailyTrend"
-                                            :key="index"
-                                            class="flex flex-col items-center cursor-pointer"
-                                            style="width: 60px;"
-                                            @mouseenter="hoveredTrendBar = index"
-                                            @mouseleave="clearHover"
-                                        >
-                                            <div class="text-sm font-bold text-blue-600 dark:text-blue-400 mb-1 min-h-[20px] transition-all"
-                                                :class="{ 'scale-110': hoveredTrendBar === index }">
-                                                {{ item.total }}
-                                            </div>
+                                    <div class="flex-1 flex items-center gap-2">
+                                        <div class="flex-1 h-8 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden relative">
                                             <div
-                                                class="w-full bg-gradient-to-t from-blue-600 via-blue-500 to-blue-400 rounded-t-lg transition-all duration-300 shadow-lg"
-                                                :class="{ 'from-blue-700 via-blue-600 to-blue-500 shadow-xl': hoveredTrendBar === index }"
-                                                :style="{ height: `${getBarHeight(item.total, maxTrendValue)}%`, minHeight: '8px' }"
-                                            ></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="absolute left-14 right-4 bottom-0 h-16 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="h-full flex items-start justify-start gap-2 px-2 pt-2" :style="{ width: `${Math.max(dailyTrend.length * 70, 100)}%`, minWidth: '100%' }">
-                                    <div
-                                        v-for="(item, index) in dailyTrend"
-                                        :key="index"
-                                        style="width: 60px;"
-                                        class="flex justify-center"
-                                    >
-                                        <div class="text-[10px] text-gray-600 dark:text-gray-400 text-center font-medium">
-                                            {{ item.date }}
+                                                class="h-full bg-gradient-to-r from-blue-500 to-blue-600 transition-all duration-300 rounded-lg flex items-center justify-end pr-3"
+                                                :class="{ 'from-blue-600 to-blue-700 shadow-lg': hoveredTrendBar === index }"
+                                                :style="{ width: `${(item.total / maxTrendValue) * 100}%` }">
+                                                <span v-if="item.total > 0" class="text-white text-xs font-bold">{{ item.total }}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -588,6 +553,8 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
+
+                    <!-- NG by Part Chart -->
                     <div class="bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/10 dark:to-pink-900/10 rounded-xl p-6 border border-red-200 dark:border-red-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -598,58 +565,25 @@ onUnmounted(() => {
                                 {{ ngByPart.length }} part
                             </span>
                         </div>
-                        <div v-if="ngByPart.length > 0" class="relative bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm" style="height: 450px;">
-                            <div class="absolute left-0 top-6 bottom-20 w-12 flex flex-col justify-between text-right text-xs text-gray-600 dark:text-gray-400 pr-2">
-                                <div>{{ maxPartValue }}</div>
-                                <div>{{ Math.floor(maxPartValue * 0.75) }}</div>
-                                <div>{{ Math.floor(maxPartValue * 0.5) }}</div>
-                                <div>{{ Math.floor(maxPartValue * 0.25) }}</div>
-                                <div>0</div>
-                            </div>
 
-                            <div class="absolute left-14 right-4 top-6 bottom-20 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="relative h-full" :style="{ width: `${Math.max(ngByPart.length * 90, 100)}%`, minWidth: '100%' }">
-                                    <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-0.5 bg-gray-400 dark:bg-gray-600"></div>
+                        <div v-if="ngByPart.length > 0" class="bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm">
+                            <div class="space-y-2">
+                                <div v-for="(item, index) in ngByPart" :key="index"
+                                     class="flex items-center gap-3 cursor-pointer"
+                                     @click="scrollToTable"
+                                     @mouseenter="hoveredPartBar = index"
+                                     @mouseleave="clearHover">
+                                    <div class="w-32 text-xs text-gray-600 dark:text-gray-400 font-medium truncate" :title="item.part_code">
+                                        {{ item.part_code }}
                                     </div>
-                                    <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-400 dark:bg-gray-600"></div>
-                                    <div class="absolute left-0 right-0 top-0 bottom-0 flex items-end justify-start gap-3 px-2 pb-1">
-                                        <div
-                                            v-for="(item, index) in ngByPart"
-                                            :key="index"
-                                            class="flex flex-col items-center cursor-pointer"
-                                            style="width: 80px;"
-                                            @click="scrollToTable"
-                                            @mouseenter="hoveredPartBar = index"
-                                            @mouseleave="clearHover"
-                                        >
-                                            <div class="text-sm font-bold text-red-600 dark:text-red-400 mb-1 min-h-[20px] transition-all"
-                                                :class="{ 'scale-110': hoveredPartBar === index }">
-                                                {{ item.total }}
-                                            </div>
+                                    <div class="flex-1 flex items-center gap-2">
+                                        <div class="flex-1 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden relative">
                                             <div
-                                                class="w-full bg-gradient-to-t from-red-600 via-red-500 to-red-400 rounded-t-lg transition-all duration-300 shadow-lg"
-                                                :class="{ 'from-red-700 via-red-600 to-red-500 shadow-xl': hoveredPartBar === index }"
-                                                :style="{ height: `${getBarHeight(item.total, maxPartValue)}%`, minHeight: '8px' }"
-                                            ></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="absolute left-14 right-4 bottom-0 h-16 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="h-full flex items-start justify-start gap-3 px-2 pt-2" :style="{ width: `${Math.max(ngByPart.length * 90, 100)}%`, minWidth: '100%' }">
-                                    <div
-                                        v-for="(item, index) in ngByPart"
-                                        :key="index"
-                                        style="width: 80px;"
-                                    >
-                                        <div class="text-[9px] text-gray-600 dark:text-gray-400 text-center w-full truncate px-1 font-medium" :title="item.part_code">
-                                            {{ item.part_code }}
+                                                class="h-full bg-gradient-to-r from-red-500 to-red-600 transition-all duration-300 rounded-lg flex items-center justify-end pr-3"
+                                                :class="{ 'from-red-600 to-red-700 shadow-lg': hoveredPartBar === index }"
+                                                :style="{ width: `${(item.total / maxPartValue) * 100}%` }">
+                                                <span v-if="item.total > 0" class="text-white text-sm font-bold">{{ item.total }}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -683,7 +617,8 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
-                    <!-- Supplier NG Chart -->
+
+                    <!-- NG by Supplier Chart -->
                     <div class="bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/10 dark:to-amber-900/10 rounded-xl p-6 border border-orange-200 dark:border-orange-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -694,63 +629,25 @@ onUnmounted(() => {
                                 {{ ngBySupplier.length }} supplier
                             </span>
                         </div>
-                        <div v-if="ngBySupplier.length > 0" class="relative bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm" style="height: 450px;">
-                            <!-- Y-axis -->
-                            <div class="absolute left-0 top-6 bottom-20 w-12 flex flex-col justify-between text-right text-xs text-gray-600 dark:text-gray-400 pr-2">
-                                <div>{{ maxSupplierValue }}</div>
-                                <div>{{ Math.floor(maxSupplierValue * 0.75) }}</div>
-                                <div>{{ Math.floor(maxSupplierValue * 0.5) }}</div>
-                                <div>{{ Math.floor(maxSupplierValue * 0.25) }}</div>
-                                <div>0</div>
-                            </div>
 
-                            <div class="absolute left-14 right-4 top-6 bottom-20 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="relative h-full" :style="{ width: `${Math.max(ngBySupplier.length * 100, 100)}%`, minWidth: '100%' }">
-                                    <!-- Grid -->
-                                    <div class="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-0.5 bg-gray-400 dark:bg-gray-600"></div>
+                        <div v-if="ngBySupplier.length > 0" class="bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm">
+                            <div class="space-y-2">
+                                <div v-for="(item, index) in ngBySupplier" :key="index"
+                                     class="flex items-center gap-3 cursor-pointer"
+                                     @click="scrollToTable"
+                                     @mouseenter="hoveredSupplierBar = index"
+                                     @mouseleave="clearHover">
+                                    <div class="w-40 text-xs text-gray-600 dark:text-gray-400 font-medium truncate" :title="item.supplier_name">
+                                        {{ item.supplier_name }}
                                     </div>
-                                    <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-400 dark:bg-gray-600"></div>
-
-                                    <!-- Bars -->
-                                    <div class="absolute left-0 right-0 top-0 bottom-0 flex items-end justify-start gap-3 px-2 pb-1">
-                                        <div
-                                            v-for="(item, index) in ngBySupplier"
-                                            :key="index"
-                                            class="flex flex-col items-center cursor-pointer"
-                                            style="width: 90px;"
-                                            @click="scrollToTable"
-                                            @mouseenter="hoveredSupplierBar = index"
-                                            @mouseleave="clearHover"
-                                        >
-                                            <div class="text-sm font-bold text-orange-600 dark:text-orange-400 mb-1 min-h-[20px] transition-all"
-                                                :class="{ 'scale-110': hoveredSupplierBar === index }">
-                                                {{ item.total }}
-                                            </div>
+                                    <div class="flex-1 flex items-center gap-2">
+                                        <div class="flex-1 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden relative">
                                             <div
-                                                class="w-full bg-gradient-to-t from-orange-600 via-orange-500 to-orange-400 rounded-t-lg transition-all duration-300 shadow-lg"
-                                                :class="{ 'from-orange-700 via-orange-600 to-orange-500 shadow-xl': hoveredSupplierBar === index }"
-                                                :style="{ height: `${getBarHeight(item.total, maxSupplierValue)}%`, minHeight: '8px' }"
-                                            ></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- X-axis -->
-                            <div class="absolute left-14 right-4 bottom-0 h-16 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                                <div class="h-full flex items-start justify-start gap-3 px-2 pt-2" :style="{ width: `${Math.max(ngBySupplier.length * 100, 100)}%`, minWidth: '100%' }">
-                                    <div
-                                        v-for="(item, index) in ngBySupplier"
-                                        :key="index"
-                                        style="width: 90px;"
-                                    >
-                                        <div class="text-[9px] text-gray-600 dark:text-gray-400 text-center w-full truncate px-1 font-medium" :title="item.supplier_name">
-                                            {{ item.supplier_name }}
+                                                class="h-full bg-gradient-to-r from-orange-500 to-orange-600 transition-all duration-300 rounded-lg flex items-center justify-end pr-3"
+                                                :class="{ 'from-orange-600 to-orange-700 shadow-lg': hoveredSupplierBar === index }"
+                                                :style="{ width: `${(item.total / maxSupplierValue) * 100}%` }">
+                                                <span v-if="item.total > 0" class="text-white text-sm font-bold">{{ item.total }}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -784,7 +681,7 @@ onUnmounted(() => {
                         </Teleport>
                     </div>
                 </div>
-                <!-- Table View -->
+                <!-- TABLE VIEW -->
                 <div v-if="viewMode === 'table'" id="table-section" class="p-6 space-y-6">
                     <div v-if="dailyTrend.length > 0">
                         <div class="flex items-center justify-between mb-4">
@@ -949,6 +846,8 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
+
+            <!-- FOOTER -->
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm">
                 <div class="text-gray-600 dark:text-gray-400">
                     <span class="font-medium">Terakhir diperbarui:</span>
@@ -972,7 +871,7 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <!-- Filter Modal -->
+        <!-- FILTER MODAL -->
         <div v-if="showFilterModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-lg w-full p-6 shadow-2xl">
                 <div class="flex items-center justify-between mb-6">

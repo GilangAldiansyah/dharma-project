@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
-import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2} from 'lucide-vue-next';
+import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2, Bot } from 'lucide-vue-next';
 
-type ColorType = 'blue' | 'orange' | 'green';
+type ColorType = 'blue' | 'orange' | 'green' | 'red' | 'black' | 'violet';
 
 interface System {
     id: string;
@@ -32,8 +32,10 @@ const iconComponents: Record<string, any> = {
     Package,
     AlertTriangle,
     Wrench,
+    Bot
 };
 
+// UPDATED: Added red, black, violet color schemes
 const colorSchemes: Record<ColorType, {
     gradient: string;
     glow: string;
@@ -73,10 +75,39 @@ const colorSchemes: Record<ColorType, {
         badge: 'bg-green-200 text-green-800 border-green-300',
         buttonBg: 'bg-green-600',
         buttonHover: 'hover:bg-green-700'
+    },
+    red: {
+        gradient: 'from-red-500 to-red-600',
+        glow: 'shadow-red-500/30',
+        cardBg: 'bg-red-50',
+        headerBg: 'bg-gradient-to-br from-red-100 to-red-50',
+        text: 'text-red-600',
+        badge: 'bg-red-200 text-red-800 border-red-300',
+        buttonBg: 'bg-red-600',
+        buttonHover: 'hover:bg-red-700'
+    },
+    black: {
+        gradient: 'from-gray-800 to-black',
+        glow: 'shadow-gray-800/30',
+        cardBg: 'bg-gray-100',
+        headerBg: 'bg-gradient-to-br from-gray-300 to-gray-200',
+        text: 'text-gray-900',
+        badge: 'bg-gray-300 text-gray-900 border-gray-400',
+        buttonBg: 'bg-gray-800',
+        buttonHover: 'hover:bg-black'
+    },
+    violet: {
+        gradient: 'from-violet-500 to-violet-600',
+        glow: 'shadow-violet-500/30',
+        cardBg: 'bg-violet-50',
+        headerBg: 'bg-gradient-to-br from-violet-100 to-violet-50',
+        text: 'text-violet-600',
+        badge: 'bg-violet-200 text-violet-800 border-violet-300',
+        buttonBg: 'bg-violet-600',
+        buttonHover: 'hover:bg-violet-700'
     }
 };
 </script>
-
 <template>
     <Head title="Pilih Sistem" />
 
@@ -92,12 +123,12 @@ const colorSchemes: Record<ColorType, {
                 <h1 class="text-5xl md:text-6xl font-bold text-slate-900 mb-4 px-4">
                     Welcome
                 </h1>
-                <p class="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto px-4">
-                    Pilih sistem yang ingin Anda akses
-                </p>
+                <h3 class="text-2xl md:text-2xl text-slate-900 mb-4 px-4">
+                    4 Wheel Departement System
+                </h3>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto mb-12">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 max-w-7xl mx-auto mb-12">
                 <div
                     v-for="system in systems"
                     :key="system.id"

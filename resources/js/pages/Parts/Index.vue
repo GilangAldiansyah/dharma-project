@@ -199,7 +199,10 @@ const search = () => {
         search: searchQuery.value,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
         type_line: filterTypeLine.value || undefined
-    }, { preserveState: true });
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
 };
 
 const filterBySupplier = () => {
@@ -207,7 +210,10 @@ const filterBySupplier = () => {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
         type_line: filterTypeLine.value || undefined
-    }, { preserveState: true });
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
 };
 
 const filterByTypeLine = () => {
@@ -215,14 +221,21 @@ const filterByTypeLine = () => {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
         type_line: filterTypeLine.value || undefined
-    }, { preserveState: true });
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
 };
 
 const resetFilters = () => {
     searchQuery.value = '';
     filterSupplier.value = 0;
     filterTypeLine.value = '';
-    router.get('/parts', {}, { preserveState: true });
+    router.get('/parts', {},
+    {
+        preserveState: false,
+        preserveScroll: true
+    });
 };
 
 const goToPage = (page: number | string) => {
@@ -233,7 +246,10 @@ const goToPage = (page: number | string) => {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
         type_line: filterTypeLine.value || undefined
-    }, { preserveState: true });
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
 };
 
 const handlePageJump = () => {
@@ -444,7 +460,6 @@ const removeImportRow = (index: number) => {
     <Head title="Master Parts" />
     <AppLayout :breadcrumbs="[{ title: 'Master Parts', href: '/parts' }]">
         <div class="p-4 space-y-4">
-            <!-- Search & Filter Section -->
             <div class="flex justify-between items-center">
                 <div class="flex-1 max-w-3xl">
                     <div class="flex gap-2 items-center">
@@ -505,8 +520,6 @@ const removeImportRow = (index: number) => {
                     </button>
                 </div>
             </div>
-
-            <!-- Table Section -->
             <div class="border border-sidebar-border rounded-lg overflow-hidden bg-white dark:bg-sidebar">
                 <div class="overflow-x-auto">
                     <table class="w-full">
@@ -563,15 +576,12 @@ const removeImportRow = (index: number) => {
                         </tbody>
                     </table>
                 </div>
-
-                <!-- Pagination -->
                 <div v-if="parts.last_page > 1" class="px-4 py-3 border-t border-sidebar-border bg-gray-50 dark:bg-sidebar-accent">
                     <div class="flex items-center justify-between">
                         <div class="text-sm text-gray-600 dark:text-gray-400">
                             Halaman {{ parts.current_page }} dari {{ parts.last_page }}
                         </div>
                         <div class="flex items-center gap-3">
-                            <!-- Jump to Page -->
                             <div class="relative">
                                 <button
                                     @click="showPageJump = !showPageJump"
@@ -603,7 +613,6 @@ const removeImportRow = (index: number) => {
                                     </button>
                                 </div>
                             </div>
-                            <!-- Page Numbers -->
                             <div class="flex gap-1">
                                 <button
                                     v-for="(page, index) in getPageNumbers"
@@ -625,7 +634,6 @@ const removeImportRow = (index: number) => {
                 </div>
             </div>
         </div>
-        <!-- Form Modal -->
         <div v-if="showModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
                 <h2 class="text-xl font-semibold mb-4">{{ editMode ? 'Edit' : 'Tambah' }} Part</h2>
@@ -701,7 +709,6 @@ const removeImportRow = (index: number) => {
             </div>
         </div>
 
-        <!-- Import Modal -->
         <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-6xl w-full p-6 max-h-[90vh] overflow-auto">
                 <h2 class="text-xl font-semibold mb-4">Import Parts dari Excel</h2>
@@ -772,7 +779,6 @@ const removeImportRow = (index: number) => {
             </div>
         </div>
 
-        <!-- Image Gallery Modal -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/95 flex items-center justify-center z-50 p-4">
             <div class="relative max-w-5xl w-full">
                 <button @click="showImageModal = false" class="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white rounded-full p-3 transition-all z-50 shadow-lg">

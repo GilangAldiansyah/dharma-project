@@ -12,17 +12,17 @@ class PartController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Part::with('supplier');
+        $query = Part::query();
 
-        if ($request->has('supplier') && $request->supplier) {
+        if ($request->filled('supplier')) {
             $query->where('supplier_id', $request->supplier);
         }
 
-        if ($request->has('type_line') && $request->type_line) {
+        if ($request->filled('type_line')) {
             $query->where('type_line', $request->type_line);
         }
 
-        if ($request->has('search') && $request->search) {
+        if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
                 $q->where('part_code', 'like', "%{$search}%")
@@ -35,17 +35,24 @@ class PartController extends Controller
             });
         }
 
-        $parts = $query->latest()->distinct()->paginate(10)->withQueryString();
+        $parts = $query
+            ->with('supplier:id,supplier_name,supplier_code')
+            ->select('parts.*')
+            ->orderBy('parts.id', 'desc')
+            ->paginate(10)
+            ->withQueryString();
 
-        $suppliers = Supplier::select('id', 'supplier_name', 'supplier_code')->orderBy('supplier_name')->get();
+        $suppliers = Supplier::select('id', 'supplier_name', 'supplier_code')
+            ->orderBy('supplier_name')
+            ->get();
 
         $typeLines = Part::whereNotNull('type_line')
-                         ->where('type_line', '!=', '')
-                         ->distinct()
-                         ->orderBy('type_line')
-                         ->pluck('type_line')
-                         ->values()
-                         ->toArray();
+            ->where('type_line', '!=', '')
+            ->distinct()
+            ->orderBy('type_line')
+            ->pluck('type_line')
+            ->values()
+            ->toArray();
 
         return Inertia::render('Parts/Index', [
             'parts' => $parts,
@@ -53,7 +60,7 @@ class PartController extends Controller
             'typeLines' => $typeLines,
             'filters' => [
                 'search' => $request->search,
-                'supplier' => $request->supplier,
+                'supplier' => $request->supplier ? (int)$request->supplier : null,
                 'type_line' => $request->type_line,
             ]
         ]);

@@ -435,15 +435,16 @@ const viewNotes = (notes: string) => {
                     <table class="w-full">
                         <thead class="bg-gray-50 dark:bg-sidebar-accent border-b border-sidebar-border">
                             <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">No. Laporan</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Part</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Supplier</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Jenis NG</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">No. Laporan</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Part</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Supplier</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Foto NG</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Jenis NG</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Foto Referensi</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Status</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">PICA</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Pelapor</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Pelapor</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">PICA</th>
+
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Status</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider">Aksi</th>
                             </tr>
                         </thead>
@@ -473,23 +474,7 @@ const viewNotes = (notes: string) => {
 
                                 <td class="px-4 py-4 text-sm">{{ report.part.supplier.supplier_name }}</td>
 
-                                <td class="px-4 py-4">
-                                    <div class="flex flex-wrap justify-center gap-1.5">
-                                        <div
-                                            v-for="type in report.ng_types"
-                                            :key="type"
-                                            :class="[
-                                                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border',
-                                                getNgTypeConfig(type).bgClass,
-                                                getNgTypeConfig(type).textClass,
-                                                getNgTypeConfig(type).borderClass
-                                            ]"
-                                        >
-                                            <component :is="getNgTypeConfig(type).icon" class="w-3 h-3" />
-                                            {{ getNgTypeConfig(type).label }}
-                                        </div>
-                                    </div>
-                                </td>
+
 
                                 <td class="px-4 py-4">
                                     <div class="flex justify-center">
@@ -515,6 +500,23 @@ const viewNotes = (notes: string) => {
                                         </div>
                                         <div v-else class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
                                             <ImageIcon class="w-8 h-8 text-gray-400" />
+                                        </div>
+                                    </div>
+                                </td>
+                                 <td class="px-4 py-4">
+                                    <div class="flex flex-wrap justify-center gap-1.5">
+                                        <div
+                                            v-for="type in report.ng_types"
+                                            :key="type"
+                                            :class="[
+                                                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border',
+                                                getNgTypeConfig(type).bgClass,
+                                                getNgTypeConfig(type).textClass,
+                                                getNgTypeConfig(type).borderClass
+                                            ]"
+                                        >
+                                            <component :is="getNgTypeConfig(type).icon" class="w-3 h-3" />
+                                            {{ getNgTypeConfig(type).label }}
                                         </div>
                                     </div>
                                 </td>
@@ -546,19 +548,7 @@ const viewNotes = (notes: string) => {
                                         </div>
                                     </div>
                                 </td>
-
-                                <td class="px-4 py-4">
-                                    <div :class="[
-                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border',
-                                        getStatusConfig(report.status).bgClass,
-                                        getStatusConfig(report.status).textClass,
-                                        getStatusConfig(report.status).borderClass
-                                    ]">
-                                        <component :is="getStatusConfig(report.status).icon" class="w-3.5 h-3.5" />
-                                        {{ getStatusConfig(report.status).label }}
-                                    </div>
-                                </td>
-
+                                                           <td class="px-4 py-4 text-sm">{{ report.reported_by }}</td>
                                 <td class="px-4 py-4">
                                     <div v-if="report.pica_document" class="space-y-2">
                                         <a
@@ -590,7 +580,18 @@ const viewNotes = (notes: string) => {
                                     <span v-else class="text-xs text-gray-400">-</span>
                                 </td>
 
-                                <td class="px-4 py-4 text-sm">{{ report.reported_by }}</td>
+
+                                <td class="px-4 py-4">
+                                    <div :class="[
+                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border',
+                                        getStatusConfig(report.status).bgClass,
+                                        getStatusConfig(report.status).textClass,
+                                        getStatusConfig(report.status).borderClass
+                                    ]">
+                                        <component :is="getStatusConfig(report.status).icon" class="w-3.5 h-3.5" />
+                                        {{ getStatusConfig(report.status).label }}
+                                    </div>
+                                </td>
 
                                 <td class="px-4 py-4">
                                     <div class="flex items-center justify-center gap-2">
@@ -641,7 +642,6 @@ const viewNotes = (notes: string) => {
                 </div>
             </div>
         </div>
-        <!-- Modal Lapor NG -->
         <div v-if="showModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-6xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between mb-6">
@@ -734,15 +734,12 @@ const viewNotes = (notes: string) => {
                             Part ini belum memiliki foto referensi standar
                         </p>
                     </div>
-
-                    <!-- NG TYPE SELECTION -->
                            <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
                             Jenis NG <span class="text-red-500">*</span>
                             <span class="text-xs font-normal text-gray-500 ml-2">(Bisa pilih lebih dari 1)</span>
                         </label>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <!-- Fungsi -->
                             <label
                                 class="relative flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
                                 :class="form.ng_types.includes('fungsi') ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-sidebar-border'"
@@ -796,7 +793,6 @@ const viewNotes = (notes: string) => {
                                 </div>
                             </label>
 
-                            <!-- Tampilan -->
                             <label
                                 class="relative flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-sidebar-accent/50"
                                 :class="form.ng_types.includes('tampilan') ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20' : 'border-sidebar-border'"
@@ -824,7 +820,6 @@ const viewNotes = (notes: string) => {
                             </label>
                         </div>
 
-                        <!-- Selected Types Summary -->
                         <div v-if="form.ng_types.length > 0" class="mt-3 flex items-center gap-2 flex-wrap">
                             <span class="text-xs text-gray-600 dark:text-gray-400">Dipilih:</span>
                             <span v-for="type in form.ng_types" :key="type" :class="[
@@ -995,8 +990,6 @@ const viewNotes = (notes: string) => {
                 </form>
             </div>
         </div>
-        <!-- LANJUTAN DARI BAGIAN 2 -->
-
         <!-- PICA Modal -->
         <div v-if="showPicaModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-2xl w-full p-6 shadow-2xl">

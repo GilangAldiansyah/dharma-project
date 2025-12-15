@@ -20,6 +20,9 @@ interface Props {
         current_page: number;
         last_page: number;
     };
+    filters?: {
+        search?: string;
+    };
 }
 
 const props = defineProps<Props>();
@@ -27,7 +30,7 @@ const props = defineProps<Props>();
 const showModal = ref(false);
 const showImportModal = ref(false);
 const editMode = ref(false);
-const searchQuery = ref('');
+const searchQuery = ref(props.filters?.search || '');
 const importData = ref<any[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -83,7 +86,47 @@ const deleteSupplier = (id: number) => {
 };
 
 const search = () => {
-    router.get('/suppliers', { search: searchQuery.value }, { preserveState: true });
+    router.get('/suppliers', {
+        search: searchQuery.value || undefined
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
+};
+
+const goToPage = (page: number) => {
+    router.get('/suppliers', {
+        page: page,
+        search: searchQuery.value || undefined
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
+};
+
+const showPhoneWarning = ref(false);
+
+const filterPhoneInput = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const originalValue = input.value;
+    const filteredValue = originalValue.replace(/[^0-9]/g, '');
+
+    console.log('Phone input:', {
+        original: originalValue,
+        filtered: filteredValue,
+        isDifferent: originalValue !== filteredValue
+    });
+
+    if (originalValue !== filteredValue) {
+        console.log('⚠️ Non-numeric character detected! Showing warning...');
+        showPhoneWarning.value = true;
+        setTimeout(() => {
+            console.log('Hiding warning...');
+            showPhoneWarning.value = false;
+        }, 2000);
+    }
+
+    form.phone = filteredValue;
 };
 
 const openImportModal = () => {
@@ -162,8 +205,6 @@ const handleFileUpload = (event: Event) => {
                 }
             }
 
-            console.log('Found suppliers:', suppliers);
-
             importData.value = suppliers;
 
             if (suppliers.length === 0) {
@@ -171,7 +212,6 @@ const handleFileUpload = (event: Event) => {
             }
 
         } catch (error) {
-            console.error('Error:', error);
             alert('Error membaca file: ' + error);
         }
     };
@@ -251,8 +291,6 @@ const removeImportRow = (index: number) => {
                             <tr>
                                 <th class="px-4 py-3 text-left text-sm font-semibold">Kode</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold">Nama Supplier</th>
-                                <!-- <th class="px-4 py-3 text-left text-sm font-semibold">Contact Person</th>
-                                <th class="px-4 py-3 text-left text-sm font-semibold">Telepon</th> -->
                                 <th class="px-4 py-3 text-center text-sm font-semibold">Aksi</th>
                             </tr>
                         </thead>
@@ -264,8 +302,6 @@ const removeImportRow = (index: number) => {
                             >
                                 <td class="px-4 py-3 text-sm font-medium">{{ supplier.supplier_code }}</td>
                                 <td class="px-4 py-3 text-sm">{{ supplier.supplier_name }}</td>
-                                <!-- <td class="px-4 py-3 text-sm">{{ supplier.contact_person || '-' }}</td>
-                                <td class="px-4 py-3 text-sm">{{ supplier.phone || '-' }}</td> -->
                                 <td class="px-4 py-3">
                                     <div class="flex items-center justify-center gap-2">
                                         <button
@@ -293,14 +329,14 @@ const removeImportRow = (index: number) => {
                     </div>
                     <div class="flex gap-2">
                         <button
-                            @click="router.get('/suppliers', { page: suppliers.current_page - 1, search: searchQuery })"
+                            @click="goToPage(suppliers.current_page - 1)"
                             :disabled="suppliers.current_page === 1"
                             class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         >
                             Previous
                         </button>
                         <button
-                            @click="router.get('/suppliers', { page: suppliers.current_page + 1, search: searchQuery })"
+                            @click="goToPage(suppliers.current_page + 1)"
                             :disabled="suppliers.current_page === suppliers.last_page"
                             class="px-3 py-1 rounded border border-sidebar-border hover:bg-sidebar disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         >
@@ -346,12 +382,29 @@ const removeImportRow = (index: number) => {
                             />
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-1">Telepon</label>
-                            <input
-                                v-model="form.phone"
-                                type="text"
-                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar-accent"
-                            />
+                            <label class="block text-sm font-medium mb-1">Telepon (angka saja)</label>
+                            <div class="relative">
+                                <input
+                                    v-model="form.phone"
+                                    type="tel"
+                                    inputmode="numeric"
+                                    pattern="[0-9]*"
+                                    @input="filterPhoneInput"
+                                    placeholder="08123456789"
+                                    maxlength="15"
+                                    class="w-full rounded-md border px-3 py-2"
+                                    :class="form.errors.phone ? 'border-red-500' : 'border-sidebar-border dark:bg-sidebar-accent'"
+                                />
+                                <div
+                                    v-if="showPhoneWarning"
+                                    class="absolute -top-10 left-0 right-0 bg-red-500 text-white text-xs font-medium px-3 py-2 rounded shadow-lg z-50 animate-pulse"
+                                    style="animation: fadeIn 0.2s;"
+                                >
+                                    ⚠️ Hanya angka yang diperbolehkan!
+                                </div>
+                            </div>
+                            <p v-if="form.errors.phone" class="text-xs text-red-600 mt-1">{{ form.errors.phone }}</p>
+                            <p v-else class="text-xs text-gray-500 mt-1">Hanya angka. Minimal 8 digit, maksimal 15 digit</p>
                         </div>
                     </div>
 
@@ -384,7 +437,6 @@ const removeImportRow = (index: number) => {
             </div>
         </div>
 
-        <!-- Modal Import Excel -->
         <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full p-6 max-h-[90vh] overflow-auto">
                 <h2 class="text-xl font-semibold mb-4">Import Supplier dari Excel</h2>
@@ -395,7 +447,7 @@ const removeImportRow = (index: number) => {
                         <li>Buka file Excel Anda</li>
                         <li>Save As → pilih <strong>CSV UTF-8 (Comma delimited) (*.csv)</strong> atau <strong>Text (Tab delimited) (*.txt)</strong></li>
                         <li>Upload file CSV/TXT yang baru dibuat</li>
-                        <li>Data akan diambil dari kolom VENDOR (kolom M atau T) mulai baris ke-8</li>
+                        <li>Data akan diambil dari kolom VENDOR</li>
                     </ol>
                 </div>
 

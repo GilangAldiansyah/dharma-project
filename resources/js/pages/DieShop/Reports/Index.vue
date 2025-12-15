@@ -134,12 +134,12 @@ const editForm = useForm({
     _method: 'PUT' as const,
 });
 
-// Watch for edit modal open - AUTO POPULATE DATA
 watch(showEditModal, (isOpen) => {
     if (isOpen && selectedReport.value) {
         editForm.pic_name = selectedReport.value.pic_name;
         editForm.shift = String(selectedReport.value.shift);
-        editForm.report_date = selectedReport.value.report_date;
+        const reportDate = new Date(selectedReport.value.report_date);
+        editForm.report_date = reportDate.toISOString().split('T')[0];
         editForm.die_part_id = String(selectedReport.value.die_part.id);
         editForm.repair_process = selectedReport.value.repair_process || '';
         editForm.problem_description = selectedReport.value.problem_description || '';
