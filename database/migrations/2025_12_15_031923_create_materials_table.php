@@ -8,16 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('transaksi_materials', function (Blueprint $table) {
+        Schema::create('materials', function (Blueprint $table) {
             $table->id();
-            $table->string('transaksi_id')->unique();
-            $table->date('tanggal');
-            $table->integer('shift'); // 1, 2, 3
-            $table->foreignId('material_id')->constrained('materials')->onDelete('cascade');
-            $table->foreignId('part_material_id')->nullable()->constrained('part_materials')->onDelete('set null');
-            $table->decimal('qty', 10, 2);
-            $table->json('foto')->nullable(); // Array of image paths
-            $table->foreignId('user_id')->nullable()->constrained('users')->onDelete('set null');
+            $table->string('material_id')->unique();
+            $table->string('nama_material');
+            $table->string('material_type');
+            $table->string('satuan');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -25,6 +21,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('transaksi_materials');
+        Schema::dropIfExists('materials');
     }
 };

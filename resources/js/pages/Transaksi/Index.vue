@@ -2,7 +2,8 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
-import { Search, Plus, Package, Eye, Filter, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { Search, Plus, Package, Eye, Filter, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight, Download } from 'lucide-vue-next';
+import * as XLSX from 'xlsx';
 
 interface Material {
     id: number;
@@ -40,6 +41,7 @@ interface Transaksi {
     user?: {
         name: string;
     };
+    created_at: string;
 }
 
 interface Props {
@@ -65,7 +67,6 @@ const filterDateFrom = ref(props.filters.date_from || '');
 const filterDateTo = ref(props.filters.date_to || '');
 const showFilters = ref(false);
 
-// Multiple delete state
 const selectedItems = ref<number[]>([]);
 const selectAll = ref(false);
 
@@ -87,9 +88,62 @@ const form = useForm({
     foto: [] as File[],
 });
 
-// Fungsi untuk format qty tanpa .00
 const formatQty = (qty: number) => {
     return parseFloat(qty.toString());
+};
+
+const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+    });
+};
+
+const exportToExcel = () => {
+    // Buat data untuk Excel
+    const excelData = props.transaksi.data.map(item => ({
+        'ID Transaksi': item.transaksi_id,
+        'Tanggal': formatDate(item.tanggal),
+        'Shift': `Shift ${item.shift}`,
+        'ID Material': item.material.material_id,
+        'Nama Material': item.material.nama_material,
+        'Tipe Material': item.material.material_type,
+        'Satuan': item.material.satuan,
+        'ID Part': item.part_material?.part_id || '-',
+        'Nama Part': item.part_material?.nama_part || '-',
+        'Quantity': formatQty(item.qty),
+        'Jumlah Foto': item.foto?.length || 0,
+        'Dibuat Oleh': item.user?.name || '-',
+        'Waktu Input': new Date(item.created_at).toLocaleString('id-ID')
+    }));
+
+    // Buat workbook dan worksheet
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transaksi Material');
+
+    // Set lebar kolom
+    const colWidths = [
+        { wch: 18 }, // ID Transaksi
+        { wch: 12 }, // Tanggal
+        { wch: 8 },  // Shift
+        { wch: 15 }, // ID Material
+        { wch: 30 }, // Nama Material
+        { wch: 20 }, // Tipe Material
+        { wch: 10 }, // Satuan
+        { wch: 15 }, // ID Part
+        { wch: 30 }, // Nama Part
+        { wch: 12 }, // Quantity
+        { wch: 12 }, // Jumlah Foto
+        { wch: 20 }, // Dibuat Oleh
+        { wch: 20 }, // Waktu Input
+    ];
+    ws['!cols'] = colWidths;
+
+    // Download file
+    const fileName = `Transaksi_Material_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
 };
 
 const search = () => {
@@ -143,29 +197,19 @@ const getPaginationRange = () => {
     return range;
 };
 
-const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-    });
-};
-
 const deleteTransaksi = (id: number) => {
     if (confirm('Yakin ingin menghapus transaksi ini?')) {
         router.delete(`/transaksi/${id}`, {
             onSuccess: () => {
-                // Berhasil dihapus
+
             },
-            onError: (errors) => {
+            onError: () => {
                 alert('Gagal menghapus transaksi. Silakan coba lagi.');
-                console.error(errors);
             }
         });
     }
 };
 
-// Toggle select all
 const toggleSelectAll = () => {
     if (selectAll.value) {
         selectedItems.value = props.transaksi.data.map(item => item.id);
@@ -174,7 +218,6 @@ const toggleSelectAll = () => {
     }
 };
 
-// Toggle individual item
 const toggleSelectItem = (id: number) => {
     const index = selectedItems.value.indexOf(id);
     if (index > -1) {
@@ -183,11 +226,9 @@ const toggleSelectItem = (id: number) => {
         selectedItems.value.push(id);
     }
 
-    // Update select all checkbox
     selectAll.value = selectedItems.value.length === props.transaksi.data.length;
 };
 
-// Delete multiple items
 const deleteMultiple = () => {
     if (selectedItems.value.length === 0) {
         alert('Pilih minimal 1 transaksi untuk dihapus');
@@ -202,15 +243,13 @@ const deleteMultiple = () => {
                 selectedItems.value = [];
                 selectAll.value = false;
             },
-            onError: (errors) => {
+            onError: () => {
                 alert('Gagal menghapus transaksi. Silakan coba lagi.');
-                console.error(errors);
             }
         });
     }
 };
 
-// Watch for changes in transaksi data to update select all state
 watch(() => props.transaksi.data, () => {
     selectAll.value = selectedItems.value.length === props.transaksi.data.length && props.transaksi.data.length > 0;
 }, { deep: true });
@@ -341,6 +380,13 @@ watch(searchMaterialQuery, () => {
                     Transaksi Pengambilan Material
                 </h1>
                 <div class="flex items-center gap-2">
+                    <button
+                        @click="exportToExcel"
+                        class="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                    >
+                        <Download class="w-4 h-4" />
+                        Export Excel
+                    </button>
                     <button
                         v-if="selectedItems.length > 0"
                         @click="deleteMultiple"

@@ -2,8 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Material;
-use App\Models\PartMaterial;
 use App\Models\TransaksiMaterial;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;

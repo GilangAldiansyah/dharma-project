@@ -12,11 +12,11 @@ return new class extends Migration
             $table->id();
             $table->string('transaksi_id')->unique();
             $table->date('tanggal');
-            $table->integer('shift'); // 1, 2, 3
+            $table->integer('shift');
             $table->foreignId('material_id')->constrained('materials')->onDelete('cascade');
             $table->foreignId('part_material_id')->nullable()->constrained('part_materials')->onDelete('set null');
             $table->decimal('qty', 10, 2);
-            $table->json('foto')->nullable(); // Array of image paths
+            $table->json('foto')->nullable();
             $table->foreignId('user_id')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
             $table->softDeletes();
