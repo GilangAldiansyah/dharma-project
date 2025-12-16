@@ -2,27 +2,28 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Material extends Model
 {
+    use HasFactory, SoftDeletes;
+
     protected $fillable = [
-        'sap_finish',
-        'id_sap',
-        'material_name',
-        'part_no',
-        'part_name',
+        'material_id',
+        'nama_material',
+        'material_type',
+        'satuan',
     ];
 
-    public function dailyStocks()
+    public function partMaterials()
     {
-        return $this->hasMany(DailyStock::class);
+        return $this->hasMany(PartMaterial::class);
     }
 
-    public function getStockForDate($date)
+    public function transaksi()
     {
-        return $this->dailyStocks()
-            ->where('stock_date', $date)
-            ->first();
+        return $this->hasMany(TransaksiMaterial::class);
     }
 }

@@ -29,6 +29,10 @@ import {
     Box,
     Home,
     TrendingUp,
+    ClipboardList,
+    Layers,
+    Database,
+    Bot,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
@@ -75,7 +79,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'NG System',
         icon: AlertTriangle,
-        routes: ['/ng-reports', '/suppliers', '/parts'],
+        routes: ['/ng-reports', '/suppliers', '/parts', '/settings'],
         dashboardRoute: '/ng-reports/dashboard',
         items: [
             {
@@ -103,7 +107,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Die Shop System',
         icon: Wrench,
-        routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts'],
+        routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts', '/settings'],
         dashboardRoute: '/die-shop-dashboard',
         items: [
             {
@@ -120,6 +124,42 @@ const allNavGroups: NavGroup[] = [
                 title: 'Master Die Parts',
                 href: '/die-parts',
                 icon: Box,
+            },
+        ],
+    },
+    {
+        title: 'ESP32 Monitoring',
+        icon: Bot,
+        routes: ['/esp32/monitor','/settings'],
+        dashboardRoute: '/esp32/monitor',
+        items: [
+            {
+                title: 'Monitor',
+                href: '/esp32/monitor',
+                icon: Bot,
+            },
+        ],
+    },
+    {
+        title: 'Material Monitoring',
+        icon: ClipboardList,
+        routes: ['/transaksi', '/materials', '/part-materials', '/settings'],
+        dashboardRoute: '/transaksi',
+        items: [
+            {
+                title: 'Transaksi Material',
+                href: '/transaksi',
+                icon: ClipboardList,
+            },
+            {
+                title: 'Master Material',
+                href: '/materials',
+                icon: Database,
+            },
+            {
+                title: 'Master Part',
+                href: '/part-materials',
+                icon: Layers,
             },
         ],
     },

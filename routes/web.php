@@ -12,6 +12,9 @@ use App\Http\Controllers\DiePartController;
 use App\Http\Controllers\DieShopReportController;
 use App\Http\Controllers\DieShopDashboardController;
 use App\Http\Controllers\ESP32Controller;
+use App\Http\Controllers\MaterialController;
+use App\Http\Controllers\PartMaterialController;
+use App\Http\Controllers\TransaksiMaterialController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -41,6 +44,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/stock/output/{outputProduct}/materials', [StockController::class, 'getOutputMaterials']);
     Route::post('/stock/output/{outputProduct}/materials', [StockController::class, 'updateOutputMaterials']);
     Route::get('/stock/available-materials', [StockController::class, 'getAvailableMaterials']);
+
     // Forecast
     Route::get('/forecast', [StockController::class, 'forecastIndex'])->name('forecast.index');
     Route::post('/forecast/update', [StockController::class, 'forecastUpdate'])->name('forecast.update');
@@ -52,7 +56,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // NG Reports System
     Route::get('/ng-reports', [NgReportController::class, 'index'])->name('ng-reports.index');
     Route::post('/ng-reports', [NgReportController::class, 'store'])->name('ng-reports.store');
-    // Route::delete('/ng-reports/{ngReport}', [NgReportController::class, 'destroys'])->name('ng-reports.destroys');
     Route::get('/ng-reports/dashboard', [NgReportController::class, 'dashboard'])->name('ng-reports.dashboard');
     Route::resource('ng-reports', NgReportController::class);
     Route::post('/ng-reports/{ngReport}/upload-pica', [NgReportController::class, 'uploadPica'])->name('ng-reports.upload-pica');
@@ -79,10 +82,25 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('die-shop-reports', DieShopReportController::class);
     Route::post('die-shop-reports/{dieShopReport}/quick-complete', [DieShopReportController::class, 'quickComplete'])->name('die-shop-reports.quick-complete');
 
-
     // Esp32
     Route::get('/esp32/monitor', [ESP32Controller::class, 'monitor'])->name('esp32.monitor');
     Route::get('/esp32/monitor/{device_id}', [ESP32Controller::class, 'detail'])->name('esp32.detail');
+
+    // Materials
+    Route::get('materials/search/api', [MaterialController::class, 'searchApi'])->name('materials.search');
+    Route::post('/materials/import', [MaterialController::class, 'import'])->name('materials.import');
+    Route::get('/materials/download-template', [MaterialController::class, 'downloadTemplate'])->name('materials.download-template');
+    Route::resource('materials', MaterialController::class);
+
+    // Part Materials - FIXED ORDER
+    Route::post('/part-materials/import', [PartMaterialController::class, 'import'])->name('part-materials.import');
+    Route::post('/part-materials/delete-multiple', [PartMaterialController::class, 'deleteMultiple'])->name('part-materials.delete-multiple');
+    Route::resource('part-materials', PartMaterialController::class);
+
+    // Transaksi Material - FIXED ORDER
+    Route::get('transaksi/history/view', [TransaksiMaterialController::class, 'history'])->name('transaksi.history');
+    Route::post('transaksi/delete-multiple', [TransaksiMaterialController::class, 'deleteMultiple'])->name('transaksi.delete-multiple');
+    Route::resource('transaksi', TransaksiMaterialController::class)->except(['edit', 'update']);
 });
 
 require __DIR__.'/settings.php';

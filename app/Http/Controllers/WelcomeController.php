@@ -50,6 +50,19 @@ class WelcomeController extends Controller
                     ]
                 ],
                 [
+                    'id' => 'material-monitoring',
+                    'title' => 'Material Monitoring',
+                    'description' => 'Sistem monitoring pengambilan material dan part',
+                    'icon' => 'ClipboardList',
+                    'color' => 'violet',
+                    'route' => '/transaksi',
+                    'features' => [
+                        'Transaksi Pengambilan Material',
+                        'Master Material & Part',
+                        'History & Analytics'
+                    ]
+                ],
+                [
                     'id' => 'esp32-monitor',
                     'title' => 'ESP32 Monitor',
                     'description' => 'Sistem monitoring real-time untuk ESP32 counter devices',
@@ -60,7 +73,7 @@ class WelcomeController extends Controller
                         'Real-time device monitoring',
                         'Relay status control',
                         'History logs & analytics'
-                    ],
+                    ]
                 ]
             ]
         ]);
