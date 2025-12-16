@@ -87,15 +87,6 @@ class PartMaterialController extends Controller
     {
         try {
             DB::beginTransaction();
-
-            Log::info('Deleting part material', [
-                'id' => $partMaterial->id,
-                'part_id' => $partMaterial->part_id,
-                'nama_part' => $partMaterial->nama_part
-            ]);
-
-            // Cek apakah part material sedang digunakan di transaksi_materials
-            // Sesuaikan dengan relasi yang ada di model
             $isUsed = DB::table('transaksi_materials')
                 ->where('part_material_id', $partMaterial->id)
                 ->exists();
@@ -105,23 +96,14 @@ class PartMaterialController extends Controller
                     ->where('part_material_id', $partMaterial->id)
                     ->count();
 
-                Log::warning('Part material in use, cannot delete', [
-                    'part_id' => $partMaterial->part_id,
-                    'used_in' => $transaksiCount
-                ]);
-
                 return redirect()->route('part-materials.index')
                     ->with('error', "Part Material tidak dapat dihapus karena sedang digunakan oleh {$transaksiCount} transaksi");
             }
-
-            // Delete biasa (bukan force delete karena tidak ada soft delete)
             $deleted = $partMaterial->delete();
 
             if (!$deleted) {
                 throw new \Exception('Gagal menghapus part material dari database');
             }
-
-            Log::info('Part material deleted successfully', ['id' => $partMaterial->id]);
 
             DB::commit();
 
@@ -130,11 +112,6 @@ class PartMaterialController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error deleting part material', [
-                'id' => $partMaterial->id ?? 'unknown',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
 
             return redirect()->route('part-materials.index')
                 ->with('error', 'Gagal menghapus part material: ' . $e->getMessage());
@@ -150,16 +127,12 @@ class PartMaterialController extends Controller
                 'ids' => 'required|array',
                 'ids.*' => 'exists:part_materials,id'
             ]);
-
-            Log::info('Deleting multiple part materials', ['ids' => $validated['ids']]);
-
             $partMaterials = PartMaterial::whereIn('id', $validated['ids'])->get();
 
             if ($partMaterials->isEmpty()) {
                 throw new \Exception('Tidak ada part material yang ditemukan');
             }
 
-            // Cek apakah ada yang sedang digunakan
             $inUse = [];
             foreach ($partMaterials as $partMaterial) {
                 $transaksiCount = DB::table('transaksi_materials')
@@ -190,14 +163,9 @@ class PartMaterialController extends Controller
                         Log::info('Deleted part material', ['id' => $partMaterial->id, 'part_id' => $partMaterial->part_id]);
                     } else {
                         $failedDeletes[] = $partMaterial->part_id;
-                        Log::error('Failed to delete part material', ['id' => $partMaterial->id]);
                     }
                 } catch (\Exception $e) {
                     $failedDeletes[] = $partMaterial->part_id;
-                    Log::error('Exception deleting part material', [
-                        'id' => $partMaterial->id,
-                        'error' => $e->getMessage()
-                    ]);
                 }
             }
 
@@ -205,13 +173,10 @@ class PartMaterialController extends Controller
                 throw new \Exception('Gagal menghapus part material: ' . implode(', ', $failedDeletes));
             }
 
-            // Verify deletion
             $remaining = PartMaterial::whereIn('id', $validated['ids'])->count();
             if ($remaining > 0) {
                 throw new \Exception('Masih ada ' . $remaining . ' part material yang belum terhapus');
             }
-
-            Log::info('Multiple part materials deleted successfully', ['count' => $deletedCount]);
 
             DB::commit();
 
@@ -220,18 +185,11 @@ class PartMaterialController extends Controller
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
-            Log::error('Validation error on multiple delete', ['errors' => $e->errors()]);
-
             return redirect()->route('part-materials.index')
                 ->with('error', 'Validasi gagal: ' . json_encode($e->errors()));
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error deleting multiple part materials', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
             return redirect()->route('part-materials.index')
                 ->with('error', 'Gagal menghapus part material: ' . $e->getMessage());
         }
@@ -241,13 +199,7 @@ class PartMaterialController extends Controller
     {
         set_time_limit(300);
 
-        Log::info('Import started', [
-            'count' => count($request->parts ?? []),
-            'sample' => $request->parts ? array_slice($request->parts, 0, 2) : []
-        ]);
-
         try {
-            // Validasi basic structure
             $request->validate([
                 'parts' => 'required|array',
                 'parts.*.part_id' => 'required|string|max:255',
@@ -260,13 +212,7 @@ class PartMaterialController extends Controller
             $skipped = 0;
             $errors = [];
             $duplicateCodes = [];
-
-            // Ambil semua materials dengan material_id sebagai key
             $materialsByCode = Material::pluck('id', 'material_id')->toArray();
-
-            Log::info('Materials loaded', ['count' => count($materialsByCode), 'sample' => array_slice($materialsByCode, 0, 3, true)]);
-
-            // Ambil semua existing part_id
             $existingPartIds = PartMaterial::pluck('id', 'part_id')->toArray();
 
             DB::beginTransaction();
@@ -277,8 +223,6 @@ class PartMaterialController extends Controller
 
                     $partId = trim($partData['part_id']);
                     $materialCode = trim($partData['material_id']);
-
-                    // Handle duplicate part_id in the same import batch
                     $originalPartId = $partId;
                     $suffix = 1;
 
@@ -295,17 +239,14 @@ class PartMaterialController extends Controller
 
                     $duplicateCodes[$partId] = true;
 
-                    // Cek apakah material_id ada
                     if (!isset($materialsByCode[$materialCode])) {
                         $skipped++;
                         $errors[] = "Baris {$rowNumber}: {$partData['nama_part']} - Material ID '{$materialCode}' tidak ditemukan";
-                        Log::warning("Material not found", ['material_id' => $materialCode, 'row' => $rowNumber]);
                         continue;
                     }
 
                     $materialId = $materialsByCode[$materialCode];
 
-                    // Check if part exists and update or create
                     if (isset($existingPartIds[$partId])) {
                         $part = PartMaterial::find($existingPartIds[$partId]);
                         $part->update([
@@ -313,7 +254,6 @@ class PartMaterialController extends Controller
                             'material_id' => $materialId,
                         ]);
                         $updated++;
-                        Log::info("Part updated", ['part_id' => $partId, 'material_id' => $materialId]);
                     } else {
                         $newPart = PartMaterial::create([
                             'part_id' => $partId,
@@ -322,7 +262,6 @@ class PartMaterialController extends Controller
                         ]);
                         $existingPartIds[$partId] = $newPart->id;
                         $imported++;
-                        Log::info("Part created", ['part_id' => $partId, 'material_id' => $materialId, 'id' => $newPart->id]);
                     }
 
                 } catch (\Illuminate\Database\QueryException $e) {
@@ -334,22 +273,13 @@ class PartMaterialController extends Controller
                     } else {
                         $errors[] = "Baris {$rowNumber}: {$partData['nama_part']} - Database error: " . $e->getMessage();
                     }
-                    Log::error("Database error on import", ['row' => $rowNumber, 'error' => $e->getMessage()]);
                 } catch (\Exception $e) {
                     $skipped++;
                     $errors[] = "Baris {$rowNumber}: {$partData['nama_part']} - " . $e->getMessage();
-                    Log::error("General error on import", ['row' => $rowNumber, 'error' => $e->getMessage()]);
                 }
             }
 
             DB::commit();
-
-            Log::info('Import completed', [
-                'imported' => $imported,
-                'updated' => $updated,
-                'skipped' => $skipped,
-                'errors_count' => count($errors)
-            ]);
 
             $message = "Import selesai!\n";
             if ($imported > 0) $message .= "✓ {$imported} part baru ditambahkan\n";
@@ -394,11 +324,9 @@ class PartMaterialController extends Controller
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
-            Log::error('Validation error', ['errors' => $e->errors()]);
             return redirect()->back()->with('error', 'Validasi gagal: ' . json_encode($e->errors()));
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Import failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             return redirect()->back()->with('error', 'Import gagal: ' . $e->getMessage());
         }
     }
