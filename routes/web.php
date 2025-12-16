@@ -92,12 +92,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/materials/download-template', [MaterialController::class, 'downloadTemplate'])->name('materials.download-template');
     Route::resource('materials', MaterialController::class);
 
-    // Part Materials - FIXED ORDER
+    // Part Materials
     Route::post('/part-materials/import', [PartMaterialController::class, 'import'])->name('part-materials.import');
     Route::post('/part-materials/delete-multiple', [PartMaterialController::class, 'deleteMultiple'])->name('part-materials.delete-multiple');
     Route::resource('part-materials', PartMaterialController::class);
 
-    // Transaksi Material - FIXED ORDER
+    // Transaksi Material
     Route::get('transaksi/history/view', [TransaksiMaterialController::class, 'history'])->name('transaksi.history');
     Route::post('transaksi/delete-multiple', [TransaksiMaterialController::class, 'deleteMultiple'])->name('transaksi.delete-multiple');
     Route::resource('transaksi', TransaksiMaterialController::class)->except(['edit', 'update']);
