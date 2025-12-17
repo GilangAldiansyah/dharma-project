@@ -25,7 +25,7 @@
                 background-color: oklch(0.145 0 0);
             }
         </style>
-        <title inertia>{{ config('app.name', '4W Department System') }}</title>
+        <title inertia>{{ config('4W Department System','app.name') }}</title>
 
         <!-- Favicon -->
         <link rel="icon" type="image/png" href="{{ asset('images/dharma-logo.png') }}">
