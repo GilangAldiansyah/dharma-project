@@ -15,6 +15,7 @@ use App\Http\Controllers\ESP32Controller;
 use App\Http\Controllers\MaterialController;
 use App\Http\Controllers\PartMaterialController;
 use App\Http\Controllers\TransaksiMaterialController;
+use App\Http\Controllers\PengembalianMaterialController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -101,6 +102,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('transaksi/history/view', [TransaksiMaterialController::class, 'history'])->name('transaksi.history');
     Route::post('transaksi/delete-multiple', [TransaksiMaterialController::class, 'deleteMultiple'])->name('transaksi.delete-multiple');
     Route::resource('transaksi', TransaksiMaterialController::class)->except(['edit', 'update']);
+
+    // Pengembalian Material
+    Route::post('/pengembalian', [PengembalianMaterialController::class, 'store'])->name('pengembalian.store');
+    Route::delete('/pengembalian/{pengembalian}', [PengembalianMaterialController::class, 'destroy'])->name('pengembalian.destroy');
+    Route::get('/transaksi/{transaksi}/pengembalian-history', [PengembalianMaterialController::class, 'getPengembalianHistory']);
 });
 
 require __DIR__.'/settings.php';

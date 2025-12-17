@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -40,5 +39,24 @@ class TransaksiMaterial extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function pengembalian()
+    {
+        return $this->hasMany(PengembalianMaterial::class);
+    }
+
+    public function getTotalPengembalianAttribute()
+    {
+        return $this->pengembalian()->sum('qty_pengembalian');
+    }
+
+    public function getSisaPengembalianAttribute()
+    {
+        return $this->qty - $this->total_pengembalian;
+    }
+    public function hasPengembalian()
+    {
+        return $this->pengembalian()->exists();
     }
 }

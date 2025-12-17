@@ -9,12 +9,13 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
+Use App\Helpers\DateHelper;
 
 class TransaksiMaterialController extends Controller
 {
     public function index(Request $request)
     {
-        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user'])
+        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
             ->when($request->search, function ($query, $search) {
                 $query->where('transaksi_id', 'like', "%{$search}%")
                     ->orWhereHas('material', function ($q) use ($search) {
@@ -30,10 +31,18 @@ class TransaksiMaterialController extends Controller
             ->when($request->date_to, function ($query, $date) {
                 $query->whereDate('tanggal', '<=', $date);
             })
-            ->orderBy('tanggal', 'desc')
             ->orderBy('created_at', 'desc')
             ->paginate(15)
             ->withQueryString();
+
+        $transaksi->getCollection()->transform(function ($item) {
+            $item->total_pengembalian = $item->total_pengembalian;
+            $item->sisa_pengembalian = $item->sisa_pengembalian;
+            $item->tanggal_pengembalian_terakhir = $item->pengembalian()
+                ->orderBy('tanggal_pengembalian', 'desc')
+                ->value('tanggal_pengembalian');
+            return $item;
+        });
 
         return Inertia::render('Transaksi/Index', [
             'transaksi' => $transaksi,
@@ -43,6 +52,8 @@ class TransaksiMaterialController extends Controller
                 'date_from' => $request->date_from,
                 'date_to' => $request->date_to,
             ],
+            'effectiveDate' => DateHelper::getEffectiveDate()->format('Y-m-d'),
+            'currentShift' => DateHelper::getCurrentShift(),
         ]);
     }
 
@@ -90,7 +101,7 @@ class TransaksiMaterialController extends Controller
 
     public function show(TransaksiMaterial $transaksi)
     {
-        $transaksi->load(['material', 'partMaterial', 'user']);
+        $transaksi->load(['material', 'partMaterial', 'user', 'pengembalian.user']);
 
         return Inertia::render('Transaksi/Show', [
             'transaksi' => $transaksi,
@@ -102,7 +113,6 @@ class TransaksiMaterialController extends Controller
         try {
             DB::beginTransaction();
 
-            // Find transaksi by ID
             $transaksi = TransaksiMaterial::findOrFail($id);
 
             Log::info('Deleting transaksi', ['id' => $id, 'transaksi_id' => $transaksi->transaksi_id]);
@@ -112,19 +122,27 @@ class TransaksiMaterialController extends Controller
                 foreach ($transaksi->foto as $foto) {
                     if (Storage::disk('public')->exists($foto)) {
                         Storage::disk('public')->delete($foto);
-                        Log::info('Deleted photo', ['path' => $foto]);
                     }
                 }
             }
 
-            // Force delete (permanent delete even if using soft deletes)
+            // Delete related pengembalian and their photos
+            foreach ($transaksi->pengembalian as $pengembalian) {
+                if ($pengembalian->foto && is_array($pengembalian->foto)) {
+                    foreach ($pengembalian->foto as $foto) {
+                        if (Storage::disk('public')->exists($foto)) {
+                            Storage::disk('public')->delete($foto);
+                        }
+                    }
+                }
+                $pengembalian->forceDelete();
+            }
+
             $deleted = $transaksi->forceDelete();
 
             if (!$deleted) {
                 throw new \Exception('Gagal menghapus transaksi dari database');
             }
-
-            Log::info('Transaksi deleted successfully', ['id' => $id]);
 
             DB::commit();
 
@@ -135,8 +153,7 @@ class TransaksiMaterialController extends Controller
             DB::rollBack();
             Log::error('Error deleting transaksi', [
                 'id' => $id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
 
             return redirect()->route('transaksi.index')
@@ -154,8 +171,6 @@ class TransaksiMaterialController extends Controller
                 'ids.*' => 'exists:transaksi_materials,id'
             ]);
 
-            Log::info('Deleting multiple transaksi', ['ids' => $validated['ids']]);
-
             $transaksiList = TransaksiMaterial::whereIn('id', $validated['ids'])->get();
 
             if ($transaksiList->isEmpty()) {
@@ -164,7 +179,6 @@ class TransaksiMaterialController extends Controller
 
             $deletedCount = 0;
             foreach ($transaksiList as $transaksi) {
-                // Delete photos from storage
                 if ($transaksi->foto && is_array($transaksi->foto)) {
                     foreach ($transaksi->foto as $foto) {
                         if (Storage::disk('public')->exists($foto)) {
@@ -173,18 +187,20 @@ class TransaksiMaterialController extends Controller
                     }
                 }
 
-                // Force delete
+                foreach ($transaksi->pengembalian as $pengembalian) {
+                    if ($pengembalian->foto && is_array($pengembalian->foto)) {
+                        foreach ($pengembalian->foto as $foto) {
+                            if (Storage::disk('public')->exists($foto)) {
+                                Storage::disk('public')->delete($foto);
+                            }
+                        }
+                    }
+                    $pengembalian->forceDelete();
+                }
+
                 $transaksi->forceDelete();
                 $deletedCount++;
             }
-
-            // Verify deletion
-            $remaining = TransaksiMaterial::whereIn('id', $validated['ids'])->count();
-            if ($remaining > 0) {
-                throw new \Exception('Masih ada ' . $remaining . ' transaksi yang belum terhapus');
-            }
-
-            Log::info('Multiple transaksi deleted successfully', ['count' => $deletedCount]);
 
             DB::commit();
 
@@ -194,8 +210,7 @@ class TransaksiMaterialController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error deleting multiple transaksi', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
 
             return redirect()->route('transaksi.index')
@@ -208,7 +223,7 @@ class TransaksiMaterialController extends Controller
         $materialId = $request->material_id;
         $partMaterialId = $request->part_material_id;
 
-        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user'])
+        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
             ->when($materialId, function ($query, $materialId) {
                 $query->where('material_id', $materialId);
             })
