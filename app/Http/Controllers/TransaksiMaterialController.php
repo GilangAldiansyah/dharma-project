@@ -13,49 +13,58 @@ Use App\Helpers\DateHelper;
 
 class TransaksiMaterialController extends Controller
 {
-    public function index(Request $request)
-    {
-        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
-            ->when($request->search, function ($query, $search) {
-                $query->where('transaksi_id', 'like', "%{$search}%")
-                    ->orWhereHas('material', function ($q) use ($search) {
-                        $q->where('nama_material', 'like', "%{$search}%");
-                    });
-            })
-            ->when($request->shift, function ($query, $shift) {
-                $query->where('shift', $shift);
-            })
-            ->when($request->date_from, function ($query, $date) {
-                $query->whereDate('tanggal', '>=', $date);
-            })
-            ->when($request->date_to, function ($query, $date) {
-                $query->whereDate('tanggal', '<=', $date);
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate(15)
-            ->withQueryString();
+ public function index(Request $request)
+{
+    $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
+        ->when($request->filled('search'), function ($query) use ($request) {
+            $search = $request->search;
+            $query->where('transaksi_id', 'like', "%{$search}%")
+                ->orWhereHas('material', function ($q) use ($search) {
+                    $q->where('nama_material', 'like', "%{$search}%");
+                });
+        })
+        ->when($request->filled('shift'), function ($query) use ($request) {
+            $query->where('shift', $request->shift);
+        })
+        ->when($request->filled('date_from'), function ($query) use ($request) {
+            $query->whereDate('tanggal', '>=', $request->date_from);
+        })
+        ->when($request->filled('date_to'), function ($query) use ($request) {
+            $query->whereDate('tanggal', '<=', $request->date_to);
+        })
+        ->when($request->filled('has_return'), function ($query) use ($request) {
+            if ($request->has_return == '1') {
+                $query->whereHas('pengembalian');
+            } elseif ($request->has_return == '0') {
+                $query->whereDoesntHave('pengembalian');
+            }
+        })
+        ->orderBy('created_at', 'desc')
+        ->paginate(15)
+        ->withQueryString();
 
-        $transaksi->getCollection()->transform(function ($item) {
-            $item->total_pengembalian = $item->total_pengembalian;
-            $item->sisa_pengembalian = $item->sisa_pengembalian;
-            $item->tanggal_pengembalian_terakhir = $item->pengembalian()
-                ->orderBy('tanggal_pengembalian', 'desc')
-                ->value('tanggal_pengembalian');
-            return $item;
-        });
+    $transaksi->getCollection()->transform(function ($item) {
+        $item->total_pengembalian = $item->total_pengembalian;
+        $item->sisa_pengembalian = $item->sisa_pengembalian;
+        $item->tanggal_pengembalian_terakhir = $item->pengembalian()
+            ->orderBy('tanggal_pengembalian', 'desc')
+            ->value('tanggal_pengembalian');
+        return $item;
+    });
 
-        return Inertia::render('Transaksi/Index', [
-            'transaksi' => $transaksi,
-            'filters' => [
-                'search' => $request->search,
-                'shift' => $request->shift,
-                'date_from' => $request->date_from,
-                'date_to' => $request->date_to,
-            ],
-            'effectiveDate' => DateHelper::getEffectiveDate()->format('Y-m-d'),
-            'currentShift' => DateHelper::getCurrentShift(),
-        ]);
-    }
+    return Inertia::render('Transaksi/Index', [
+        'transaksi' => $transaksi,
+        'filters' => [
+            'search' => $request->search,
+            'shift' => $request->shift,
+            'date_from' => $request->date_from,
+            'date_to' => $request->date_to,
+            'has_return' => $request->has_return,
+        ],
+        'effectiveDate' => DateHelper::getEffectiveDate()->format('Y-m-d'),
+        'currentShift' => DateHelper::getCurrentShift(),
+    ]);
+}
 
     public function create()
     {
@@ -73,7 +82,6 @@ class TransaksiMaterialController extends Controller
             'foto.*' => 'nullable|image|max:5120',
         ]);
 
-        // Generate ID Transaksi
         $today = now()->format('ymd');
         $lastTransaksi = TransaksiMaterial::whereDate('created_at', now()->toDateString())
             ->orderBy('id', 'desc')
@@ -108,6 +116,48 @@ class TransaksiMaterialController extends Controller
         ]);
     }
 
+    public function exportData(Request $request)
+{
+    $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
+        ->when($request->filled('search'), function ($query) use ($request) {
+            $search = $request->search;
+            $query->where('transaksi_id', 'like', "%{$search}%")
+                ->orWhereHas('material', function ($q) use ($search) {
+                    $q->where('nama_material', 'like', "%{$search}%");
+                });
+        })
+        ->when($request->filled('shift'), function ($query) use ($request) {
+            $query->where('shift', $request->shift);
+        })
+        ->when($request->filled('date_from'), function ($query) use ($request) {
+            $query->whereDate('tanggal', '>=', $request->date_from);
+        })
+        ->when($request->filled('date_to'), function ($query) use ($request) {
+            $query->whereDate('tanggal', '<=', $request->date_to);
+        })
+        ->when($request->filled('has_return'), function ($query) use ($request) {
+            if ($request->has_return == '1') {
+                $query->whereHas('pengembalian');
+            } elseif ($request->has_return == '0') {
+                $query->whereDoesntHave('pengembalian');
+            }
+        })
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    // Transform data untuk menambahkan calculated fields
+    $transaksi->transform(function ($item) {
+        $item->total_pengembalian = $item->total_pengembalian;
+        $item->sisa_pengembalian = $item->sisa_pengembalian;
+        $item->tanggal_pengembalian_terakhir = $item->pengembalian()
+            ->orderBy('tanggal_pengembalian', 'desc')
+            ->value('tanggal_pengembalian');
+        return $item;
+    });
+
+    return response()->json($transaksi);
+}
+
     public function destroy($id)
     {
         try {
@@ -115,9 +165,6 @@ class TransaksiMaterialController extends Controller
 
             $transaksi = TransaksiMaterial::findOrFail($id);
 
-            Log::info('Deleting transaksi', ['id' => $id, 'transaksi_id' => $transaksi->transaksi_id]);
-
-            // Delete photos from storage
             if ($transaksi->foto && is_array($transaksi->foto)) {
                 foreach ($transaksi->foto as $foto) {
                     if (Storage::disk('public')->exists($foto)) {
@@ -126,7 +173,6 @@ class TransaksiMaterialController extends Controller
                 }
             }
 
-            // Delete related pengembalian and their photos
             foreach ($transaksi->pengembalian as $pengembalian) {
                 if ($pengembalian->foto && is_array($pengembalian->foto)) {
                     foreach ($pengembalian->foto as $foto) {

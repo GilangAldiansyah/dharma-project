@@ -16,6 +16,7 @@ use App\Http\Controllers\MaterialController;
 use App\Http\Controllers\PartMaterialController;
 use App\Http\Controllers\TransaksiMaterialController;
 use App\Http\Controllers\PengembalianMaterialController;
+use App\Http\Controllers\DashboardTransaksiController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -99,9 +100,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('part-materials', PartMaterialController::class);
 
     // Transaksi Material
+    Route::get('/transaksi/export-data', [TransaksiMaterialController::class, 'exportData'])->name('transaksi.export-data');
+    Route::get('/transaksi/dashboard', [DashboardTransaksiController::class, 'index'])->name('transaksi.dashboard');
     Route::get('transaksi/history/view', [TransaksiMaterialController::class, 'history'])->name('transaksi.history');
     Route::post('transaksi/delete-multiple', [TransaksiMaterialController::class, 'deleteMultiple'])->name('transaksi.delete-multiple');
     Route::resource('transaksi', TransaksiMaterialController::class)->except(['edit', 'update']);
+
 
     // Pengembalian Material
     Route::post('/pengembalian', [PengembalianMaterialController::class, 'store'])->name('pengembalian.store');

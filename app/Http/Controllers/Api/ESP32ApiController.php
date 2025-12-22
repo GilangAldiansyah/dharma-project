@@ -21,7 +21,6 @@ class ESP32ApiController extends Controller
                 'error_B' => 'required|boolean',
             ]);
 
-            // Update atau create device
             $device = Esp32Device::updateOrCreate(
                 ['device_id' => $validated['device_id']],
                 [
@@ -52,7 +51,6 @@ class ESP32ApiController extends Controller
                     'logged_at' => now(),
                 ]);
 
-                // Batasi log maksimal 100 entries per device
                 $totalLogs = Esp32Log::where('device_id', $validated['device_id'])->count();
                 if ($totalLogs > 100) {
                     Esp32Log::where('device_id', $validated['device_id'])

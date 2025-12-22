@@ -143,13 +143,18 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Material Monitoring',
         icon: ClipboardList,
-        routes: ['/transaksi', '/materials', '/part-materials', '/settings'],
+        routes: ['/transaksi','transaksi/dashboard','/materials', '/part-materials', '/settings'],
         dashboardRoute: '/transaksi',
         items: [
             {
                 title: 'Transaksi Material',
                 href: '/transaksi',
                 icon: ClipboardList,
+            },
+            {
+            title: 'Dashboard Transaksi',
+            href: '/transaksi/dashboard',
+            icon: BarChart3,
             },
             {
                 title: 'Master Material',

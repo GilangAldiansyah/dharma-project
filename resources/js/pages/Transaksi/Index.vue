@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
-import { Search, Plus, Package, Eye, Filter, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight, Download, Undo2, History, ChevronDown, ChevronUp } from 'lucide-vue-next';
+import { ref, watch, nextTick } from 'vue';
+import { Search, Plus, Package, Eye, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight, Download, Undo2, History, ChevronDown, ChevronUp } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
 interface Material {
@@ -72,6 +72,7 @@ interface Props {
         shift?: number;
         date_from?: string;
         date_to?: string;
+        has_return?: string;
     };
     effectiveDate: string;
     currentShift: number;
@@ -83,7 +84,8 @@ const searchQuery = ref(props.filters.search || '');
 const filterShift = ref(props.filters.shift || '');
 const filterDateFrom = ref(props.filters.date_from || '');
 const filterDateTo = ref(props.filters.date_to || '');
-const showFilters = ref(false);
+const filterHasReturn = ref(props.filters.has_return || '');
+const datePreset = ref('');
 
 const selectedItems = ref<number[]>([]);
 const selectAll = ref(false);
@@ -93,6 +95,7 @@ const showModal = ref(false);
 const showDetailModal = ref(false);
 const showPengembalianModal = ref(false);
 const showPengembalianHistoryModal = ref(false);
+const showImageModal = ref(false);
 const selectedTransaksi = ref<Transaksi | null>(null);
 const pengembalianHistory = ref<PengembalianHistory[]>([]);
 const searchMaterialQuery = ref('');
@@ -101,6 +104,8 @@ const selectedMaterial = ref<Material | null>(null);
 const isSearching = ref(false);
 const previewImages = ref<string[]>([]);
 const pengembalianPreviewImages = ref<string[]>([]);
+const currentImageIndex = ref(0);
+const currentImageList = ref<string[]>([]);
 
 const form = useForm({
     tanggal: new Date().toISOString().split('T')[0],
@@ -118,6 +123,7 @@ const pengembalianForm = useForm({
     keterangan: '',
     foto: [] as File[],
 });
+
 const formatQty = (qty: number) => {
     return parseFloat(qty.toString());
 };
@@ -127,6 +133,23 @@ const formatDate = (dateString: string) => {
         day: '2-digit',
         month: 'short',
         year: 'numeric'
+    });
+};
+
+const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
     });
 };
 
@@ -146,53 +169,170 @@ const toggleExpandRow = (id: number) => {
     }
 };
 
-const exportToExcel = () => {
-    const excelData = props.transaksi.data.map(item => ({
-        'ID Transaksi': item.transaksi_id,
-        'Tanggal': formatDate(item.tanggal),
-        'Shift': `Shift ${item.shift}`,
-        'ID Material': item.material.material_id,
-        'Nama Material': item.material.nama_material,
-        'Tipe Material': item.material.material_type,
-        'Satuan': item.material.satuan,
-        'Quantity': formatQty(item.qty),
-        'Total Pengembalian': item.total_pengembalian || 0,
-        'Tanggal Pengembalian': item.tanggal_pengembalian_terakhir ? formatDate(item.tanggal_pengembalian_terakhir) : '-',
-        'Dipakai': item.sisa_pengembalian || item.qty,
-        'Dibuat Oleh': item.user?.name || '-',
-        'Waktu Input': new Date(item.created_at).toLocaleString('id-ID')
-    }));
+const setDatePreset = (preset: string) => {
+    datePreset.value = preset;
+    const today = new Date();
 
-    const ws = XLSX.utils.json_to_sheet(excelData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Transaksi Material');
+    switch(preset) {
+        case 'today':
+            filterDateFrom.value = today.toISOString().split('T')[0];
+            filterDateTo.value = today.toISOString().split('T')[0];
+            break;
+        case 'yesterday':
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            filterDateFrom.value = yesterday.toISOString().split('T')[0];
+            filterDateTo.value = yesterday.toISOString().split('T')[0];
+            break;
+        case 'last7':
+            const last7 = new Date(today);
+            last7.setDate(last7.getDate() - 7);
+            filterDateFrom.value = last7.toISOString().split('T')[0];
+            filterDateTo.value = today.toISOString().split('T')[0];
+            break;
+        case 'last30':
+            const last30 = new Date(today);
+            last30.setDate(last30.getDate() - 30);
+            filterDateFrom.value = last30.toISOString().split('T')[0];
+            filterDateTo.value = today.toISOString().split('T')[0];
+            break;
+        case 'thisMonth':
+            filterDateFrom.value = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+            filterDateTo.value = today.toISOString().split('T')[0];
+            break;
+    }
+};
+const openImageModal = (images: string[], index: number) => {
+    currentImageList.value = images;
+    currentImageIndex.value = index;
+    showImageModal.value = true;
+};
 
-    const colWidths = [
-        { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 30 },
-        { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 12 },
-        { wch: 18 }, { wch: 15 }, { wch: 20 },
-    ];
-    ws['!cols'] = colWidths;
+const closeImageModal = () => {
+    showImageModal.value = false;
+    currentImageList.value = [];
+    currentImageIndex.value = 0;
+};
 
-    const fileName = `Transaksi_Material_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+const nextImage = () => {
+    if (currentImageIndex.value < currentImageList.value.length - 1) {
+        currentImageIndex.value++;
+    }
+};
+
+const prevImage = () => {
+    if (currentImageIndex.value > 0) {
+        currentImageIndex.value--;
+    }
+};
+
+const exportToExcel = async () => {
+    try {
+        // Show loading indicator
+        const exportButton = document.querySelector('[title="Export ke Excel"]') as HTMLButtonElement;
+        const originalHTML = exportButton?.innerHTML;
+
+        if (exportButton) {
+            exportButton.innerHTML = '<svg class="animate-spin h-4 w-4 text-white inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span class="hidden sm:inline">Mengunduh...</span>';
+            exportButton.disabled = true;
+        }
+
+        // Build query params from current filters
+        const params = new URLSearchParams();
+        if (searchQuery.value) params.append('search', searchQuery.value);
+        if (filterShift.value) params.append('shift', filterShift.value.toString());
+        if (filterDateFrom.value) params.append('date_from', filterDateFrom.value);
+        if (filterDateTo.value) params.append('date_to', filterDateTo.value);
+        if (filterHasReturn.value !== '') params.append('has_return', filterHasReturn.value);
+
+        // Fetch all data from API
+        const response = await fetch(`/transaksi/export-data?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error('Gagal mengambil data');
+        }
+
+        const allData = await response.json();
+
+        // Transform data for Excel
+        const excelData = allData.map((item: Transaksi) => ({
+            'ID Transaksi': item.transaksi_id,
+            'Tanggal': formatDate(item.tanggal),
+            'Shift': `Shift ${item.shift}`,
+            'ID Material': item.material.material_id,
+            'Nama Material': item.material.nama_material,
+            'Tipe Material': item.material.material_type,
+            'Satuan': item.material.satuan,
+            'Quantity': formatQty(item.qty),
+            'Total Pengembalian': item.total_pengembalian || 0,
+            'Tanggal Pengembalian': item.tanggal_pengembalian_terakhir ? formatDate(item.tanggal_pengembalian_terakhir) : '-',
+            'Dipakai': item.sisa_pengembalian || item.qty,
+            'Dibuat Oleh': item.user?.name || '-',
+            'Waktu Input': formatDateTime(item.created_at)
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(excelData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Transaksi Material');
+
+        const colWidths = [
+            { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 30 },
+            { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 18 },
+            { wch: 12 }, { wch: 15 }, { wch: 22 },
+        ];
+        ws['!cols'] = colWidths;
+
+        const fileName = `Transaksi_Material_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+
+        if (exportButton && originalHTML) {
+            exportButton.innerHTML = originalHTML;
+            exportButton.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error exporting data:', error);
+        alert('Gagal mengexport data. Silakan coba lagi.');
+
+        const exportButton = document.querySelector('[title="Export ke Excel"]') as HTMLButtonElement;
+        if (exportButton) {
+            exportButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span class="hidden sm:inline">Export</span>';
+            exportButton.disabled = false;
+        }
+    }
 };
 
 const search = () => {
-    router.get('/transaksi', {
-        search: searchQuery.value,
-        shift: filterShift.value,
-        date_from: filterDateFrom.value,
-        date_to: filterDateTo.value,
-    }, { preserveState: true, preserveScroll: true });
+    const params: Record<string, any> = {};
+
+    if (searchQuery.value) params.search = searchQuery.value;
+    if (filterShift.value) params.shift = filterShift.value;
+    if (filterDateFrom.value) params.date_from = filterDateFrom.value;
+    if (filterDateTo.value) params.date_to = filterDateTo.value;
+    if (filterHasReturn.value !== '') params.has_return = filterHasReturn.value;
+
+    router.get('/transaksi', params, {
+        preserveState: true,
+        preserveScroll: true
+    });
 };
 
 const resetFilters = () => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
+
     searchQuery.value = '';
     filterShift.value = '';
     filterDateFrom.value = '';
     filterDateTo.value = '';
-    router.get('/transaksi');
+    filterHasReturn.value = '';
+    datePreset.value = '';
+
+    nextTick(() => {
+        router.get('/transaksi', {}, {
+            preserveState: false,
+            preserveScroll: false
+        });
+    });
 };
 
 const goToPage = (page: number) => {
@@ -201,6 +341,7 @@ const goToPage = (page: number) => {
         shift: filterShift.value,
         date_from: filterDateFrom.value,
         date_to: filterDateTo.value,
+        has_return: filterHasReturn.value,
     }, { preserveState: true, preserveScroll: true });
 };
 
@@ -278,7 +419,6 @@ const deleteMultiple = () => {
         });
     }
 };
-
 watch(() => props.transaksi.data, () => {
     selectAll.value = selectedItems.value.length === props.transaksi.data.length && props.transaksi.data.length > 0;
 }, { deep: true });
@@ -312,7 +452,7 @@ const closeDetailModal = () => {
     showDetailModal.value = false;
     selectedTransaksi.value = null;
 };
-// Pengembalian functions
+
 const openPengembalianModal = (transaksi: Transaksi) => {
     selectedTransaksi.value = transaksi;
     pengembalianForm.reset();
@@ -445,6 +585,17 @@ const submit = () => {
     });
 };
 
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch([searchQuery, filterShift, filterDateFrom, filterDateTo, filterHasReturn], () => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
+    searchTimer = setTimeout(() => {
+        search();
+    }, 300);
+}, { deep: true });
+
 watch(searchMaterialQuery, () => {
     if (searchMaterialQuery.value.length >= 2) {
         searchMaterial();
@@ -452,6 +603,7 @@ watch(searchMaterialQuery, () => {
         searchResults.value = [];
     }
 });
+
 </script>
 <template>
     <Head title="Transaksi Material" />
@@ -459,7 +611,6 @@ watch(searchMaterialQuery, () => {
         { title: 'Transaksi Material', href: '/transaksi' }
     ]">
         <div class="p-4 space-y-4">
-            <!-- Header -->
             <div class="flex justify-between items-center">
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Package class="w-6 h-6 text-blue-600" />
@@ -494,7 +645,6 @@ watch(searchMaterialQuery, () => {
                 </div>
             </div>
 
-            <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Total Transaksi</div>
@@ -530,37 +680,21 @@ watch(searchMaterialQuery, () => {
             </div>
 
             <!-- Search & Filter -->
-            <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 space-y-3">
-                <div class="flex gap-2">
-                    <input
-                        v-model="searchQuery"
-                        @keyup.enter="search"
-                        type="text"
-                        placeholder="Cari transaksi atau material..."
-                        class="flex-1 rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                        @click="showFilters = !showFilters"
-                        :class="[
-                            'px-4 py-2 rounded-md flex items-center gap-2 transition-colors',
-                            showFilters ? 'bg-blue-600 text-white' : 'bg-sidebar hover:bg-sidebar-accent'
-                        ]"
-                    >
-                        <Filter class="w-4 h-4" />
-                        Filter
-                    </button>
-                    <button
-                        @click="search"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2 transition-colors"
-                    >
-                        <Search class="w-4 h-4" />
-                        Cari
-                    </button>
-                </div>
+            <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    <div class="md:col-span-4">
+                        <div class="relative">
+                            <input
+                                v-model="searchQuery"
+                                type="text"
+                                placeholder="Cari transaksi atau material..."
+                                class="w-full rounded-md border border-sidebar-border pl-10 pr-3 py-2 dark:bg-sidebar focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            />
+                            <Search class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                        </div>
+                    </div>
 
-                <div v-if="showFilters" class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t border-sidebar-border">
-                    <div>
-                        <label class="block text-sm mb-1 font-medium">Shift</label>
+                    <div class="md:col-span-2">
                         <select
                             v-model="filterShift"
                             class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar text-sm focus:ring-2 focus:ring-blue-500"
@@ -571,36 +705,91 @@ watch(searchMaterialQuery, () => {
                             <option :value="3">Shift 3</option>
                         </select>
                     </div>
-                    <div>
-                        <label class="block text-sm mb-1 font-medium">Dari Tanggal</label>
+
+                    <div class="md:col-span-2">
                         <input
                             v-model="filterDateFrom"
                             type="date"
                             class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar text-sm focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
-                    <div>
-                        <label class="block text-sm mb-1 font-medium">Sampai Tanggal</label>
+
+                    <div class="md:col-span-2">
                         <input
                             v-model="filterDateTo"
                             type="date"
                             class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar text-sm focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
+
+                    <div class="md:col-span-2">
+                        <select
+                            v-model="filterHasReturn"
+                            class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar text-sm focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Semua Status</option>
+                            <option value="1">Ada Pengembalian</option>
+                            <option value="0">Tidak ada Pengembalian</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div v-if="showFilters" class="flex gap-2">
+                <div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-sidebar-border">
+                    <span class="text-xs text-gray-500 dark:text-gray-400 self-center mr-2">Quick Filter:</span>
                     <button
-                        @click="search"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm transition-colors"
+                        @click="setDatePreset('today')"
+                        :class="[
+                            'px-2.5 py-1 text-xs rounded-md transition-colors',
+                            datePreset === 'today' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ]"
                     >
-                        Terapkan Filter
+                        Hari Ini
                     </button>
                     <button
-                        @click="resetFilters"
-                        class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm transition-colors"
+                        @click="setDatePreset('yesterday')"
+                        :class="[
+                            'px-2.5 py-1 text-xs rounded-md transition-colors',
+                            datePreset === 'yesterday' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ]"
                     >
-                        Reset Filter
+                        Kemarin
+                    </button>
+                    <button
+                        @click="setDatePreset('last7')"
+                        :class="[
+                            'px-2.5 py-1 text-xs rounded-md transition-colors',
+                            datePreset === 'last7' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ]"
+                    >
+                        7 Hari
+                    </button>
+                    <button
+                        @click="setDatePreset('last30')"
+                        :class="[
+                            'px-2.5 py-1 text-xs rounded-md transition-colors',
+                            datePreset === 'last30' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ]"
+                    >
+                        30 Hari
+                    </button>
+                    <button
+                        @click="setDatePreset('thisMonth')"
+                        :class="[
+                            'px-2.5 py-1 text-xs rounded-md transition-colors',
+                            datePreset === 'thisMonth' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-sidebar-accent hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ]"
+                    >
+                        Bulan Ini
+                    </button>
+
+                    <!-- Reset Button -->
+                    <button
+                        v-if="searchQuery || filterShift || filterDateFrom || filterDateTo || filterHasReturn"
+                        @click="resetFilters"
+                        class="ml-auto px-3 py-1 text-xs bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center gap-1"
+                    >
+                        <X class="w-3 h-3" />
+                        Reset
                     </button>
                 </div>
             </div>
@@ -657,7 +846,12 @@ watch(searchMaterialQuery, () => {
                                             </span>
                                         </div>
                                     </td>
-                                    <td class="px-4 py-3 text-sm">{{ formatDate(item.tanggal) }}</td>
+                                  <td class="px-4 py-3 text-sm">
+                                        <div class="font-medium">{{ formatDate(item.tanggal) }}</div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">
+                                            {{ formatTime(item.created_at) }}
+                                        </div>
+                                    </td>
                                     <td class="px-4 py-3">
                                         <span :class="[
                                             'px-2 py-1 rounded-full text-xs font-medium',
@@ -672,13 +866,13 @@ watch(searchMaterialQuery, () => {
                                         <div class="font-medium">{{ item.material.nama_material }}</div>
                                         <div class="text-gray-500 text-xs">{{ item.material.material_id }}</div>
                                     </td>
-                                   <td class="px-4 py-3 text-sm">
-                                    <div class="flex items-center gap-2">
-                                        <div class="flex-1">
-                                            <div class="font-medium">
-                                                {{ formatQty(item.total_pengembalian && item.total_pengembalian > 0 ? getSisaQty(item) : item.qty) }} {{ item.material.satuan }}
+                                    <td class="px-4 py-3 text-sm">
+                                        <div class="flex items-center gap-2">
+                                            <div class="flex-1">
+                                                <div class="font-medium">
+                                                    {{ formatQty(item.total_pengembalian && item.total_pengembalian > 0 ? getSisaQty(item) : item.qty) }} {{ item.material.satuan }}
+                                                </div>
                                             </div>
-                                        </div>
                                             <button
                                                 v-if="!item.total_pengembalian || item.total_pengembalian === 0"
                                                 @click="openPengembalianModal(item)"
@@ -700,7 +894,7 @@ watch(searchMaterialQuery, () => {
                                         </div>
                                     </td>
                                     <td class="px-4 py-3 text-sm">
-                                        <span v-if="item.foto && item.foto.length > 0" class="text-blue-600 flex items-center gap-1">
+                                        <span v-if="item.foto && item.foto.length > 0" class="text-blue-600 flex items-center gap-1 cursor-pointer hover:text-blue-700" @click="openImageModal(item.foto.map(f => `/storage/${f}`), 0)">
                                             <Camera class="w-3 h-3" />
                                             {{ item.foto.length }}
                                         </span>
@@ -728,49 +922,47 @@ watch(searchMaterialQuery, () => {
 
                                 <!-- Expanded Row - Detail Pengembalian -->
                                 <tr v-if="expandedRows.includes(item.id) && item.total_pengembalian && item.total_pengembalian > 0">
-
                                     <td colspan="8" class="px-4 py-3 bg-orange-50 dark:bg-orange-900/10">
-
                                         <div class="space-y-3">
                                             <div class="flex items-center justify-between">
-    <div class="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
-        <Undo2 class="w-4 h-4 text-orange-600" />
-        Detail Pengembalian
-    </div>
-    <div class="flex items-center gap-3">
-        <div class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-sidebar px-3 py-1.5 rounded-md border border-sidebar-border">
-            <Calendar class="w-3.5 h-3.5 text-purple-600" />
-            <span class="font-medium">{{ item.tanggal_pengembalian_terakhir ? formatDate(item.tanggal_pengembalian_terakhir) : '-' }}</span>
-        </div>
-        <button
-            @click="viewPengembalianHistory(item)"
-            class="text-xs px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
-        >
-            <History class="w-3 h-3" />
-            Lihat Detail
-        </button>
-    </div>
+                                                <div class="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                                    <Undo2 class="w-4 h-4 text-orange-600" />
+                                                    Detail Pengembalian
                                                 </div>
-                                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
-                                                        <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Qty Pengambilan</div>
-                                                        <div class="text-lg font-bold text-blue-600">
-                                                            {{ formatQty(item.qty) }} {{ item.material.satuan }}
-                                                        </div>
+                                                <div class="flex items-center gap-3">
+                                                    <div class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-sidebar px-3 py-1.5 rounded-md border border-sidebar-border">
+                                                        <Calendar class="w-3.5 h-3.5 text-purple-600" />
+                                                        <span class="font-medium">{{ item.tanggal_pengembalian_terakhir ? formatDate(item.tanggal_pengembalian_terakhir) : '-' }}</span>
                                                     </div>
-                                                    <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
-                                                        <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Dikembalikan</div>
-                                                        <div class="text-lg font-bold text-orange-600">
-                                                            {{ formatQty(item.total_pengembalian) }} {{ item.material.satuan }}
-                                                        </div>
-                                                    </div>
-                                                    <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
-                                                        <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Qty Terpakai</div>
-                                                        <div class="text-lg font-bold text-green-600">
-                                                            {{ formatQty(getSisaQty(item)) }} {{ item.material.satuan }}
-                                                        </div>
+                                                    <button
+                                                        @click="viewPengembalianHistory(item)"
+                                                        class="text-xs px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                                                    >
+                                                        <History class="w-3 h-3" />
+                                                        Lihat Detail
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Qty Pengambilan</div>
+                                                    <div class="text-lg font-bold text-blue-600">
+                                                        {{ formatQty(item.qty) }} {{ item.material.satuan }}
                                                     </div>
                                                 </div>
+                                                <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Dikembalikan</div>
+                                                    <div class="text-lg font-bold text-orange-600">
+                                                        {{ formatQty(item.total_pengembalian) }} {{ item.material.satuan }}
+                                                    </div>
+                                                </div>
+                                                <div class="bg-white dark:bg-sidebar rounded-lg p-3 border border-sidebar-border">
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Qty Terpakai</div>
+                                                    <div class="text-lg font-bold text-green-600">
+                                                        {{ formatQty(getSisaQty(item)) }} {{ item.material.satuan }}
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <div class="flex gap-2 pt-2">
                                                 <button
                                                     @click="openPengembalianModal(item)"
@@ -796,7 +988,6 @@ watch(searchMaterialQuery, () => {
                     <p class="text-sm mt-1">Mulai dengan menambahkan transaksi pengambilan material</p>
                 </div>
             </div>
-
             <!-- Pagination -->
             <div v-if="transaksi.last_page > 1" class="flex items-center justify-between bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                 <div class="text-sm text-gray-600 dark:text-gray-400">
@@ -842,9 +1033,10 @@ watch(searchMaterialQuery, () => {
                 </div>
             </div>
         </div>
-        <!-- Modal Detail Transaksi -->
-        <div v-if="showDetailModal && selectedTransaksi" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+
+        <!-- Detail Modal -->
+        <div v-if="showDetailModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
                     <h2 class="text-xl font-bold">Detail Transaksi</h2>
                     <button @click="closeDetailModal" class="p-1 hover:bg-sidebar-accent rounded transition-colors">
@@ -927,25 +1119,28 @@ watch(searchMaterialQuery, () => {
                         </div>
                     </div>
 
+                    <div class="border-t border-sidebar-border pt-6">
+                        <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Waktu Input</div>
+                        <div class="font-medium">{{ formatDateTime(selectedTransaksi.created_at) }}</div>
+                    </div>
+
                     <div v-if="selectedTransaksi.foto && selectedTransaksi.foto.length > 0" class="border-t border-sidebar-border pt-6">
                         <h3 class="font-semibold mb-4 flex items-center gap-2">
                             <Camera class="w-5 h-5" />
                             Foto ({{ selectedTransaksi.foto.length }})
                         </h3>
                         <div class="grid grid-cols-3 gap-4">
-                            <a
+                            <div
                                 v-for="(foto, index) in selectedTransaksi.foto"
                                 :key="index"
-                                :href="`/storage/${foto}`"
-                                target="_blank"
-                                class="relative aspect-square rounded-lg overflow-hidden hover:opacity-80 transition-opacity"
+                                @click="openImageModal(selectedTransaksi.foto.map(f => `/storage/${f}`), index)"
+                                class="relative aspect-square rounded-lg overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
                             >
                                 <img
                                     :src="`/storage/${foto}`"
                                     :alt="`Foto ${index + 1}`"
                                     class="w-full h-full object-cover"
                                 />
-                            </a>
                             </div>
                         </div>
                     </div>
@@ -960,10 +1155,10 @@ watch(searchMaterialQuery, () => {
                     </button>
                 </div>
             </div>
-
-        <!-- Modal Input Transaksi -->
-        <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-sidebar rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        </div>
+        <!-- Input Pengambilan Modal -->
+        <div v-if="showModal" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-sidebar rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
                     <h2 class="text-xl font-bold">Input Pengambilan Material</h2>
                     <button @click="closeModal" class="p-1 hover:bg-sidebar-accent rounded transition-colors">
@@ -1125,9 +1320,9 @@ watch(searchMaterialQuery, () => {
             </div>
         </div>
 
-        <!-- Modal Input Pengembalian -->
-        <div v-if="showPengembalianModal && selectedTransaksi" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-sidebar rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <!-- Pengembalian Modal -->
+        <div v-if="showPengembalianModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-sidebar rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
                     <h2 class="text-xl font-bold flex items-center gap-2">
                         <Undo2 class="w-5 h-5 text-orange-600" />
@@ -1268,9 +1463,9 @@ watch(searchMaterialQuery, () => {
             </div>
         </div>
 
-        <!-- Modal Riwayat Pengembalian -->
-        <div v-if="showPengembalianHistoryModal && selectedTransaksi" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <!-- Pengembalian History Modal -->
+        <div v-if="showPengembalianHistoryModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
                     <h2 class="text-xl font-bold flex items-center gap-2">
                         <History class="w-5 h-5 text-purple-600" />
@@ -1331,19 +1526,18 @@ watch(searchMaterialQuery, () => {
                             </div>
 
                             <div v-if="pengembalian.foto && pengembalian.foto.length > 0" class="grid grid-cols-5 gap-2">
-                                <a
+                                <div
                                     v-for="(foto, index) in pengembalian.foto"
                                     :key="index"
-                                    :href="`/storage/${foto}`"
-                                    target="_blank"
-                                    class="relative aspect-square rounded-lg overflow-hidden hover:opacity-80 transition-opacity"
+                                    @click="openImageModal(pengembalian.foto.map(f => `/storage/${f}`), index)"
+                                    class="relative aspect-square rounded-lg overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
                                 >
                                     <img
                                         :src="`/storage/${foto}`"
                                         :alt="`Foto ${index + 1}`"
                                         class="w-full h-full object-cover"
                                     />
-                                </a>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1356,6 +1550,46 @@ watch(searchMaterialQuery, () => {
                     >
                         Tutup
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Modal -->
+        <div v-if="showImageModal" class="fixed inset-0 backdrop-blur-sm bg-black/80 flex items-center justify-center z-50 p-4">
+            <div class="relative w-full max-w-6xl h-full max-h-[90vh] flex items-center justify-center">
+                <button
+                    @click="closeImageModal"
+                    class="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <X class="w-6 h-6" />
+                </button>
+
+                <button
+                    v-if="currentImageIndex > 0"
+                    @click="prevImage"
+                    class="absolute left-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <ChevronLeft class="w-6 h-6" />
+                </button>
+
+                <div class="flex items-center justify-center w-full h-full">
+                    <img
+                        :src="currentImageList[currentImageIndex]"
+                        class="max-w-full max-h-full object-contain rounded-lg"
+                        :alt="`Foto ${currentImageIndex + 1}`"
+                    />
+                </div>
+
+                <button
+                    v-if="currentImageIndex < currentImageList.length - 1"
+                    @click="nextImage"
+                    class="absolute right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <ChevronRight class="w-6 h-6"/>
+                </button>
+
+                <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-white/10 text-white rounded-full text-sm">
+                    {{ currentImageIndex + 1 }} / {{ currentImageList.length }}
                 </div>
             </div>
         </div>
