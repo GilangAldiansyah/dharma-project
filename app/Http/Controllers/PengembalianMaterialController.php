@@ -23,13 +23,6 @@ class PengembalianMaterialController extends Controller
             'foto.*' => 'nullable|image|max:5120',
         ]);
 
-          Log::info('Debug Tanggal Pengembalian', [
-                'now' => now()->toDateTimeString(),
-                'tanggal_input' => $validated['tanggal_pengembalian'],
-                'effective_date' => DateHelper::getEffectiveDate()->toDateString(),
-                'is_valid' => DateHelper::isValidPengembalianDate($validated['tanggal_pengembalian']),
-            ]);
-
         if (!DateHelper::isValidPengembalianDate($validated['tanggal_pengembalian'])) {
             return back()->withErrors([
                 'tanggal_pengembalian' => 'Tanggal pengembalian tidak valid. Tidak boleh lebih dari tanggal efektif saat ini.'

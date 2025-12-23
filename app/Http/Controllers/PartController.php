@@ -35,11 +35,19 @@ class PartController extends Controller
             });
         }
 
+        // Get per_page from request, default to 15
+        $perPage = $request->input('per_page', 15);
+
+        // Validate per_page value
+        if (!in_array($perPage, [15, 25, 50, 100])) {
+            $perPage = 15;
+        }
+
         $parts = $query
             ->with('supplier:id,supplier_name,supplier_code')
             ->select('parts.*')
             ->orderBy('parts.id', 'desc')
-            ->paginate(10)
+            ->paginate($perPage)
             ->withQueryString();
 
         $suppliers = Supplier::select('id', 'supplier_name', 'supplier_code')
@@ -62,6 +70,7 @@ class PartController extends Controller
                 'search' => $request->search,
                 'supplier' => $request->supplier ? (int)$request->supplier : null,
                 'type_line' => $request->type_line,
+                'per_page' => $perPage,
             ]
         ]);
     }

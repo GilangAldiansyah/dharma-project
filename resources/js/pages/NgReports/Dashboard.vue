@@ -5,8 +5,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
     BarChart3, Package, Building2, Calendar, RefreshCw, Table,
     TrendingUp, AlertCircle, CheckCircle, Clock, Download,
-    Filter, X, ChevronRight, Eye, FileText
+    Filter, X, ChevronRight, Eye, FileText, PieChart
 } from 'lucide-vue-next';
+import * as XLSX from 'xlsx';
 
 interface Props {
     ngByPart: Array<{
@@ -16,6 +17,11 @@ interface Props {
     }>;
     ngBySupplier: Array<{
         supplier_name: string;
+        total: number;
+    }>;
+    ngByType: Array<{
+        type: string;
+        label: string;
         total: number;
     }>;
     summary: {
@@ -58,10 +64,12 @@ const endDate = ref(props.filters.end_date);
 const viewMode = ref<'bar' | 'table'>('bar');
 const showFilterModal = ref(false);
 const isLoading = ref(false);
+const isExporting = ref(false);
 
 const hoveredTrendBar = ref<number | null>(null);
 const hoveredPartBar = ref<number | null>(null);
 const hoveredSupplierBar = ref<number | null>(null);
+const hoveredPieSlice = ref<number | null>(null);
 const tooltipPosition = ref({ top: '0px', left: '0px' });
 
 const updateTooltipPosition = (event: MouseEvent) => {
@@ -77,6 +85,59 @@ const clearHover = () => {
     hoveredTrendBar.value = null;
     hoveredPartBar.value = null;
     hoveredSupplierBar.value = null;
+    hoveredPieSlice.value = null;
+};
+
+// Pie Chart calculations
+const ngTypeChartData = computed(() => {
+    if (!props.ngByType || props.ngByType.length === 0) return [];
+
+    const total = props.ngByType.reduce((sum, item) => sum + item.total, 0);
+    let currentAngle = 0;
+
+    return props.ngByType.map(item => {
+        const percentage = (item.total / total) * 100;
+        const angle = (item.total / total) * 360;
+        const startAngle = currentAngle;
+        const endAngle = currentAngle + angle;
+        currentAngle = endAngle;
+
+        return {
+            type: item.type,
+            label: item.label,
+            total: item.total,
+            percentage,
+            startAngle,
+            endAngle,
+        };
+    });
+});
+
+const createPieSlicePath = (startAngle: number, endAngle: number): string => {
+    const cx = 120;
+    const cy = 120;
+    const radius = 90;
+
+    const startRad = (startAngle - 90) * (Math.PI / 180);
+    const endRad = (endAngle - 90) * (Math.PI / 180);
+
+    const x1 = cx + radius * Math.cos(startRad);
+    const y1 = cy + radius * Math.sin(startRad);
+    const x2 = cx + radius * Math.cos(endRad);
+    const y2 = cy + radius * Math.sin(endRad);
+
+    const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
+
+    return `M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+};
+
+const getNgTypeColor = (type: string): string => {
+    const colors: Record<string, string> = {
+        'fungsi': '#ef4444',
+        'dimensi': '#f59e0b',
+        'tampilan': '#3b82f6',
+    };
+    return colors[type] || '#6b7280';
 };
 
 const setQuickFilter = (type: 'today' | 'week' | 'month' | 'year') => {
@@ -131,14 +192,50 @@ const resetFilter = () => {
 const refreshData = () => {
     isLoading.value = true;
     router.reload({
-        only: ['ngByPart', 'ngBySupplier', 'summary', 'dailyTrend', 'statusDistribution', 'criticalParts', 'criticalSuppliers'],
+        only: ['ngByPart', 'ngBySupplier', 'ngByType', 'summary', 'dailyTrend', 'statusDistribution', 'criticalParts', 'criticalSuppliers'],
         onFinish: () => {
             isLoading.value = false;
         }
     });
 };
 
-// FUNGSI BARU UNTUK MENGHITUNG TINGGI BAR YANG BENAR
+const exportData = async () => {
+    try {
+        isExporting.value = true;
+
+        // Fetch data dari backend
+        const response = await fetch(`/ng-reports/dashboard/export?start_date=${startDate.value}&end_date=${endDate.value}`);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (!result.data || !Array.isArray(result.data)) {
+            throw new Error('Data tidak valid dari server');
+        }
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+
+        // Create worksheet from data
+        const ws = XLSX.utils.json_to_sheet(result.data);
+
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, 'NG Reports');
+
+        // Generate and download file
+        XLSX.writeFile(wb, result.filename);
+
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Gagal mengekspor data. Silakan coba lagi.');
+    } finally {
+        isExporting.value = false;
+    }
+};
+
 const maxPartValue = computed(() =>
     Math.max(...props.ngByPart.map(item => item.total), 1)
 );
@@ -213,10 +310,6 @@ const dateRangeText = computed(() => {
     return `${formatDate(startDate.value)} - ${formatDate(endDate.value)}`;
 });
 
-const exportData = () => {
-    alert('Fitur export akan segera tersedia');
-};
-
 onMounted(() => {
     document.addEventListener('mousemove', updateTooltipPosition);
 });
@@ -231,6 +324,7 @@ onUnmounted(() => {
         { title: 'Dashboard NG', href: '/ng-reports/dashboard' }
     ]">
         <div class="p-4 sm:p-6 space-y-6">
+            <!-- Header -->
             <div class="bg-gradient-to-r from-red-600 to-orange-600 rounded-xl shadow-lg p-6 text-white">
                 <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                     <div>
@@ -265,15 +359,17 @@ onUnmounted(() => {
                         </button>
                         <button
                             @click="exportData"
-                            class="px-4 py-2.5 bg-white text-red-600 hover:bg-red-50 rounded-lg transition-all flex items-center gap-2 text-sm font-semibold shadow-lg"
+                            :disabled="isExporting"
+                            class="px-4 py-2.5 bg-white text-red-600 hover:bg-red-50 rounded-lg transition-all flex items-center gap-2 text-sm font-semibold shadow-lg disabled:opacity-50"
                         >
-                            <Download class="w-4 h-4" />
-                            Export
+                            <Download class="w-4 h-4" :class="{ 'animate-bounce': isExporting }" />
+                            {{ isExporting ? 'Exporting...' : 'Export Excel' }}
                         </button>
                     </div>
                 </div>
             </div>
 
+            <!-- Summary Cards -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6 hover:shadow-lg transition-shadow">
                     <div class="flex items-start justify-between">
@@ -298,7 +394,6 @@ onUnmounted(() => {
                         </div>
                     </div>
                 </div>
-
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6 hover:shadow-lg transition-shadow">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
@@ -340,43 +435,123 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
-                <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                    <CheckCircle class="w-5 h-5 text-green-600" />
-                    Distribusi Status
-                </h3>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div
-                        v-for="status in statusDistribution"
-                        :key="status.status"
-                        class="relative overflow-hidden rounded-lg border-2"
-                        :class="[
-                            getStatusBgColor(status.color),
-                            `border-${status.color}-300 dark:border-${status.color}-700`
-                        ]"
-                    >
-                        <div class="p-4">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm font-semibold" :class="getStatusTextColor(status.color)">
-                                    {{ status.status }}
-                                </span>
-                                <div class="w-3 h-3 rounded-full" :class="getStatusColor(status.color)"></div>
-                            </div>
-                            <p class="text-2xl font-bold" :class="getStatusTextColor(status.color)">
-                                {{ status.count }}
-                            </p>
-                            <p class="text-xs mt-1" :class="getStatusTextColor(status.color)">
-                                {{ summary.total_ng > 0 ? ((status.count / summary.total_ng) * 100).toFixed(1) : 0 }}% dari total
-                            </p>
-                        </div>
+            <!-- Status Distribution & NG Type Pie Chart -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Status Distribution - 2 columns -->
+                <div class="lg:col-span-2 bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
+                    <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                        <CheckCircle class="w-5 h-5 text-green-600" />
+                        Distribusi Status
+                    </h3>
+                    <div class="grid grid-cols-1 gap-3">
                         <div
-                            class="absolute bottom-0 left-0 h-1 transition-all duration-500"
-                            :class="getStatusColor(status.color)"
-                            :style="{ width: summary.total_ng > 0 ? `${(status.count / summary.total_ng) * 100}%` : '0%' }"
-                        ></div>
+                            v-for="status in statusDistribution"
+                            :key="status.status"
+                            class="relative overflow-hidden rounded-lg border-2"
+                            :class="[
+                                getStatusBgColor(status.color),
+                                `border-${status.color}-300 dark:border-${status.color}-700`
+                            ]"
+                        >
+                            <div class="p-4">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-3 h-3 rounded-full flex-shrink-0" :class="getStatusColor(status.color)"></div>
+                                        <div>
+                                            <span class="text-sm font-semibold block" :class="getStatusTextColor(status.color)">
+                                                {{ status.status }}
+                                            </span>
+                                            <span class="text-xs" :class="getStatusTextColor(status.color)">
+                                                {{ summary.total_ng > 0 ? ((status.count / summary.total_ng) * 100).toFixed(1) : 0 }}% dari total
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-3xl font-bold" :class="getStatusTextColor(status.color)">
+                                            {{ status.count }}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div
+                                class="absolute bottom-0 left-0 h-1 transition-all duration-500"
+                                :class="getStatusColor(status.color)"
+                                :style="{ width: summary.total_ng > 0 ? `${(status.count / summary.total_ng) * 100}%` : '0%' }"
+                            ></div>
+                        </div>
                     </div>
                 </div>
+
+                <!-- NG Type Pie Chart - 1 column -->
+                <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
+                    <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                        <PieChart class="w-5 h-5 text-purple-600" />
+                        Distribusi Jenis NG
+                    </h3>
+                    <div v-if="ngTypeChartData.length > 0" class="flex flex-col items-center gap-2">
+                        <svg width="220" height="220" viewBox="0 0 240 240" class="flex-shrink-0">
+                            <g v-for="(data, index) in ngTypeChartData" :key="index">
+                                <path
+                                    :d="createPieSlicePath(data.startAngle, data.endAngle)"
+                                    :fill="getNgTypeColor(data.type)"
+                                    class="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                                    :class="{ 'opacity-90': hoveredPieSlice === index }"
+                                    @mouseenter="hoveredPieSlice = index"
+                                    @mouseleave="clearHover"
+                                />
+                            </g>
+                            <circle cx="120" cy="120" r="55" fill="white" class="dark:fill-gray-800" />
+                            <text x="120" y="115" text-anchor="middle" class="fill-gray-700 dark:fill-gray-300 text-sm font-semibold">Total</text>
+                            <text x="120" y="135" text-anchor="middle" class="fill-gray-900 dark:fill-gray-100 text-xl font-bold">
+                                {{ summary.total_ng }}
+                            </text>
+                        </svg>
+                        <div class="w-full">
+                            <div v-for="(data, index) in ngTypeChartData" :key="data.type"
+                                 class="flex items-center justify-between text-sm rounded-lg hover:bg-gray-50 dark:hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                 @mouseenter="hoveredPieSlice = index"
+                                 @mouseleave="clearHover">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: getNgTypeColor(data.type) }"></div>
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ data.label }}</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="font-bold text-gray-900 dark:text-gray-100">{{ data.total }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-center py-12 text-gray-500">
+                        <PieChart class="w-12 h-12 mx-auto mb-2 opacity-50" />
+                        <p class="text-sm">Tidak ada data jenis NG</p>
+                    </div>
+
+                    <!-- Tooltip for Pie Chart -->
+                    <Teleport to="body">
+                        <div
+                            v-if="hoveredPieSlice !== null"
+                            class="fixed pointer-events-none z-[9999] -translate-x-1/2"
+                            :style="tooltipPosition"
+                        >
+                            <div class="bg-gray-900 text-white text-xs rounded-lg shadow-2xl p-3 min-w-[140px]">
+                                <div class="font-bold text-center mb-1">{{ ngTypeChartData[hoveredPieSlice].label }}</div>
+                                <div class="text-center pt-1 border-t border-gray-700">
+                                    <span class="font-bold text-base" :style="{ color: getNgTypeColor(ngTypeChartData[hoveredPieSlice].type) }">
+                                        {{ ngTypeChartData[hoveredPieSlice].total }} NG
+                                    </span>
+                                    <div class="text-gray-400 text-[10px] mt-1">
+                                        {{ ngTypeChartData[hoveredPieSlice].percentage.toFixed(1) }}% dari total
+                                    </div>
+                                </div>
+                                <div class="absolute top-full left-1/2 -translate-x-1/2">
+                                    <div class="border-4 border-transparent border-t-gray-900"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </Teleport>
+                </div>
             </div>
+            <!-- Top Parts & Suppliers -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
                     <div class="flex items-center justify-between mb-4">
@@ -384,13 +559,13 @@ onUnmounted(() => {
                             <Package class="w-5 h-5 text-red-600" />
                             Top 5 Part Bermasalah
                         </h3>
-                      <button
-                        @click="scrollToTableSection"
-                        class="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                    >
-                        Lihat Semua
-                        <ChevronRight class="w-3 h-3" />
-                    </button>
+                        <button
+                            @click="scrollToTableSection"
+                            class="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                        >
+                            Lihat Semua
+                            <ChevronRight class="w-3 h-3" />
+                        </button>
                     </div>
                     <div class="space-y-3">
                         <div
@@ -468,7 +643,7 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- CHART SECTION - REDESIGNED COMPLETELY -->
+            <!-- Charts Section -->
             <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border overflow-hidden">
                 <div class="flex border-b border-sidebar-border">
                     <button
@@ -497,9 +672,9 @@ onUnmounted(() => {
                     </button>
                 </div>
 
-                <!-- BAR CHART VIEW - COMPLETELY REDESIGNED -->
+                <!-- Bar Charts View -->
                 <div v-if="viewMode === 'bar'" class="p-6 space-y-8">
-                    <!-- Daily Trend Chart -->
+                    <!-- Daily Trend -->
                     <div v-if="dailyTrend.length > 0" class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -511,7 +686,6 @@ onUnmounted(() => {
                             </span>
                         </div>
 
-                        <!-- SIMPLE BAR CHART -->
                         <div class="bg-white dark:bg-sidebar rounded-xl p-6 shadow-sm">
                             <div class="space-y-2">
                                 <div v-for="(item, index) in dailyTrend" :key="index"
@@ -617,7 +791,6 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
-
                     <!-- NG by Supplier Chart -->
                     <div class="bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/10 dark:to-amber-900/10 rounded-xl p-6 border border-orange-200 dark:border-orange-800">
                         <div class="flex items-center justify-between mb-6">
@@ -681,7 +854,7 @@ onUnmounted(() => {
                         </Teleport>
                     </div>
                 </div>
-                <!-- TABLE VIEW -->
+                <!-- Table View -->
                 <div v-if="viewMode === 'table'" id="table-section" class="p-6 space-y-6">
                     <div v-if="dailyTrend.length > 0">
                         <div class="flex items-center justify-between mb-4">
@@ -847,7 +1020,7 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- FOOTER -->
+            <!-- Footer -->
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm">
                 <div class="text-gray-600 dark:text-gray-400">
                     <span class="font-medium">Terakhir diperbarui:</span>
@@ -859,7 +1032,6 @@ onUnmounted(() => {
                         minute: '2-digit'
                     }) }}</span>
                 </div>
-
                 <a
                     href="/ng-reports"
                     class="px-6 py-3 bg-gradient-to-r from-red-600 to-orange-600 text-white rounded-lg hover:from-red-700 hover:to-orange-700 flex items-center gap-2 font-semibold shadow-lg hover:shadow-xl transition-all"
@@ -870,8 +1042,7 @@ onUnmounted(() => {
                 </a>
             </div>
         </div>
-
-        <!-- FILTER MODAL -->
+        <!-- Filter Modal -->
         <div v-if="showFilterModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-xl max-w-lg w-full p-6 shadow-2xl">
                 <div class="flex items-center justify-between mb-6">
@@ -888,7 +1059,6 @@ onUnmounted(() => {
                 </div>
 
                 <div class="space-y-6">
-                    <!-- Quick Filters -->
                     <div>
                         <label class="block text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">
                             Filter Cepat

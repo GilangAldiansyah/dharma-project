@@ -13,58 +13,93 @@ Use App\Helpers\DateHelper;
 
 class TransaksiMaterialController extends Controller
 {
- public function index(Request $request)
-{
-    $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
-        ->when($request->filled('search'), function ($query) use ($request) {
-            $search = $request->search;
-            $query->where('transaksi_id', 'like', "%{$search}%")
-                ->orWhereHas('material', function ($q) use ($search) {
-                    $q->where('nama_material', 'like', "%{$search}%");
-                });
-        })
-        ->when($request->filled('shift'), function ($query) use ($request) {
-            $query->where('shift', $request->shift);
-        })
-        ->when($request->filled('date_from'), function ($query) use ($request) {
-            $query->whereDate('tanggal', '>=', $request->date_from);
-        })
-        ->when($request->filled('date_to'), function ($query) use ($request) {
-            $query->whereDate('tanggal', '<=', $request->date_to);
-        })
-        ->when($request->filled('has_return'), function ($query) use ($request) {
-            if ($request->has_return == '1') {
-                $query->whereHas('pengembalian');
-            } elseif ($request->has_return == '0') {
-                $query->whereDoesntHave('pengembalian');
-            }
-        })
-        ->orderBy('created_at', 'desc')
-        ->paginate(15)
-        ->withQueryString();
+    public function index(Request $request)
+    {
+        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = $request->search;
+                $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhereHas('material', function ($q) use ($search) {
+                        $q->where('nama_material', 'like', "%{$search}%");
+                    });
+            })
+            ->when($request->filled('shift'), function ($query) use ($request) {
+                $query->where('shift', $request->shift);
+            })
+            ->when($request->filled('date_from'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '>=', $request->date_from);
+            })
+            ->when($request->filled('date_to'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '<=', $request->date_to);
+            })
+            ->when($request->filled('has_return'), function ($query) use ($request) {
+                if ($request->has_return == '1') {
+                    $query->whereHas('pengembalian');
+                } elseif ($request->has_return == '0') {
+                    $query->whereDoesntHave('pengembalian');
+                }
+            })
+            ->orderBy('created_at', 'desc')
+            ->paginate(15)
+            ->withQueryString();
 
-    $transaksi->getCollection()->transform(function ($item) {
-        $item->total_pengembalian = $item->total_pengembalian;
-        $item->sisa_pengembalian = $item->sisa_pengembalian;
-        $item->tanggal_pengembalian_terakhir = $item->pengembalian()
-            ->orderBy('tanggal_pengembalian', 'desc')
-            ->value('tanggal_pengembalian');
-        return $item;
-    });
+        $transaksi->getCollection()->transform(function ($item) {
+            $item->total_pengembalian = $item->total_pengembalian;
+            $item->sisa_pengembalian = $item->sisa_pengembalian;
+            $item->tanggal_pengembalian_terakhir = $item->pengembalian()
+                ->orderBy('tanggal_pengembalian', 'desc')
+                ->value('tanggal_pengembalian');
+            return $item;
+        });
 
-    return Inertia::render('Transaksi/Index', [
-        'transaksi' => $transaksi,
-        'filters' => [
-            'search' => $request->search,
-            'shift' => $request->shift,
-            'date_from' => $request->date_from,
-            'date_to' => $request->date_to,
-            'has_return' => $request->has_return,
-        ],
-        'effectiveDate' => DateHelper::getEffectiveDate()->format('Y-m-d'),
-        'currentShift' => DateHelper::getCurrentShift(),
-    ]);
-}
+        // Get statistics based on current filters
+        $statsQuery = TransaksiMaterial::query()
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = $request->search;
+                $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhereHas('material', function ($q) use ($search) {
+                        $q->where('nama_material', 'like', "%{$search}%");
+                    });
+            })
+            ->when($request->filled('shift'), function ($query) use ($request) {
+                $query->where('shift', $request->shift);
+            })
+            ->when($request->filled('date_from'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '>=', $request->date_from);
+            })
+            ->when($request->filled('date_to'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '<=', $request->date_to);
+            })
+            ->when($request->filled('has_return'), function ($query) use ($request) {
+                if ($request->has_return == '1') {
+                    $query->whereHas('pengembalian');
+                } elseif ($request->has_return == '0') {
+                    $query->whereDoesntHave('pengembalian');
+                }
+            });
+
+        $statistics = [
+            'total' => $statsQuery->count(),
+            'with_return' => (clone $statsQuery)->whereHas('pengembalian')->count(),
+            'shift_1' => (clone $statsQuery)->where('shift', 1)->count(),
+            'shift_2' => (clone $statsQuery)->where('shift', 2)->count(),
+            'shift_3' => (clone $statsQuery)->where('shift', 3)->count(),
+        ];
+
+        return Inertia::render('Transaksi/Index', [
+            'transaksi' => $transaksi,
+            'statistics' => $statistics,
+            'filters' => [
+                'search' => $request->search,
+                'shift' => $request->shift,
+                'date_from' => $request->date_from,
+                'date_to' => $request->date_to,
+                'has_return' => $request->has_return,
+            ],
+            'effectiveDate' => DateHelper::getEffectiveDate()->format('Y-m-d'),
+            'currentShift' => DateHelper::getCurrentShift(),
+        ]);
+    }
 
     public function create()
     {
@@ -117,46 +152,45 @@ class TransaksiMaterialController extends Controller
     }
 
     public function exportData(Request $request)
-{
-    $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
-        ->when($request->filled('search'), function ($query) use ($request) {
-            $search = $request->search;
-            $query->where('transaksi_id', 'like', "%{$search}%")
-                ->orWhereHas('material', function ($q) use ($search) {
-                    $q->where('nama_material', 'like', "%{$search}%");
-                });
-        })
-        ->when($request->filled('shift'), function ($query) use ($request) {
-            $query->where('shift', $request->shift);
-        })
-        ->when($request->filled('date_from'), function ($query) use ($request) {
-            $query->whereDate('tanggal', '>=', $request->date_from);
-        })
-        ->when($request->filled('date_to'), function ($query) use ($request) {
-            $query->whereDate('tanggal', '<=', $request->date_to);
-        })
-        ->when($request->filled('has_return'), function ($query) use ($request) {
-            if ($request->has_return == '1') {
-                $query->whereHas('pengembalian');
-            } elseif ($request->has_return == '0') {
-                $query->whereDoesntHave('pengembalian');
-            }
-        })
-        ->orderBy('created_at', 'desc')
-        ->get();
+    {
+        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = $request->search;
+                $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhereHas('material', function ($q) use ($search) {
+                        $q->where('nama_material', 'like', "%{$search}%");
+                    });
+            })
+            ->when($request->filled('shift'), function ($query) use ($request) {
+                $query->where('shift', $request->shift);
+            })
+            ->when($request->filled('date_from'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '>=', $request->date_from);
+            })
+            ->when($request->filled('date_to'), function ($query) use ($request) {
+                $query->whereDate('tanggal', '<=', $request->date_to);
+            })
+            ->when($request->filled('has_return'), function ($query) use ($request) {
+                if ($request->has_return == '1') {
+                    $query->whereHas('pengembalian');
+                } elseif ($request->has_return == '0') {
+                    $query->whereDoesntHave('pengembalian');
+                }
+            })
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-    // Transform data untuk menambahkan calculated fields
-    $transaksi->transform(function ($item) {
-        $item->total_pengembalian = $item->total_pengembalian;
-        $item->sisa_pengembalian = $item->sisa_pengembalian;
-        $item->tanggal_pengembalian_terakhir = $item->pengembalian()
-            ->orderBy('tanggal_pengembalian', 'desc')
-            ->value('tanggal_pengembalian');
-        return $item;
-    });
+        $transaksi->transform(function ($item) {
+            $item->total_pengembalian = $item->total_pengembalian;
+            $item->sisa_pengembalian = $item->sisa_pengembalian;
+            $item->tanggal_pengembalian_terakhir = $item->pengembalian()
+                ->orderBy('tanggal_pengembalian', 'desc')
+                ->value('tanggal_pengembalian');
+            return $item;
+        });
 
-    return response()->json($transaksi);
-}
+        return response()->json($transaksi);
+    }
 
     public function destroy($id)
     {

@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router } from '@inertiajs/vue3';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { BarChart3, TrendingUp, Package, Undo2, ArrowDownRight, Table, PieChart } from 'lucide-vue-next';
+import { BarChart3, TrendingUp, Package, Undo2,  Table, PieChart, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 
 interface Summary {
     total_transaksi: number;
@@ -10,6 +10,9 @@ interface Summary {
     total_material_diambil: number;
     total_material_dikembalikan: number;
     total_material_terpakai: number;
+    qty_per_satuan_diambil: Array<{ satuan: string; total_qty: number }>;
+    qty_per_satuan_dikembalikan: Array<{ satuan: string; total_qty: number }>;
+    qty_per_satuan_terpakai: Array<{ satuan: string; total_qty: number }>;
 }
 
 interface MaterialData {
@@ -67,6 +70,60 @@ const hoveredFreqBar = ref<number | null>(null);
 const hoveredReturnBar = ref<number | null>(null);
 const tooltipPosition = ref({ top: '0px', left: '0px' });
 
+// Pagination states
+const shiftRowsPerPage = ref(15);
+const shiftCurrentPage = ref(1);
+
+const qtyRowsPerPage = ref(15);
+const qtyCurrentPage = ref(1);
+
+const freqRowsPerPage = ref(15);
+const freqCurrentPage = ref(1);
+
+const returnRowsPerPage = ref(15);
+const returnCurrentPage = ref(1);
+
+// Computed pagination
+const paginatedShiftData = computed(() => {
+    const start = (shiftCurrentPage.value - 1) * shiftRowsPerPage.value;
+    const end = start + shiftRowsPerPage.value;
+    return props.transaksiPerShift.slice(start, end);
+});
+
+const shiftTotalPages = computed(() => {
+    return Math.ceil(props.transaksiPerShift.length / shiftRowsPerPage.value);
+});
+
+const paginatedQtyData = computed(() => {
+    const start = (qtyCurrentPage.value - 1) * qtyRowsPerPage.value;
+    const end = start + qtyRowsPerPage.value;
+    return props.allMaterialsByQuantity.slice(start, end);
+});
+
+const qtyTotalPages = computed(() => {
+    return Math.ceil(props.allMaterialsByQuantity.length / qtyRowsPerPage.value);
+});
+
+const paginatedFreqData = computed(() => {
+    const start = (freqCurrentPage.value - 1) * freqRowsPerPage.value;
+    const end = start + freqRowsPerPage.value;
+    return props.allMaterialsByFrequency.slice(start, end);
+});
+
+const freqTotalPages = computed(() => {
+    return Math.ceil(props.allMaterialsByFrequency.length / freqRowsPerPage.value);
+});
+
+const paginatedReturnData = computed(() => {
+    const start = (returnCurrentPage.value - 1) * returnRowsPerPage.value;
+    const end = start + returnRowsPerPage.value;
+    return props.allMaterialPengembalian.slice(start, end);
+});
+
+const returnTotalPages = computed(() => {
+    return Math.ceil(props.allMaterialPengembalian.length / returnRowsPerPage.value);
+});
+
 const updateTooltipPosition = (event: MouseEvent) => {
     const x = event.clientX;
     const y = event.clientY;
@@ -85,7 +142,6 @@ const clearHover = () => {
 const formatNumber = (num: number) => {
     return new Intl.NumberFormat('id-ID').format(num);
 };
-
 
 const applyFilter = () => {
     router.get('/transaksi/dashboard', {
@@ -114,7 +170,6 @@ const setQuickFilter = (days: number) => {
     applyFilter();
 };
 
-// Pie Chart Computation
 const shiftChartData = computed(() => {
     const total = props.transaksiPerShift.reduce((sum, item) => sum + item.total_transaksi, 0);
     let currentAngle = -90;
@@ -163,7 +218,6 @@ const createPieSlicePath = (startAngle: number, endAngle: number, radius: number
     return `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 };
 
-// Bar Chart Data
 const maxQtyValue = computed(() => {
     return Math.max(...props.topMaterialsByQuantity.map(m => m.total_qty), 1);
 });
@@ -184,7 +238,6 @@ onUnmounted(() => {
     document.removeEventListener('mousemove', updateTooltipPosition);
 });
 </script>
-
 <template>
     <Head title="Dashboard Transaksi Material" />
     <AppLayout :breadcrumbs="[
@@ -204,7 +257,6 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- Date Filter -->
             <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                 <div class="flex flex-col md:flex-row gap-3 items-end">
                     <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -241,7 +293,6 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- Quick Filters -->
                 <div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-sidebar-border">
                     <span class="text-xs text-gray-500 dark:text-gray-400 self-center mr-2">Quick Filter:</span>
                     <button
@@ -264,17 +315,15 @@ onUnmounted(() => {
                     </button>
                 </div>
             </div>
-            <!-- Summary Cards with Pie Chart -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <!-- Left: 4 Summary Cards -->
-                <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <!-- Total Transaksi -->
+
+            <div class="grid grid-cols-1 gap-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-5 hover:shadow-lg transition-shadow">
                         <div class="flex items-center justify-between">
-                            <div>
+                            <div class="flex-1">
                                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Transaksi</p>
-                                <p class="text-3xl font-bold text-blue-600">{{ formatNumber(summary.total_transaksi) }}</p>
-                                <p class="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                                <p class="text-8xl font-bold text-blue-600 my-2">{{ formatNumber(summary.total_transaksi) }}</p>
+                                <p class="text-xs text-gray-500 flex items-center gap-1">
                                     <Package class="w-3 h-3" />
                                     Pengambilan Material
                                 </p>
@@ -285,13 +334,12 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <!-- Total Pengembalian -->
                     <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-5 hover:shadow-lg transition-shadow">
                         <div class="flex items-center justify-between">
-                            <div>
+                            <div class="flex-1">
                                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Pengembalian</p>
-                                <p class="text-3xl font-bold text-orange-600">{{ formatNumber(summary.total_pengembalian) }}</p>
-                                <p class="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                                <p class="text-8xl font-bold text-orange-600 my-2">{{ formatNumber(summary.total_pengembalian) }}</p>
+                                <p class="text-xs text-gray-500 flex items-center gap-1">
                                     <Undo2 class="w-3 h-3" />
                                     Return Material
                                 </p>
@@ -302,85 +350,119 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <!-- Material Dikembalikan -->
                     <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-5 hover:shadow-lg transition-shadow">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Dikembalikan</p>
-                                <p class="text-3xl font-bold text-purple-600">{{ formatNumber(summary.total_material_dikembalikan) }}</p>
-                                <p class="text-xs text-gray-500 mt-2 flex items-center gap-1">
-                                    <ArrowDownRight class="w-3 h-3" />
-                                    Total Quantity
-                                </p>
-                            </div>
-                            <div class="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-full">
-                                <Undo2 class="w-8 h-8 text-purple-600" />
-                            </div>
+                        <div class="mb-3">
+                            <h3 class="font-semibold text-sm flex items-center gap-2">
+                                <PieChart class="w-4 h-4 text-blue-600" />
+                                Distribusi per Shift
+                            </h3>
+                            <p class="text-xs text-gray-500 mt-0.5">Transaksi per shift kerja</p>
                         </div>
-                    </div>
 
-                    <!-- Terpakai -->
-                    <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-5 hover:shadow-lg transition-shadow">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Terpakai</p>
-                                <p class="text-3xl font-bold text-indigo-600">{{ formatNumber(summary.total_material_terpakai) }}</p>
-                                <p class="text-xs text-gray-500 mt-2 flex items-center gap-1">
-                                    <Package class="w-3 h-3" />
-                                    Usage
-                                </p>
-                            </div>
-                            <div class="p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-full">
-                                <Package class="w-8 h-8 text-indigo-600" />
+                        <div class="flex items-center gap-4">
+                            <svg width="160" height="160" viewBox="0 0 240 240" class="flex-shrink-0">
+                                <g v-for="(data, index) in shiftChartData" :key="index">
+                                    <path
+                                        :d="createPieSlicePath(data.startAngle, data.endAngle)"
+                                        :fill="getShiftColor(data.shift)"
+                                        class="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                                    />
+                                </g>
+                                <circle cx="120" cy="120" r="50" fill="white" class="dark:fill-gray-800" />
+                                <text x="120" y="115" text-anchor="middle" class="fill-gray-700 dark:fill-gray-300 text-xs font-semibold">Total</text>
+                                <text x="120" y="135" text-anchor="middle" class="fill-gray-900 dark:fill-gray-100 text-base font-bold">
+                                    {{ formatNumber(summary.total_transaksi) }}
+                                </text>
+                            </svg>
+
+                            <div class="flex-1 space-y-1.5">
+                                <div v-for="data in shiftChartData" :key="data.shift"
+                                     class="flex items-center justify-between text-xs">
+                                    <div class="flex items-center gap-1.5">
+                                        <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: getShiftColor(data.shift) }"></div>
+                                        <span class="font-medium text-gray-700 dark:text-gray-300">Shift {{ data.shift }}</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="font-bold text-gray-900 dark:text-gray-100">{{ formatNumber(data.total_transaksi) }}</span>
+                                        <span class="text-gray-500 ml-1">({{ data.percentage.toFixed(1) }}%)</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Right: Pie Chart -->
-                <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-5 hover:shadow-lg transition-shadow">
-                    <div class="mb-4">
-                        <h3 class="font-semibold text-base flex items-center gap-2">
-                            <PieChart class="w-5 h-5 text-blue-600" />
-                            Distribusi per Shift
-                        </h3>
-                        <p class="text-xs text-gray-500 mt-1">Transaksi per shift kerja</p>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/10 dark:to-emerald-900/10 border border-green-200 dark:border-green-800 rounded-lg p-5 hover:shadow-lg transition-shadow">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                                <Package class="w-5 h-5 text-green-600" />
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">Material Diambil</h3>
+                                <p class="text-xs text-gray-600 dark:text-gray-400">Quantity per satuan</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <div v-for="item in summary.qty_per_satuan_diambil" :key="item.satuan"
+                                 class="flex justify-between items-center py-2.5 px-3 bg-white dark:bg-sidebar rounded-lg border border-green-200 dark:border-green-800/50">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ item.satuan }}</span>
+                                <span class="text-lg font-bold text-green-600">{{ formatNumber(item.total_qty) }}</span>
+                            </div>
+                            <div v-if="summary.qty_per_satuan_diambil.length === 0" class="text-center py-6 text-xs text-gray-400 italic">
+                                Tidak ada data
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="flex flex-col items-center justify-center">
-                        <!-- Pie Chart SVG -->
-                        <svg width="180" height="180" viewBox="0 0 240 240">
-                            <g v-for="(data, index) in shiftChartData" :key="index">
-                                <path
-                                    :d="createPieSlicePath(data.startAngle, data.endAngle)"
-                                    :fill="getShiftColor(data.shift)"
-                                    class="transition-all duration-300 hover:opacity-80 cursor-pointer"
-                                />
-                            </g>
-                            <circle cx="120" cy="120" r="50" fill="white" class="dark:fill-gray-800" />
-                            <text x="120" y="115" text-anchor="middle" class="fill-gray-700 dark:fill-gray-300 text-xs font-semibold">Total</text>
-                            <text x="120" y="135" text-anchor="middle" class="fill-gray-900 dark:fill-gray-100 text-lg font-bold">
-                                {{ formatNumber(summary.total_transaksi) }}
-                            </text>
-                        </svg>
+                    <div class="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/10 dark:to-violet-900/10 border border-purple-200 dark:border-purple-800 rounded-lg p-5 hover:shadow-lg transition-shadow">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2.5 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                                <Undo2 class="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">Material Dikembalikan</h3>
+                                <p class="text-xs text-gray-600 dark:text-gray-400">Quantity per satuan</p>
+                            </div>
+                        </div>
 
-                        <div class="mt-4 space-y-2 w-full">
-                            <div v-for="data in shiftChartData" :key="data.shift"
-                                 class="flex items-center justify-between text-xs">
-                                <div class="flex items-center gap-2">
-                                    <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: getShiftColor(data.shift) }"></div>
-                                    <span class="font-medium">Shift {{ data.shift }}</span>
-                                </div>
-                                <div class="text-right">
-                                    <span class="font-bold">{{ formatNumber(data.total_transaksi) }}</span>
-                                    <span class="text-gray-500 ml-1">({{ data.percentage.toFixed(1) }}%)</span>
-                                </div>
+                        <div class="space-y-2">
+                            <div v-for="item in summary.qty_per_satuan_dikembalikan" :key="item.satuan"
+                                 class="flex justify-between items-center py-2.5 px-3 bg-white dark:bg-sidebar rounded-lg border border-purple-200 dark:border-purple-800/50">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ item.satuan }}</span>
+                                <span class="text-lg font-bold text-purple-600">{{ formatNumber(item.total_qty) }}</span>
+                            </div>
+                            <div v-if="summary.qty_per_satuan_dikembalikan.length === 0" class="text-center py-6 text-xs text-gray-400 italic">
+                                Tidak ada data
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/10 dark:to-blue-900/10 border border-indigo-200 dark:border-indigo-800 rounded-lg p-5 hover:shadow-lg transition-shadow">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                                <TrendingUp class="w-5 h-5 text-indigo-600" />
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">Material Terpakai</h3>
+                                <p class="text-xs text-gray-600 dark:text-gray-400">Usage per satuan</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <div v-for="item in summary.qty_per_satuan_terpakai" :key="item.satuan"
+                                 class="flex justify-between items-center py-2.5 px-3 bg-white dark:bg-sidebar rounded-lg border border-indigo-200 dark:border-indigo-800/50">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ item.satuan }}</span>
+                                <span class="text-lg font-bold text-indigo-600">{{ formatNumber(item.total_qty) }}</span>
+                            </div>
+                            <div v-if="summary.qty_per_satuan_terpakai.length === 0" class="text-center py-6 text-xs text-gray-400 italic">
+                                Tidak ada data
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-
             <div class="bg-white dark:bg-sidebar rounded-lg shadow-lg border border-sidebar-border">
                 <div class="flex border-b border-sidebar-border">
                     <button
@@ -408,7 +490,6 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="viewMode === 'chart'" class="p-6 space-y-8">
-                    <!-- Top 10 Material by Quantity -->
                     <div class="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/10 dark:to-emerald-900/10 rounded-xl p-6 border border-green-200 dark:border-green-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -450,7 +531,6 @@ onUnmounted(() => {
                             <p class="font-medium">Tidak ada data untuk periode ini</p>
                         </div>
 
-                        <!-- Tooltip for Quantity -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredQtyBar !== null"
@@ -477,7 +557,7 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
-                    <!-- Top 10 Material by Frequency -->
+
                     <div class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -519,7 +599,6 @@ onUnmounted(() => {
                             <p class="font-medium">Tidak ada data untuk periode ini</p>
                         </div>
 
-                        <!-- Tooltip for Frequency -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredFreqBar !== null"
@@ -547,7 +626,6 @@ onUnmounted(() => {
                         </Teleport>
                     </div>
 
-                    <!-- Material Pengembalian Chart -->
                     <div class="bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/10 dark:to-amber-900/10 rounded-xl p-6 border border-orange-200 dark:border-orange-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -589,7 +667,6 @@ onUnmounted(() => {
                             <p class="font-medium">Tidak ada data pengembalian</p>
                         </div>
 
-                        <!-- Tooltip for Return -->
                         <Teleport to="body">
                             <div
                                 v-if="hoveredReturnBar !== null"
@@ -619,194 +696,291 @@ onUnmounted(() => {
                 </div>
                 <!-- Table View -->
                 <div v-if="viewMode === 'table'" id="table-section" class="overflow-x-auto">
-                    <!-- Transaksi per Shift Table -->
                     <div class="p-6">
-                        <div class="mb-6">
-                            <h3 class="font-semibold text-lg flex items-center gap-2">
-                                <PieChart class="w-5 h-5 text-blue-600" />
-                                Detail Transaksi per Shift
-                            </h3>
-                            <p class="text-sm text-gray-500 mt-1">Rincian lengkap transaksi dan quantity per shift</p>
+                        <!-- Shift Table -->
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-lg flex items-center gap-2">
+                                    <PieChart class="w-5 h-5 text-blue-600" />
+                                    Detail Transaksi per Shift
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-sm text-gray-600 dark:text-gray-400">Tampilkan:</label>
+                                    <select v-model="shiftRowsPerPage" @change="shiftCurrentPage = 1" class="px-3 py-1.5 border border-sidebar-border rounded-md dark:bg-sidebar text-sm">
+                                        <option :value="15">15</option>
+                                        <option :value="25">25</option>
+                                        <option :value="50">50</option>
+                                        <option :value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <table class="w-full">
+                                <thead class="bg-gray-50 dark:bg-sidebar-accent">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shift</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Transaksi</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Quantity</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rata-rata Qty/Transaksi</th>
+                                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Persentase</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-sidebar-border">
+                                    <tr v-for="item in paginatedShiftData" :key="item.shift" class="hover:bg-sidebar-accent transition-colors">
+                                        <td class="px-4 py-3">
+                                            <div class="flex items-center gap-2">
+                                                <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: getShiftColor(item.shift) }"></div>
+                                                <span class="text-sm font-semibold">Shift {{ item.shift }}</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-4 py-3 text-right">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                                {{ formatNumber(item.total_transaksi) }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-sm font-medium">{{ formatNumber(item.total_qty) }}</td>
+                                        <td class="px-4 py-3 text-right text-sm">{{ formatNumber(Math.round(item.total_qty / item.total_transaksi)) }}</td>
+                                        <td class="px-4 py-3 text-center">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                                {{ ((item.total_transaksi / summary.total_transaksi) * 100).toFixed(1) }}%
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div class="flex items-center justify-between mt-4 px-4">
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    Menampilkan {{ ((shiftCurrentPage - 1) * shiftRowsPerPage) + 1 }} - {{ Math.min(shiftCurrentPage * shiftRowsPerPage, transaksiPerShift.length) }} dari {{ transaksiPerShift.length }} data
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        @click="shiftCurrentPage--"
+                                        :disabled="shiftCurrentPage === 1"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </button>
+                                    <div class="flex items-center gap-1">
+                                        <span class="px-3 py-1.5 text-sm">Hal {{ shiftCurrentPage }} dari {{ shiftTotalPages }}</span>
+                                    </div>
+                                    <button
+                                        @click="shiftCurrentPage++"
+                                        :disabled="shiftCurrentPage === shiftTotalPages"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <table class="w-full mb-8">
-                            <thead class="bg-gray-50 dark:bg-sidebar-accent">
-                                <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shift</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Transaksi</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Quantity</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rata-rata Qty/Transaksi</th>
-                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Persentase</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-sidebar-border">
-                                <tr
-                                    v-for="item in transaksiPerShift"
-                                    :key="item.shift"
-                                    class="hover:bg-sidebar-accent transition-colors"
-                                >
-                                    <td class="px-4 py-3">
-                                        <div class="flex items-center gap-2">
-                                            <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: getShiftColor(item.shift) }"></div>
-                                            <span class="text-sm font-semibold">Shift {{ item.shift }}</span>
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-3 text-right">
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                                            {{ formatNumber(item.total_transaksi) }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-right text-sm font-medium">
-                                        {{ formatNumber(item.total_qty) }}
-                                    </td>
-                                    <td class="px-4 py-3 text-right text-sm">
-                                        {{ formatNumber(Math.round(item.total_qty / item.total_transaksi)) }}
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                            {{ ((item.total_transaksi / summary.total_transaksi) * 100).toFixed(1) }}%
-                                        </span>
-                                    </td>
-                                </tr>
-                                <tr v-if="transaksiPerShift.length === 0">
-                                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-                                        Tidak ada data transaksi per shift
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <!-- Material by Quantity Table -->
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-lg flex items-center gap-2">
+                                    <Package class="w-5 h-5 text-green-600" />
+                                    Material Berdasarkan Total Quantity ({{ allMaterialsByQuantity.length }} material)
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-sm text-gray-600 dark:text-gray-400">Tampilkan:</label>
+                                    <select v-model="qtyRowsPerPage" @change="qtyCurrentPage = 1" class="px-3 py-1.5 border border-sidebar-border rounded-md dark:bg-sidebar text-sm">
+                                        <option :value="15">15</option>
+                                        <option :value="25">25</option>
+                                        <option :value="50">50</option>
+                                        <option :value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
 
-                        <div class="mt-8 mb-6">
-                            <h3 class="font-semibold text-lg flex items-center gap-2">
-                                <Package class="w-5 h-5 text-green-600" />
-                                Material Berdasarkan Total Quantity
-                            </h3>
-                            <p class="text-sm text-gray-500 mt-1">Daftar lengkap material berdasarkan quantity ({{ allMaterialsByQuantity.length }} material)</p>
+                            <table class="w-full">
+                                <thead class="bg-gray-50 dark:bg-sidebar-accent">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-sidebar-border">
+                                    <tr v-for="(item, index) in paginatedQtyData" :key="item.material_id" class="hover:bg-sidebar-accent transition-colors">
+                                        <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ ((qtyCurrentPage - 1) * qtyRowsPerPage) + index + 1 }}</td>
+                                        <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
+                                        <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
+                                        <td class="px-4 py-3 text-right">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                                {{ formatNumber(item.total_qty) }} {{ item.satuan }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-sm font-medium">{{ formatNumber(item.jumlah_pengambilan) }}x</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div class="flex items-center justify-between mt-4 px-4">
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    Menampilkan {{ ((qtyCurrentPage - 1) * qtyRowsPerPage) + 1 }} - {{ Math.min(qtyCurrentPage * qtyRowsPerPage, allMaterialsByQuantity.length) }} dari {{ allMaterialsByQuantity.length }} data
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        @click="qtyCurrentPage--"
+                                        :disabled="qtyCurrentPage === 1"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </button>
+                                    <div class="flex items-center gap-1">
+                                        <span class="px-3 py-1.5 text-sm">Hal {{ qtyCurrentPage }} dari {{ qtyTotalPages }}</span>
+                                    </div>
+                                    <button
+                                        @click="qtyCurrentPage++"
+                                        :disabled="qtyCurrentPage === qtyTotalPages"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <table class="w-full">
-                            <thead class="bg-gray-50 dark:bg-sidebar-accent">
-                                <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-sidebar-border">
-                                <tr
-                                    v-for="(item, index) in allMaterialsByQuantity"
-                                    :key="item.material_id"
-                                    class="hover:bg-sidebar-accent transition-colors"
-                                >
-                                    <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ index + 1 }}</td>
-                                    <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
-                                    <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
-                                    <td class="px-4 py-3 text-right">
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                            {{ formatNumber(item.total_qty) }} {{ item.satuan }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-right text-sm font-medium">
-                                        {{ formatNumber(item.jumlah_pengambilan) }}x
-                                    </td>
-                                </tr>
-                                <tr v-if="allMaterialsByQuantity.length === 0">
-                                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-                                        Tidak ada data
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <!-- Material by Frequency Table -->
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-lg flex items-center gap-2">
+                                    <TrendingUp class="w-5 h-5 text-blue-600" />
+                                    Material Berdasarkan Frekuensi ({{ allMaterialsByFrequency.length }} material)
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-sm text-gray-600 dark:text-gray-400">Tampilkan:</label>
+                                    <select v-model="freqRowsPerPage" @change="freqCurrentPage = 1" class="px-3 py-1.5 border border-sidebar-border rounded-md dark:bg-sidebar text-sm">
+                                        <option :value="15">15</option>
+                                        <option :value="25">25</option>
+                                        <option :value="50">50</option>
+                                        <option :value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
 
-                             <div class="mt-8 mb-6">
-                            <h3 class="font-semibold text-lg flex items-center gap-2">
-                                <TrendingUp class="w-5 h-5 text-blue-600" />
-                                Material Berdasarkan Frekuensi Pengambilan
-                            </h3>
-                            <p class="text-sm text-gray-500 mt-1">Daftar lengkap material berdasarkan frekuensi ({{ allMaterialsByFrequency.length }} material)</p>
+                            <table class="w-full">
+                                <thead class="bg-gray-50 dark:bg-sidebar-accent">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-sidebar-border">
+                                    <tr v-for="(item, index) in paginatedFreqData" :key="item.material_id" class="hover:bg-sidebar-accent transition-colors">
+                                        <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ ((freqCurrentPage - 1) * freqRowsPerPage) + index + 1 }}</td>
+                                        <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
+                                        <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
+                                        <td class="px-4 py-3 text-right">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                                {{ formatNumber(item.jumlah_pengambilan) }}x
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-sm font-medium">{{ formatNumber(item.total_qty) }} {{ item.satuan }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div class="flex items-center justify-between mt-4 px-4">
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    Menampilkan {{ ((freqCurrentPage - 1) * freqRowsPerPage) + 1 }} - {{ Math.min(freqCurrentPage * freqRowsPerPage, allMaterialsByFrequency.length) }} dari {{ allMaterialsByFrequency.length }} data
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        @click="freqCurrentPage--"
+                                        :disabled="freqCurrentPage === 1"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </button>
+                                    <div class="flex items-center gap-1">
+                                        <span class="px-3 py-1.5 text-sm">Hal {{ freqCurrentPage }} dari {{ freqTotalPages }}</span>
+                                    </div>
+                                    <button
+                                        @click="freqCurrentPage++"
+                                        :disabled="freqCurrentPage === freqTotalPages"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <table class="w-full mb-8">
-                            <thead class="bg-gray-50 dark:bg-sidebar-accent">
-                                <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-sidebar-border">
-                                <tr
-                                    v-for="(item, index) in allMaterialsByFrequency"
-                                    :key="item.material_id"
-                                    class="hover:bg-sidebar-accent transition-colors"
-                                >
-                                    <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ index + 1 }}</td>
-                                    <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
-                                    <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
-                                    <td class="px-4 py-3 text-right">
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                                            {{ formatNumber(item.jumlah_pengambilan) }}x
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-right text-sm font-medium">
-                                        {{ formatNumber(item.total_qty) }} {{ item.satuan }}
-                                    </td>
-                                </tr>
-                                <tr v-if="allMaterialsByFrequency.length === 0">
-                                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-                                        Tidak ada data
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <!-- Material Pengembalian Table -->
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-lg flex items-center gap-2">
+                                    <Undo2 class="w-5 h-5 text-orange-600" />
+                                    Material dengan Pengembalian ({{ allMaterialPengembalian.length }} material)
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-sm text-gray-600 dark:text-gray-400">Tampilkan:</label>
+                                    <select v-model="returnRowsPerPage" @change="returnCurrentPage = 1" class="px-3 py-1.5 border border-sidebar-border rounded-md dark:bg-sidebar text-sm">
+                                        <option :value="15">15</option>
+                                        <option :value="25">25</option>
+                                        <option :value="50">50</option>
+                                        <option :value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
 
-                              <div class="mt-8 mb-6">
-                            <h3 class="font-semibold text-lg flex items-center gap-2">
-                                <Undo2 class="w-5 h-5 text-orange-600" />
-                                Material dengan Pengembalian
-                            </h3>
-                            <p class="text-sm text-gray-500 mt-1">Daftar lengkap material yang dikembalikan ({{ allMaterialPengembalian.length }} material)</p>
+                            <table class="w-full">
+                                <thead class="bg-gray-50 dark:bg-sidebar-accent">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi Return</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty Return</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-sidebar-border">
+                                    <tr v-for="(item, index) in paginatedReturnData" :key="item.material_id" class="hover:bg-sidebar-accent transition-colors">
+                                        <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ ((returnCurrentPage - 1) * returnRowsPerPage) + index + 1 }}</td>
+                                        <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
+                                        <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
+                                        <td class="px-4 py-3 text-right">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                                {{ formatNumber(item.jumlah_pengembalian) }}x
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-sm font-medium">{{ formatNumber(item.total_qty_pengembalian) }} {{ item.satuan }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div class="flex items-center justify-between mt-4 px-4">
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    Menampilkan {{ ((returnCurrentPage - 1) * returnRowsPerPage) + 1 }} - {{ Math.min(returnCurrentPage * returnRowsPerPage, allMaterialPengembalian.length) }} dari {{ allMaterialPengembalian.length }} data
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        @click="returnCurrentPage--"
+                                        :disabled="returnCurrentPage === 1"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </button>
+                                    <div class="flex items-center gap-1">
+                                        <span class="px-3 py-1.5 text-sm">Hal {{ returnCurrentPage }} dari {{ returnTotalPages }}</span>
+                                    </div>
+                                    <button
+                                        @click="returnCurrentPage++"
+                                        :disabled="returnCurrentPage === returnTotalPages"
+                                        class="px-3 py-1.5 border border-sidebar-border rounded-md hover:bg-sidebar-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-
-                        <table class="w-full mb-8">
-                            <thead class="bg-gray-50 dark:bg-sidebar-accent">
-                                <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material ID</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Material</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Frekuensi Return</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty Return</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-sidebar-border">
-                                <tr
-                                    v-for="(item, index) in allMaterialPengembalian"
-                                    :key="item.material_id"
-                                    class="hover:bg-sidebar-accent transition-colors"
-                                >
-                                    <td class="px-4 py-3 text-sm font-medium text-gray-500">{{ index + 1 }}</td>
-                                    <td class="px-4 py-3 text-sm font-medium">{{ item.material_id }}</td>
-                                    <td class="px-4 py-3 text-sm">{{ item.nama_material }}</td>
-                                    <td class="px-4 py-3 text-right">
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-                                            {{ formatNumber(item.jumlah_pengembalian) }}x
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-right text-sm font-medium">
-                                        {{ formatNumber(item.total_qty_pengembalian) }} {{ item.satuan }}
-                                    </td>
-                                </tr>
-                                <tr v-if="allMaterialPengembalian.length === 0">
-                                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-                                        Tidak ada data pengembalian
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>

@@ -64,7 +64,8 @@ class NgReportController extends Controller
                     'tampilan' => 'Tampilan',
                 ];
                 return [
-                    'type' => $typeLabels[$type] ?? $type,
+                    'type' => $type,
+                    'label' => $typeLabels[$type] ?? $type,
                     'total' => $count,
                 ];
             })
@@ -136,6 +137,49 @@ class NgReportController extends Controller
                 'end_date' => $endDate,
             ],
         ]);
+    }
+
+    public function exportDashboard(Request $request)
+    {
+        try {
+            $startDate = $request->input('start_date', Carbon::now()->startOfMonth()->toDateString());
+            $endDate = $request->input('end_date', Carbon::now()->endOfMonth()->toDateString());
+
+            $start = Carbon::parse($startDate)->startOfDay();
+            $end = Carbon::parse($endDate)->endOfDay();
+
+            // Get all data
+            $reports = NgReport::with(['part.supplier'])
+                ->whereBetween('reported_at', [$start, $end])
+                ->orderBy('reported_at', 'desc')
+                ->get();
+
+            $data = $reports->map(function ($report) {
+                return [
+                    'No. Laporan' => $report->report_number,
+                    'Tanggal' => Carbon::parse($report->reported_at)->format('d/m/Y H:i'),
+                    'Part Code' => $report->part->part_code,
+                    'Part Name' => $report->part->part_name,
+                    'Supplier' => $report->part->supplier->supplier_name,
+                    'Jenis NG' => implode(', ', array_map('ucfirst', $report->ng_types)),
+                    'Status' => $report->status,
+                    'Dilaporkan Oleh' => $report->reported_by,
+                    'PICA Upload' => $report->pica_uploaded_at ? Carbon::parse($report->pica_uploaded_at)->format('d/m/Y H:i') : '-',
+                    'PICA Upload By' => $report->pica_uploaded_by ?? '-',
+                    'Notes' => $report->notes ?? '-',
+                ];
+            })->toArray();
+
+            return response()->json([
+                'data' => $data,
+                'filename' => 'NG_Reports_' . $startDate . '_to_' . $endDate . '.xlsx'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat mengekspor data',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     public function index(Request $request)

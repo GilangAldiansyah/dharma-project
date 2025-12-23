@@ -16,11 +16,56 @@ class DashboardTransaksiController extends Controller
         $startDate = $request->start_date ?? Carbon::now()->subDays(30)->format('Y-m-d');
         $endDate = $request->end_date ?? Carbon::now()->format('Y-m-d');
 
-        // Hitung total SEKALI SAJA dengan nama kolom yang BENAR
-        $totalDiambil = TransaksiMaterial::whereBetween('tanggal', [$startDate, $endDate])
-            ->sum('qty');
-        $totalDikembalikan = PengembalianMaterial::whereBetween('tanggal_pengembalian', [$startDate, $endDate])
-            ->sum('qty_pengembalian');
+        // Total qty per satuan untuk material diambil
+        $qtyPerSatuanDiambil = TransaksiMaterial::select(
+                'materials.satuan',
+                DB::raw('SUM(transaksi_materials.qty) as total_qty')
+            )
+            ->join('materials', 'transaksi_materials.material_id', '=', 'materials.id')
+            ->whereBetween('transaksi_materials.tanggal', [$startDate, $endDate])
+            ->groupBy('materials.satuan')
+            ->orderBy('materials.satuan')
+            ->get()
+            ->map(function($item) {
+                return [
+                    'satuan' => $item->satuan,
+                    'total_qty' => round($item->total_qty, 2)
+                ];
+            });
+
+        // Total qty per satuan untuk material dikembalikan
+        $qtyPerSatuanDikembalikan = PengembalianMaterial::select(
+                'materials.satuan',
+                DB::raw('SUM(pengembalian_materials.qty_pengembalian) as total_qty')
+            )
+            ->join('transaksi_materials', 'pengembalian_materials.transaksi_material_id', '=', 'transaksi_materials.id')
+            ->join('materials', 'transaksi_materials.material_id', '=', 'materials.id')
+            ->whereBetween('pengembalian_materials.tanggal_pengembalian', [$startDate, $endDate])
+            ->groupBy('materials.satuan')
+            ->orderBy('materials.satuan')
+            ->get()
+            ->map(function($item) {
+                return [
+                    'satuan' => $item->satuan,
+                    'total_qty' => round($item->total_qty, 2)
+                ];
+            });
+
+        // Hitung total untuk backward compatibility
+        $totalDiambil = $qtyPerSatuanDiambil->sum('total_qty');
+        $totalDikembalikan = $qtyPerSatuanDikembalikan->sum('total_qty');
+
+        // Hitung terpakai per satuan
+        $qtyPerSatuanTerpakai = collect();
+        foreach($qtyPerSatuanDiambil as $diambil) {
+            $dikembalikan = $qtyPerSatuanDikembalikan->firstWhere('satuan', $diambil['satuan']);
+            $qtyDikembalikan = $dikembalikan ? $dikembalikan['total_qty'] : 0;
+
+            $qtyPerSatuanTerpakai->push([
+                'satuan' => $diambil['satuan'],
+                'total_qty' => round($diambil['total_qty'] - $qtyDikembalikan, 2)
+            ]);
+        }
 
         $summary = [
             'total_transaksi' => TransaksiMaterial::whereBetween('tanggal', [$startDate, $endDate])->count(),
@@ -28,6 +73,10 @@ class DashboardTransaksiController extends Controller
             'total_material_diambil' => round($totalDiambil, 2),
             'total_material_dikembalikan' => round($totalDikembalikan, 2),
             'total_material_terpakai' => round($totalDiambil - $totalDikembalikan, 2),
+            // Tambahan breakdown per satuan
+            'qty_per_satuan_diambil' => $qtyPerSatuanDiambil,
+            'qty_per_satuan_dikembalikan' => $qtyPerSatuanDikembalikan,
+            'qty_per_satuan_terpakai' => $qtyPerSatuanTerpakai,
         ];
 
         // Top 10 Materials by Frequency (untuk grafik)

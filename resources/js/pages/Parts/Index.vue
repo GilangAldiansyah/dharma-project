@@ -25,6 +25,8 @@ interface Props {
         data: Part[];
         current_page: number;
         last_page: number;
+        per_page: number;
+        total: number;
     };
     suppliers: Array<{ id: number; supplier_name: string; supplier_code: string }>;
     typeLines: string[];
@@ -32,6 +34,7 @@ interface Props {
         search?: string;
         supplier?: number;
         type_line?: string;
+        per_page?: number;
     };
 }
 
@@ -44,6 +47,7 @@ const editMode = ref(false);
 const searchQuery = ref(props.filters?.search || '');
 const filterSupplier = ref(props.filters?.supplier || 0);
 const filterTypeLine = ref(props.filters?.type_line || '');
+const perPage = ref(props.filters?.per_page || 15);
 const imagePreviews = ref<string[]>([]);
 const imagePreviewsNew = ref<string[]>([]);
 const showImageModal = ref(false);
@@ -193,12 +197,12 @@ const deletePart = (id: number) => {
         router.delete(`/parts/${id}`, { preserveScroll: true });
     }
 };
-
 const search = () => {
     router.get('/parts', {
         search: searchQuery.value,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined
+        type_line: filterTypeLine.value || undefined,
+        per_page: perPage.value
     }, {
         preserveState: false,
         preserveScroll: true
@@ -209,7 +213,8 @@ const filterBySupplier = () => {
     router.get('/parts', {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined
+        type_line: filterTypeLine.value || undefined,
+        per_page: perPage.value
     }, {
         preserveState: false,
         preserveScroll: true
@@ -220,7 +225,20 @@ const filterByTypeLine = () => {
     router.get('/parts', {
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined
+        type_line: filterTypeLine.value || undefined,
+        per_page: perPage.value
+    }, {
+        preserveState: false,
+        preserveScroll: true
+    });
+};
+
+const changePerPage = () => {
+    router.get('/parts', {
+        search: searchQuery.value || undefined,
+        supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
+        type_line: filterTypeLine.value || undefined,
+        per_page: perPage.value
     }, {
         preserveState: false,
         preserveScroll: true
@@ -231,6 +249,7 @@ const resetFilters = () => {
     searchQuery.value = '';
     filterSupplier.value = 0;
     filterTypeLine.value = '';
+    perPage.value = 15;
     router.get('/parts', {},
     {
         preserveState: false,
@@ -245,7 +264,8 @@ const goToPage = (page: number | string) => {
         page: page,
         search: searchQuery.value || undefined,
         supplier: filterSupplier.value > 0 ? filterSupplier.value : undefined,
-        type_line: filterTypeLine.value || undefined
+        type_line: filterTypeLine.value || undefined,
+        per_page: perPage.value
     }, {
         preserveState: false,
         preserveScroll: true
@@ -290,7 +310,6 @@ const openImportModal = () => {
     showImportModal.value = true;
     importData.value = [];
 };
-
 const handleFileUpload = (event: Event) => {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
@@ -501,6 +520,16 @@ const removeImportRow = (index: number) => {
                         >
                             <X class="w-5 h-5" />
                         </button>
+                            <select
+                                v-model="perPage"
+                                @change="changePerPage"
+                                class="rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar min-w-[120px]"
+                            >
+                                <option :value="15">15 ROW</option>
+                                <option :value="25">25 ROW</option>
+                                <option :value="50">50 ROW</option>
+                                <option :value="100">100 ROW</option>
+                            </select>
                     </div>
                 </div>
                 <div class="flex gap-2">
@@ -578,8 +607,10 @@ const removeImportRow = (index: number) => {
                 </div>
                 <div v-if="parts.last_page > 1" class="px-4 py-3 border-t border-sidebar-border bg-gray-50 dark:bg-sidebar-accent">
                     <div class="flex items-center justify-between">
-                        <div class="text-sm text-gray-600 dark:text-gray-400">
-                            Halaman {{ parts.current_page }} dari {{ parts.last_page }}
+                        <div class="flex items-center gap-3">
+                            <div class="text-sm text-gray-600 dark:text-gray-400">
+                                Menampilkan {{ (parts.current_page - 1) * parts.per_page + 1 }} - {{ Math.min(parts.current_page * parts.per_page, parts.total) }} dari {{ parts.total }} data
+                            </div>
                         </div>
                         <div class="flex items-center gap-3">
                             <div class="relative">
@@ -708,7 +739,6 @@ const removeImportRow = (index: number) => {
                 </form>
             </div>
         </div>
-
         <div v-if="showImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-6xl w-full p-6 max-h-[90vh] overflow-auto">
                 <h2 class="text-xl font-semibold mb-4">Import Parts dari Excel</h2>

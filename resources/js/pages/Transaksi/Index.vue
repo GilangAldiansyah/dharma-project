@@ -67,6 +67,13 @@ interface Props {
         last_page: number;
         total: number;
     };
+    statistics: {
+        total: number;
+        with_return: number;
+        shift_1: number;
+        shift_2: number;
+        shift_3: number;
+    };
     filters: {
         search?: string;
         shift?: number;
@@ -648,7 +655,7 @@ watch(searchMaterialQuery, () => {
             <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Total Transaksi</div>
-                    <div class="text-2xl font-bold">{{ transaksi.total }}</div>
+                    <div class="text-2xl font-bold">{{ statistics.total }}</div>  <!-- ← GANTI -->
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
@@ -656,25 +663,25 @@ watch(searchMaterialQuery, () => {
                         Ada Pengembalian
                     </div>
                     <div class="text-2xl font-bold text-orange-600">
-                        {{ transaksi.data.filter(t => t.total_pengembalian && t.total_pengembalian > 0).length }}
+                        {{ statistics.with_return }}  <!-- ← GANTI -->
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 1</div>
                     <div class="text-2xl font-bold text-blue-600">
-                        {{ transaksi.data.filter(t => t.shift === 1).length }}
+                        {{ statistics.shift_1 }}  <!-- ← GANTI -->
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 2</div>
                     <div class="text-2xl font-bold text-green-600">
-                        {{ transaksi.data.filter(t => t.shift === 2).length }}
+                        {{ statistics.shift_2 }}  <!-- ← GANTI -->
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 3</div>
                     <div class="text-2xl font-bold text-purple-600">
-                        {{ transaksi.data.filter(t => t.shift === 3).length }}
+                        {{ statistics.shift_3 }}  <!-- ← GANTI -->
                     </div>
                 </div>
             </div>

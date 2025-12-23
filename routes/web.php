@@ -56,6 +56,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/forecast/copy', [StockController::class, 'forecastCopy'])->name('forecast.copy');
 
     // NG Reports System
+    Route::get('/ng-reports/dashboard/export', [NgReportController::class, 'exportDashboard'])->name('ng-reports.dashboard.export');
     Route::get('/ng-reports', [NgReportController::class, 'index'])->name('ng-reports.index');
     Route::post('/ng-reports', [NgReportController::class, 'store'])->name('ng-reports.store');
     Route::get('/ng-reports/dashboard', [NgReportController::class, 'dashboard'])->name('ng-reports.dashboard');
