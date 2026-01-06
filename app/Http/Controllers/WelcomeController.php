@@ -28,7 +28,7 @@ class WelcomeController extends Controller
                     'title' => 'NG System',
                     'description' => 'Sistem pelaporan NG, PICA, dan manajemen supplier',
                     'icon' => 'AlertTriangle',
-                    'color' => 'orange',
+                    'color' => 'red',
                     'route' => '/ng-reports/dashboard',
                     'features' => [
                         'NG Reports & Tracking',
@@ -73,6 +73,19 @@ class WelcomeController extends Controller
                         'Real-time device monitoring',
                         'Relay status control',
                         'History logs & analytics'
+                    ]
+                ],
+                [
+                    'id' => 'maintenance-monitoring',
+                    'title' => 'Line Stop Monitoring',
+                    'description' => 'Sistem Monitoring Line Stop',
+                    'icon' => 'Activity',
+                    'color' => 'orange',
+                    'route' => '/maintenance',
+                    'features' => [
+                        'Laporan Maintenance Mesin',
+                        'Barcode Scanning Support',
+                        'MTTR & MTBF Calculation'
                     ]
                 ]
             ]

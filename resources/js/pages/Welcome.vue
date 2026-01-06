@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
-import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2, Bot, ClipboardList } from 'lucide-vue-next';
+import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2, Bot, ClipboardList, Activity } from 'lucide-vue-next';
 
 type ColorType = 'blue' | 'orange' | 'green' | 'red' | 'black' | 'violet';
 
@@ -33,7 +33,8 @@ const iconComponents: Record<string, any> = {
     AlertTriangle,
     Wrench,
     Bot,
-    ClipboardList
+    ClipboardList,
+    Activity
 };
 
 // UPDATED: Added red, black, violet color schemes

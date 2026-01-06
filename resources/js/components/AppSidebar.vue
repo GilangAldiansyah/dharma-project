@@ -33,6 +33,8 @@ import {
     Layers,
     Database,
     Bot,
+    Activity,
+    Cog,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
@@ -152,9 +154,9 @@ const allNavGroups: NavGroup[] = [
                 icon: ClipboardList,
             },
             {
-            title: 'Dashboard Transaksi',
-            href: '/transaksi/dashboard',
-            icon: BarChart3,
+                title: 'Dashboard Transaksi',
+                href: '/transaksi/dashboard',
+                icon: BarChart3,
             },
             {
                 title: 'Master Material',
@@ -165,6 +167,34 @@ const allNavGroups: NavGroup[] = [
                 title: 'Master Part',
                 href: '/part-materials',
                 icon: Layers,
+            },
+        ],
+    },
+    {
+      title: 'Maintenance Monitoring',
+        icon: Activity,
+        routes: ['/maintenance', '/settings'],
+        dashboardRoute: '/maintenance/dashboard',
+        items: [
+            {
+                title: 'Dashboard',
+                href: '/maintenance/dashboard',
+                icon: BarChart3,
+            },
+            {
+                title: 'Laporan Maintenance',
+                href: '/maintenance',
+                icon: Activity,
+            },
+               {
+                title: 'Line',
+                href: '/maintenance/lines',
+                icon: Layers,
+            },
+            {
+                title: 'Mesin',
+                href: '/maintenance/mesin',
+                icon: Cog,
             },
         ],
     },
