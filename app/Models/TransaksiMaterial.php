@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,6 +14,7 @@ class TransaksiMaterial extends Model
         'transaksi_id',
         'tanggal',
         'shift',
+        'pic',
         'material_id',
         'part_material_id',
         'qty',
@@ -55,6 +57,7 @@ class TransaksiMaterial extends Model
     {
         return $this->qty - $this->total_pengembalian;
     }
+
     public function hasPengembalian()
     {
         return $this->pengembalian()->exists();

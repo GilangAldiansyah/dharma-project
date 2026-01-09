@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
     BarChart3, Package, Building2, Calendar, RefreshCw, Table,
     TrendingUp, AlertCircle, CheckCircle, Clock, Download,
-    Filter, X, ChevronRight, Eye, FileText, PieChart
-} from 'lucide-vue-next';
+    Filter, X, ChevronRight, Eye, FileText, PieChart, Upload, Trash2 }
+from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -55,6 +55,9 @@ interface Props {
         start_date: string;
         end_date: string;
     };
+    template_exists: boolean;
+    template_url: string | null;
+
 }
 
 const props = defineProps<Props>();
@@ -88,7 +91,6 @@ const clearHover = () => {
     hoveredPieSlice.value = null;
 };
 
-// Pie Chart calculations
 const ngTypeChartData = computed(() => {
     if (!props.ngByType || props.ngByType.length === 0) return [];
 
@@ -197,6 +199,55 @@ const refreshData = () => {
             isLoading.value = false;
         }
     });
+};
+
+const uploadForm = useForm({
+    template: null as File | null,
+});
+
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const showTemplateModal = ref(false);
+const showDeleteConfirm = ref(false);
+
+const handleFileChange = (e: Event) => {
+    const target = e.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (file) {
+        uploadForm.template = file;
+    }
+};
+
+const uploadTemplate = () => {
+    if (!uploadForm.template) {
+        alert('Pilih file template terlebih dahulu');
+        return;
+    }
+
+    uploadForm.post('/ng-reports/upload-template', {
+        preserveScroll: true,
+        onSuccess: () => {
+            uploadForm.reset();
+            if (fileInputRef.value) {
+                fileInputRef.value.value = '';
+            }
+            showTemplateModal.value = false;
+        },
+    });
+};
+
+const deleteTemplate = () => {
+    router.delete('/ng-reports/delete-template', {
+        preserveScroll: true,
+        onSuccess: () => {
+            showDeleteConfirm.value = false;
+        },
+    });
+};
+
+const downloadTemplateFile = () => {
+    if (props.template_url) {
+        window.open(props.template_url, '_blank');
+    }
 };
 
 const exportData = async () => {
@@ -1020,6 +1071,59 @@ onUnmounted(() => {
                 </div>
             </div>
 
+             <div class="bg-white dark:bg-sidebar rounded-xl shadow-md border border-sidebar-border p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <FileText class="w-5 h-5 text-purple-600" />
+                            Template PICA / Temporary Action
+                        </h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Kelola template yang digunakan oleh user
+                        </p>
+                    </div>
+                    <button
+                        @click="showTemplateModal = true"
+                        class="px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all flex items-center gap-2 text-sm font-medium shadow-lg hover:shadow-xl"
+                    >
+                        <Upload class="w-4 h-4" />
+                        Kelola Template
+                    </button>
+                </div>
+
+                <!-- Current Template Status -->
+                <div v-if="template_exists" class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3">
+                            <CheckCircle class="w-5 h-5 text-green-600 dark:text-green-400" />
+                            <div>
+                                <p class="text-sm font-semibold text-green-900 dark:text-green-200">Template Aktif</p>
+                                <p class="text-xs text-green-700 dark:text-green-400 mt-1">temporary_action_template.pdf</p>
+                            </div>
+                        </div>
+                        <button
+                            @click="downloadTemplateFile"
+                            class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium"
+                        >
+                            <Download class="w-4 h-4" />
+                            Preview
+                        </button>
+                    </div>
+                </div>
+
+                <div v-else class="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <div class="flex items-start gap-3">
+                        <AlertCircle class="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                        <div>
+                            <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">Template Belum Diupload</p>
+                            <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                                User tidak dapat mendownload template. Klik "Kelola Template" untuk upload.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Footer -->
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm">
                 <div class="text-gray-600 dark:text-gray-400">
@@ -1041,6 +1145,147 @@ onUnmounted(() => {
                     <ChevronRight class="w-4 h-4" />
                 </a>
             </div>
+         <!-- Template Management Modal -->
+    <div v-if="showTemplateModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-white dark:bg-sidebar rounded-xl max-w-2xl w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Kelola Template PICA</h2>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Upload atau hapus template</p>
+                </div>
+                <button
+                    @click="showTemplateModal = false"
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-sidebar-accent rounded-lg transition-colors"
+                >
+                    <X class="w-6 h-6" />
+                </button>
+            </div>
+
+            <div class="space-y-6">
+                <!-- Current Status -->
+                <div v-if="template_exists" class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3 flex-1">
+                            <CheckCircle class="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
+                            <div>
+                                <p class="text-sm font-semibold text-green-900 dark:text-green-200">Template Aktif</p>
+                                <p class="text-xs text-green-700 dark:text-green-400 mt-1">temporary_action_template.pdf</p>
+                            </div>
+                        </div>
+                        <button
+                            @click="showDeleteConfirm = true"
+                            class="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 text-sm font-medium"
+                        >
+                            <Trash2 class="w-4 h-4" />
+                            Hapus
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Upload Form -->
+                <form @submit.prevent="uploadTemplate" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                            {{ template_exists ? 'Upload Template Baru (akan mengganti yang lama)' : 'Upload Template' }}
+                            <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            ref="fileInputRef"
+                            type="file"
+                            accept="application/pdf"
+                            @change="handleFileChange"
+                            class="w-full rounded-lg border border-sidebar-border px-4 py-3 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-400"
+                        />
+                        <p class="text-xs text-gray-500 mt-2 flex items-center gap-1.5">
+                            <AlertCircle class="w-3.5 h-3.5" />
+                            Format: PDF | Maksimal: 10 MB
+                        </p>
+
+                        <div v-if="uploadForm.template" class="mt-4 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 flex items-center gap-3">
+                            <div class="bg-purple-100 dark:bg-purple-900/30 p-3 rounded-lg">
+                                <FileText class="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-gray-900 dark:text-white">{{ uploadForm.template.name }}</p>
+                                <p class="text-xs text-gray-500">{{ (uploadForm.template.size / 1024 / 1024).toFixed(2) }} MB</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+                        <p class="text-xs text-blue-800 dark:text-blue-300">
+                            💡 <strong>Info:</strong> Template ini akan digunakan oleh seluruh user untuk mengisi Temporary Action. Pastikan template sudah sesuai sebelum diupload.
+                        </p>
+                    </div>
+
+                    <div class="flex gap-3 justify-end pt-4 border-t border-sidebar-border">
+                        <button
+                            type="button"
+                            @click="showTemplateModal = false"
+                            class="px-6 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-sidebar-accent transition-colors font-medium"
+                        >
+                            Batal
+                        </button>
+                        <button
+                            type="submit"
+                            :disabled="!uploadForm.template || uploadForm.processing"
+                            class="px-6 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg hover:shadow-xl transition-all font-medium"
+                        >
+                            <svg v-if="uploadForm.processing" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <Upload class="w-5 h-5" />
+                            {{ uploadForm.processing ? 'Uploading...' : 'Upload Template' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div v-if="showDeleteConfirm" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <div class="bg-white dark:bg-sidebar rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white">Konfirmasi Hapus</h2>
+                <button
+                    @click="showDeleteConfirm = false"
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-sidebar-accent rounded-lg transition-colors"
+                >
+                    <X class="w-5 h-5" />
+                </button>
+            </div>
+
+            <div class="mb-6">
+                <div class="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <AlertCircle class="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                        <p class="text-sm font-semibold text-red-900 dark:text-red-200">Apakah Anda yakin?</p>
+                        <p class="text-xs text-red-700 dark:text-red-400 mt-1">
+                            Template akan dihapus dan user tidak dapat mendownload template sampai Anda upload template baru.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3 justify-end">
+                <button
+                    @click="showDeleteConfirm = false"
+                    class="px-4 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-sidebar-accent transition-colors font-medium"
+                >
+                    Batal
+                </button>
+                <button
+                    @click="deleteTemplate"
+                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-2"
+                >
+                    <Trash2 class="w-4 h-4" />
+                    Ya, Hapus
+                </button>
+            </div>
+        </div>
+    </div>
         </div>
         <!-- Filter Modal -->
         <div v-if="showFilterModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">

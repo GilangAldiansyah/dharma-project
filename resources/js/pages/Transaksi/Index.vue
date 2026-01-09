@@ -26,6 +26,7 @@ interface Transaksi {
     transaksi_id: string;
     tanggal: string;
     shift: number;
+    pic: string;
     qty: number;
     foto: string[];
     material: {
@@ -51,6 +52,7 @@ interface PengembalianHistory {
     id: number;
     pengembalian_id: string;
     tanggal_pengembalian: string;
+    pic: string;
     qty_pengembalian: number;
     foto: string[];
     keterangan: string;
@@ -117,6 +119,7 @@ const currentImageList = ref<string[]>([]);
 const form = useForm({
     tanggal: new Date().toISOString().split('T')[0],
     shift: 1,
+    pic: '',
     material_id: null as number | null,
     part_material_id: null as number | null,
     qty: '',
@@ -126,6 +129,7 @@ const form = useForm({
 const pengembalianForm = useForm({
     transaksi_material_id: null as number | null,
     tanggal_pengembalian: new Date().toISOString().split('T')[0],
+    pic: '',
     qty_pengembalian: '',
     keterangan: '',
     foto: [] as File[],
@@ -209,6 +213,7 @@ const setDatePreset = (preset: string) => {
             break;
     }
 };
+
 const openImageModal = (images: string[], index: number) => {
     currentImageList.value = images;
     currentImageIndex.value = index;
@@ -235,7 +240,6 @@ const prevImage = () => {
 
 const exportToExcel = async () => {
     try {
-        // Show loading indicator
         const exportButton = document.querySelector('[title="Export ke Excel"]') as HTMLButtonElement;
         const originalHTML = exportButton?.innerHTML;
 
@@ -244,7 +248,6 @@ const exportToExcel = async () => {
             exportButton.disabled = true;
         }
 
-        // Build query params from current filters
         const params = new URLSearchParams();
         if (searchQuery.value) params.append('search', searchQuery.value);
         if (filterShift.value) params.append('shift', filterShift.value.toString());
@@ -252,7 +255,6 @@ const exportToExcel = async () => {
         if (filterDateTo.value) params.append('date_to', filterDateTo.value);
         if (filterHasReturn.value !== '') params.append('has_return', filterHasReturn.value);
 
-        // Fetch all data from API
         const response = await fetch(`/transaksi/export-data?${params.toString()}`);
         if (!response.ok) {
             throw new Error('Gagal mengambil data');
@@ -260,11 +262,11 @@ const exportToExcel = async () => {
 
         const allData = await response.json();
 
-        // Transform data for Excel
         const excelData = allData.map((item: Transaksi) => ({
             'ID Transaksi': item.transaksi_id,
             'Tanggal': formatDate(item.tanggal),
             'Shift': `Shift ${item.shift}`,
+            'PIC': item.pic,
             'ID Material': item.material.material_id,
             'Nama Material': item.material.nama_material,
             'Tipe Material': item.material.material_type,
@@ -282,7 +284,7 @@ const exportToExcel = async () => {
         XLSX.utils.book_append_sheet(wb, ws, 'Transaksi Material');
 
         const colWidths = [
-            { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 30 },
+            { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 15 }, { wch: 30 },
             { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 18 },
             { wch: 12 }, { wch: 15 }, { wch: 22 },
         ];
@@ -426,6 +428,7 @@ const deleteMultiple = () => {
         });
     }
 };
+
 watch(() => props.transaksi.data, () => {
     selectAll.value = selectedItems.value.length === props.transaksi.data.length && props.transaksi.data.length > 0;
 }, { deep: true });
@@ -439,6 +442,7 @@ const openModal = () => {
     previewImages.value = [];
     form.tanggal = props.effectiveDate;
     form.shift = props.currentShift;
+    form.pic = '';
 };
 
 const closeModal = () => {
@@ -465,6 +469,7 @@ const openPengembalianModal = (transaksi: Transaksi) => {
     pengembalianForm.reset();
     pengembalianForm.transaksi_material_id = transaksi.id;
     pengembalianForm.tanggal_pengembalian = props.effectiveDate;
+    pengembalianForm.pic = '';
     pengembalianPreviewImages.value = [];
     showPengembalianModal.value = true;
 };
@@ -655,7 +660,7 @@ watch(searchMaterialQuery, () => {
             <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Total Transaksi</div>
-                    <div class="text-2xl font-bold">{{ statistics.total }}</div>  <!-- ← GANTI -->
+                    <div class="text-2xl font-bold">{{ statistics.total }}</div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
@@ -663,30 +668,29 @@ watch(searchMaterialQuery, () => {
                         Ada Pengembalian
                     </div>
                     <div class="text-2xl font-bold text-orange-600">
-                        {{ statistics.with_return }}  <!-- ← GANTI -->
+                        {{ statistics.with_return }}
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 1</div>
                     <div class="text-2xl font-bold text-blue-600">
-                        {{ statistics.shift_1 }}  <!-- ← GANTI -->
+                        {{ statistics.shift_1 }}
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 2</div>
                     <div class="text-2xl font-bold text-green-600">
-                        {{ statistics.shift_2 }}  <!-- ← GANTI -->
+                        {{ statistics.shift_2 }}
                     </div>
                 </div>
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Shift 3</div>
                     <div class="text-2xl font-bold text-purple-600">
-                        {{ statistics.shift_3 }}  <!-- ← GANTI -->
+                        {{ statistics.shift_3 }}
                     </div>
                 </div>
             </div>
 
-            <!-- Search & Filter -->
             <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                 <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
                     <div class="md:col-span-4">
@@ -694,7 +698,7 @@ watch(searchMaterialQuery, () => {
                             <input
                                 v-model="searchQuery"
                                 type="text"
-                                placeholder="Cari transaksi atau material..."
+                                placeholder="Cari transaksi, PIC, atau material..."
                                 class="w-full rounded-md border border-sidebar-border pl-10 pr-3 py-2 dark:bg-sidebar focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             />
                             <Search class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
@@ -789,7 +793,6 @@ watch(searchMaterialQuery, () => {
                         Bulan Ini
                     </button>
 
-                    <!-- Reset Button -->
                     <button
                         v-if="searchQuery || filterShift || filterDateFrom || filterDateTo || filterHasReturn"
                         @click="resetFilters"
@@ -800,7 +803,7 @@ watch(searchMaterialQuery, () => {
                     </button>
                 </div>
             </div>
-            <!-- Table -->
+
             <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg overflow-hidden shadow-sm">
                 <div class="overflow-x-auto">
                     <table class="w-full">
@@ -817,6 +820,7 @@ watch(searchMaterialQuery, () => {
                                 <th class="px-4 py-3 text-left text-sm font-medium">ID Transaksi</th>
                                 <th class="px-4 py-3 text-left text-sm font-medium">Tanggal</th>
                                 <th class="px-7 py-3 text-left text-sm font-medium">Shift</th>
+                                <th class="px-4 py-3 text-left text-sm font-medium">PIC</th>
                                 <th class="px-4 py-3 text-left text-sm font-medium">Material</th>
                                 <th class="px-4 py-3 text-left text-sm font-medium">QTY</th>
                                 <th class="px-4 py-3 text-left text-sm font-medium">Foto</th>
@@ -825,7 +829,6 @@ watch(searchMaterialQuery, () => {
                         </thead>
                         <tbody class="divide-y divide-sidebar-border">
                             <template v-for="item in transaksi.data" :key="item.id">
-                                <!-- Main Row -->
                                 <tr
                                     :class="[
                                         'hover:bg-sidebar-accent transition-colors',
@@ -853,7 +856,7 @@ watch(searchMaterialQuery, () => {
                                             </span>
                                         </div>
                                     </td>
-                                  <td class="px-4 py-3 text-sm">
+                                    <td class="px-4 py-3 text-sm">
                                         <div class="font-medium">{{ formatDate(item.tanggal) }}</div>
                                         <div class="text-xs text-gray-500 dark:text-gray-400">
                                             {{ formatTime(item.created_at) }}
@@ -868,6 +871,12 @@ watch(searchMaterialQuery, () => {
                                         ]">
                                             Shift {{ item.shift }}
                                         </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <div class="flex items-center gap-2">
+                                            <User class="w-4 h-4 text-gray-400" />
+                                            <span class="font-medium">{{ item.pic }}</span>
+                                        </div>
                                     </td>
                                     <td class="px-4 py-3 text-sm">
                                         <div class="font-medium">{{ item.material.nama_material }}</div>
@@ -927,9 +936,8 @@ watch(searchMaterialQuery, () => {
                                     </td>
                                 </tr>
 
-                                <!-- Expanded Row - Detail Pengembalian -->
                                 <tr v-if="expandedRows.includes(item.id) && item.total_pengembalian && item.total_pengembalian > 0">
-                                    <td colspan="8" class="px-4 py-3 bg-orange-50 dark:bg-orange-900/10">
+                                    <td colspan="9" class="px-4 py-3 bg-orange-50 dark:bg-orange-900/10">
                                         <div class="space-y-3">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
@@ -995,7 +1003,7 @@ watch(searchMaterialQuery, () => {
                     <p class="text-sm mt-1">Mulai dengan menambahkan transaksi pengambilan material</p>
                 </div>
             </div>
-            <!-- Pagination -->
+
             <div v-if="transaksi.last_page > 1" class="flex items-center justify-between bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                 <div class="text-sm text-gray-600 dark:text-gray-400">
                     Halaman {{ transaksi.current_page }} dari {{ transaksi.last_page }}
@@ -1040,8 +1048,6 @@ watch(searchMaterialQuery, () => {
                 </div>
             </div>
         </div>
-
-        <!-- Detail Modal -->
         <div v-if="showDetailModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
@@ -1077,6 +1083,13 @@ watch(searchMaterialQuery, () => {
                             ]">
                                 Shift {{ selectedTransaksi.shift }}
                             </span>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
+                                <User class="w-4 h-4" />
+                                PIC
+                            </div>
+                            <div class="font-semibold">{{ selectedTransaksi.pic }}</div>
                         </div>
                         <div>
                             <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
@@ -1163,7 +1176,7 @@ watch(searchMaterialQuery, () => {
                 </div>
             </div>
         </div>
-        <!-- Input Pengambilan Modal -->
+
         <div v-if="showModal" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
@@ -1250,6 +1263,23 @@ watch(searchMaterialQuery, () => {
 
                     <div>
                         <label class="block text-sm font-medium mb-2">
+                            <User class="w-4 h-4 inline-block mr-1" />
+                            PIC
+                        </label>
+                        <input
+                            v-model="form.pic"
+                            type="text"
+                            placeholder="Nama orang yang mengambil material"
+                            class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                        <div v-if="form.errors.pic" class="mt-1 text-sm text-red-600">
+                            {{ form.errors.pic }}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">
                             Quantity
                             <span v-if="selectedMaterial" class="text-gray-500">({{ selectedMaterial.satuan }})</span>
                         </label>
@@ -1327,7 +1357,6 @@ watch(searchMaterialQuery, () => {
             </div>
         </div>
 
-        <!-- Pengembalian Modal -->
         <div v-if="showPengembalianModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
@@ -1347,6 +1376,10 @@ watch(searchMaterialQuery, () => {
                             <div>
                                 <div class="text-gray-500 dark:text-gray-400">ID Transaksi</div>
                                 <div class="font-medium">{{ selectedTransaksi.transaksi_id }}</div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500 dark:text-gray-400">PIC Pengambilan</div>
+                                <div class="font-medium">{{ selectedTransaksi.pic }}</div>
                             </div>
                             <div>
                                 <div class="text-gray-500 dark:text-gray-400">Material</div>
@@ -1375,6 +1408,23 @@ watch(searchMaterialQuery, () => {
                         />
                         <div v-if="pengembalianForm.errors.tanggal_pengembalian" class="mt-1 text-sm text-red-600">
                             {{ pengembalianForm.errors.tanggal_pengembalian }}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">
+                            <User class="w-4 h-4 inline-block mr-1" />
+                            PIC Pengembalian
+                        </label>
+                        <input
+                            v-model="pengembalianForm.pic"
+                            type="text"
+                            placeholder="Nama orang yang mengembalikan material"
+                            class="w-full px-3 py-2 border border-sidebar-border rounded-md dark:bg-sidebar focus:ring-2 focus:ring-orange-500"
+                            required
+                        />
+                        <div v-if="pengembalianForm.errors.pic" class="mt-1 text-sm text-red-600">
+                            {{ pengembalianForm.errors.pic }}
                         </div>
                     </div>
 
@@ -1470,7 +1520,6 @@ watch(searchMaterialQuery, () => {
             </div>
         </div>
 
-        <!-- Pengembalian History Modal -->
         <div v-if="showPengembalianHistoryModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
@@ -1516,15 +1565,19 @@ watch(searchMaterialQuery, () => {
                             class="border border-sidebar-border rounded-lg p-4 hover:shadow-md transition-shadow"
                         >
                             <div class="flex items-start justify-between mb-3">
-                                <div>
+                                <div class="flex-1">
                                     <div class="font-medium">{{ selectedTransaksi.material.nama_material }}</div>
                                     <div class="text-sm text-gray-500">{{ formatDate(pengembalian.tanggal_pengembalian) }}</div>
+                                    <div class="flex items-center gap-1.5 mt-1 text-sm">
+                                        <User class="w-3.5 h-3.5 text-blue-600" />
+                                        <span class="font-medium text-blue-600">{{ pengembalian.pic }}</span>
+                                    </div>
                                 </div>
                                 <div class="text-right">
                                     <div class="text-lg font-bold text-orange-600">
                                         {{ formatQty(pengembalian.qty_pengembalian) }} {{ selectedTransaksi.material.satuan }}
                                     </div>
-                                    <div class="text-xs text-gray-500">{{ pengembalian.user.name }}</div>
+                                    <div class="text-xs text-gray-500">Diinput: {{ pengembalian.user.name }}</div>
                                 </div>
                             </div>
 
@@ -1561,44 +1614,43 @@ watch(searchMaterialQuery, () => {
             </div>
         </div>
 
-        <!-- Image Modal -->
-        <div v-if="showImageModal" class="fixed inset-0 backdrop-blur-sm bg-black/80 flex items-center justify-center z-50 p-4">
-            <div class="relative w-full max-w-6xl h-full max-h-[90vh] flex items-center justify-center">
-                <button
-                    @click="closeImageModal"
-                    class="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-                >
-                    <X class="w-6 h-6" />
-                </button>
+    <div v-if="showImageModal" class="fixed inset-0 backdrop-blur-sm bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="relative w-full max-w-6xl h-full max-h-[90vh] flex items-center justify-center">
+            <button
+                @click="closeImageModal"
+                class="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+            >
+                <X class="w-6 h-6" />
+            </button>
 
-                <button
-                    v-if="currentImageIndex > 0"
-                    @click="prevImage"
-                    class="absolute left-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-                >
-                    <ChevronLeft class="w-6 h-6" />
-                </button>
+            <button
+                v-if="currentImageIndex > 0"
+                @click="prevImage"
+                class="absolute left-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+            >
+                <ChevronLeft class="w-6 h-6" />
+            </button>
 
-                <div class="flex items-center justify-center w-full h-full">
-                    <img
-                        :src="currentImageList[currentImageIndex]"
-                        class="max-w-full max-h-full object-contain rounded-lg"
-                        :alt="`Foto ${currentImageIndex + 1}`"
-                    />
-                </div>
+            <div class="flex items-center justify-center w-full h-full">
+                <img
+                    :src="currentImageList[currentImageIndex]"
+                    class="max-w-full max-h-full object-contain rounded-lg"
+                    :alt="`Foto ${currentImageIndex + 1}`"
+                />
+            </div>
 
-                <button
-                    v-if="currentImageIndex < currentImageList.length - 1"
-                    @click="nextImage"
-                    class="absolute right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-                >
-                    <ChevronRight class="w-6 h-6"/>
-                </button>
+            <button
+                v-if="currentImageIndex < currentImageList.length - 1"
+                @click="nextImage"
+                class="absolute right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+            >
+                <ChevronRight class="w-6 h-6"/>
+            </button>
 
-                <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-white/10 text-white rounded-full text-sm">
-                    {{ currentImageIndex + 1 }} / {{ currentImageList.length }}
-                </div>
+            <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-white/10 text-white rounded-full text-sm">
+                {{ currentImageIndex + 1 }} / {{ currentImageList.length }}
             </div>
         </div>
-    </AppLayout>
+    </div>
+</AppLayout>
 </template>

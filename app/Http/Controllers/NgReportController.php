@@ -10,8 +10,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
+
 class NgReportController extends Controller
 {
+    private const TEMPLATE_PATH = 'templates/temporary_action_template.pdf';
     public function dashboard(Request $request)
     {
         $startDate = $request->input('start_date', Carbon::now()->startOfMonth()->toDateString());
@@ -19,6 +21,9 @@ class NgReportController extends Controller
 
         $start = Carbon::parse($startDate)->startOfDay();
         $end = Carbon::parse($endDate)->endOfDay();
+
+        $templateExists = Storage::disk('public')->exists(self::TEMPLATE_PATH);
+        $templateUrl = $templateExists ? Storage::url(self::TEMPLATE_PATH) : null;
 
         $ngByPart = NgReport::with('part')
             ->whereBetween('reported_at', [$start, $end])
@@ -51,7 +56,6 @@ class NgReportController extends Controller
             ->take(15)
             ->values();
 
-        // NG By Type - count semua type yang dipilih (bisa multiple)
         $ngByType = NgReport::whereBetween('reported_at', [$start, $end])
             ->get()
             ->pluck('ng_types')
@@ -75,9 +79,15 @@ class NgReportController extends Controller
         $openNg = NgReport::whereBetween('reported_at', [$start, $end])
             ->where('status', NgReport::STATUS_OPEN)
             ->count();
-        $picaSubmitted = NgReport::whereBetween('reported_at', [$start, $end])
-            ->where('status', NgReport::STATUS_PICA_SUBMITTED)
+
+        // Update: Count based on TA and PICA status
+        $taSubmitted = NgReport::whereBetween('reported_at', [$start, $end])
+            ->whereNotNull('ta_status')
             ->count();
+        $picaSubmitted = NgReport::whereBetween('reported_at', [$start, $end])
+            ->whereNotNull('pica_status')
+            ->count();
+
         $closedNg = NgReport::whereBetween('reported_at', [$start, $end])
             ->where('status', NgReport::STATUS_CLOSED)
             ->count();
@@ -108,12 +118,12 @@ class NgReportController extends Controller
 
         $statusDistribution = [
             ['status' => 'Open', 'count' => $openNg, 'color' => 'red'],
+            ['status' => 'TA Submitted', 'count' => $taSubmitted, 'color' => 'blue'],
             ['status' => 'PICA Submitted', 'count' => $picaSubmitted, 'color' => 'yellow'],
             ['status' => 'Closed', 'count' => $closedNg, 'color' => 'green'],
         ];
 
         $criticalParts = $ngByPart->take(5);
-
         $criticalSuppliers = $ngBySupplier->take(5);
 
         return Inertia::render('NgReports/Dashboard', [
@@ -123,6 +133,7 @@ class NgReportController extends Controller
             'summary' => [
                 'total_ng' => $totalNg,
                 'open_ng' => $openNg,
+                'ta_submitted' => $taSubmitted,
                 'pica_submitted' => $picaSubmitted,
                 'closed_ng' => $closedNg,
                 'total_parts' => $totalParts,
@@ -136,6 +147,8 @@ class NgReportController extends Controller
                 'start_date' => $startDate,
                 'end_date' => $endDate,
             ],
+            'template_exists' => $templateExists,
+            'template_url' => $templateUrl,
         ]);
     }
 
@@ -148,7 +161,6 @@ class NgReportController extends Controller
             $start = Carbon::parse($startDate)->startOfDay();
             $end = Carbon::parse($endDate)->endOfDay();
 
-            // Get all data
             $reports = NgReport::with(['part.supplier'])
                 ->whereBetween('reported_at', [$start, $end])
                 ->orderBy('reported_at', 'desc')
@@ -162,8 +174,13 @@ class NgReportController extends Controller
                     'Part Name' => $report->part->part_name,
                     'Supplier' => $report->part->supplier->supplier_name,
                     'Jenis NG' => implode(', ', array_map('ucfirst', $report->ng_types)),
+                    'Temporary Action' => $report->temporary_actions ? implode(', ', array_map('ucfirst', $report->temporary_actions)) : '-',
+                    'TA Status' => $report->ta_status ? ucfirst($report->ta_status) : '-',
+                    'PICA Status' => $report->pica_status ? ucfirst($report->pica_status) : '-',
                     'Status' => $report->status,
                     'Dilaporkan Oleh' => $report->reported_by,
+                    'TA Submit' => $report->ta_submitted_at ? Carbon::parse($report->ta_submitted_at)->format('d/m/Y H:i') : '-',
+                    'TA Submit By' => $report->ta_submitted_by ?? '-',
                     'PICA Upload' => $report->pica_uploaded_at ? Carbon::parse($report->pica_uploaded_at)->format('d/m/Y H:i') : '-',
                     'PICA Upload By' => $report->pica_uploaded_by ?? '-',
                     'Notes' => $report->notes ?? '-',
@@ -181,6 +198,40 @@ class NgReportController extends Controller
             ], 500);
         }
     }
+
+    public function uploadPicaTemplate(Request $request)
+{
+    $request->validate([
+        'template' => 'required|file|mimes:pdf|max:10240', // max 10MB
+    ]);
+
+    try {
+        if (Storage::disk('public')->exists(self::TEMPLATE_PATH)) {
+            Storage::disk('public')->delete(self::TEMPLATE_PATH);
+        }
+
+        Storage::disk('public')->makeDirectory('templates');
+        $request->file('template')->storeAs('templates', 'temporary_action_template.pdf', 'public');
+
+        return redirect()->back()->with('success', 'Template PICA berhasil diupload!');
+    } catch (\Exception $e) {
+        return redirect()->back()->with('error', 'Gagal mengupload template: ' . $e->getMessage());
+    }
+}
+
+public function deletePicaTemplate()
+{
+    try {
+        if (Storage::disk('public')->exists(self::TEMPLATE_PATH)) {
+            Storage::disk('public')->delete(self::TEMPLATE_PATH);
+        }
+
+        return redirect()->back()->with('success', 'Template PICA berhasil dihapus!');
+    } catch (\Exception $e) {
+        return redirect()->back()->with('error', 'Gagal menghapus template: ' . $e->getMessage());
+    }
+}
+
 
     public function index(Request $request)
     {
@@ -208,11 +259,34 @@ class NgReportController extends Controller
             $query->whereJsonContains('ng_types', $request->ng_type);
         }
 
+        // Filter by TA status
+        if ($request->filled('ta_status') && $request->ta_status !== 'all') {
+            $query->where('ta_status', $request->ta_status);
+        }
+
+        // Filter by PICA status
+        if ($request->filled('pica_status') && $request->pica_status !== 'all') {
+            $query->where('pica_status', $request->pica_status);
+        }
+
         $reports = $query->latest('reported_at')->paginate(10)->withQueryString();
+
+        // Add deadline info to each report
+        $reports->getCollection()->transform(function ($report) {
+            $report->ta_deadline = $report->getTaDeadline()->format('d M Y H:i');
+            $report->pica_deadline = $report->getPicaDeadline()->format('d M Y H:i');
+            $report->is_ta_deadline_exceeded = $report->isTaDeadlineExceeded();
+            $report->is_pica_deadline_exceeded = $report->isPicaDeadlineExceeded();
+            $report->can_be_closed = $report->canBeClosed();
+            return $report;
+        });
 
         $parts = Part::with('supplier')
             ->select('id', 'part_code', 'part_name', 'supplier_id', 'product_images')
             ->get();
+
+         $templateExists = Storage::disk('public')->exists(self::TEMPLATE_PATH);
+        $templateUrl = $templateExists ? Storage::url(self::TEMPLATE_PATH) : null;
 
         return Inertia::render('NgReports/Index', [
             'reports' => $reports,
@@ -221,7 +295,11 @@ class NgReportController extends Controller
                 'search' => $request->search ?? '',
                 'status' => $request->status ?? 'all',
                 'ng_type' => $request->ng_type ?? 'all',
+                'ta_status' => $request->ta_status ?? 'all',
+                'pica_status' => $request->pica_status ?? 'all',
             ],
+            'template_exists' => $templateExists,
+            'template_url' => $templateUrl,
         ]);
     }
 
@@ -249,11 +327,90 @@ class NgReportController extends Controller
 
         NgReport::create($validated);
 
+
         return redirect()->back()->with('success', 'Laporan NG berhasil dibuat!');
+    }
+
+    public function submitTemporaryAction(Request $request, NgReport $ngReport)
+    {
+        // Validate that TA hasn't been submitted yet or was rejected
+        if ($ngReport->ta_status === NgReport::TA_STATUS_SUBMITTED ||
+            $ngReport->ta_status === NgReport::TA_STATUS_APPROVED) {
+            return redirect()->back()->with('error', 'Temporary Action sudah disubmit sebelumnya!');
+        }
+
+        $validated = $request->validate([
+            'temporary_actions' => 'required|array|min:1',
+            'temporary_actions.*' => 'required|in:repair,tukar_guling,sortir',
+            'temporary_action_notes' => 'nullable|string',
+            'ta_submitted_by' => 'required|string',
+        ]);
+
+        $ngReport->update([
+            'temporary_actions' => $validated['temporary_actions'],
+            'temporary_action_notes' => $validated['temporary_action_notes'],
+            'ta_submitted_at' => now(),
+            'ta_submitted_by' => $validated['ta_submitted_by'],
+            'ta_status' => NgReport::TA_STATUS_SUBMITTED,
+            'ta_reviewed_at' => null,
+            'ta_reviewed_by' => null,
+            'ta_rejection_reason' => null,
+        ]);
+
+        return redirect()->back()->with('success', 'Temporary Action berhasil disubmit!');
+    }
+
+    public function approveTemporaryAction(Request $request, NgReport $ngReport)
+    {
+        if ($ngReport->ta_status !== NgReport::TA_STATUS_SUBMITTED) {
+            return redirect()->back()->with('error', 'Temporary Action belum disubmit atau sudah direview!');
+        }
+
+        $validated = $request->validate([
+            'ta_reviewed_by' => 'required|string',
+        ]);
+
+        $ngReport->update([
+            'ta_status' => NgReport::TA_STATUS_APPROVED,
+            'ta_reviewed_at' => now(),
+            'ta_reviewed_by' => $validated['ta_reviewed_by'],
+            'ta_rejection_reason' => null,
+        ]);
+
+        return redirect()->back()->with('success', 'Temporary Action berhasil disetujui!');
+    }
+
+    public function rejectTemporaryAction(Request $request, NgReport $ngReport)
+    {
+        if ($ngReport->ta_status !== NgReport::TA_STATUS_SUBMITTED) {
+            return redirect()->back()->with('error', 'Temporary Action belum disubmit atau sudah direview!');
+        }
+
+        $validated = $request->validate([
+            'ta_reviewed_by' => 'required|string',
+            'ta_rejection_reason' => 'required|string|min:10',
+        ]);
+
+        $ngReport->update([
+            'ta_status' => NgReport::TA_STATUS_REJECTED,
+            'ta_reviewed_at' => now(),
+            'ta_reviewed_by' => $validated['ta_reviewed_by'],
+            'ta_rejection_reason' => $validated['ta_rejection_reason'],
+        ]);
+
+        return redirect()->back()->with('success', 'Temporary Action ditolak. Silakan submit ulang dengan perbaikan.');
     }
 
     public function uploadPica(Request $request, NgReport $ngReport)
     {
+        if (!$ngReport->ta_submitted_at) {
+            return redirect()->back()->with('error', 'Harap submit Temporary Action terlebih dahulu sebelum upload PICA!');
+        }
+
+        if ($ngReport->pica_status === NgReport::PICA_STATUS_APPROVED) {
+            return redirect()->back()->with('error', 'PICA sudah disetujui, tidak bisa diubah!');
+        }
+
         $validated = $request->validate([
             'pica_document' => 'required|file|mimes:pdf|max:10240',
             'pica_uploaded_by' => 'required|string',
@@ -269,10 +426,54 @@ class NgReportController extends Controller
             'pica_document' => $picaPath,
             'pica_uploaded_at' => now(),
             'pica_uploaded_by' => $validated['pica_uploaded_by'],
-            'status' => NgReport::STATUS_PICA_SUBMITTED,
+            'pica_status' => NgReport::PICA_STATUS_SUBMITTED,
+            'pica_reviewed_at' => null,
+            'pica_reviewed_by' => null,
+            'pica_rejection_reason' => null,
         ]);
 
         return redirect()->back()->with('success', 'PICA berhasil diupload!');
+    }
+
+    public function approvePica(Request $request, NgReport $ngReport)
+    {
+        if ($ngReport->pica_status !== NgReport::PICA_STATUS_SUBMITTED) {
+            return redirect()->back()->with('error', 'PICA belum disubmit atau sudah direview!');
+        }
+
+        $validated = $request->validate([
+            'pica_reviewed_by' => 'required|string',
+        ]);
+
+        $ngReport->update([
+            'pica_status' => NgReport::PICA_STATUS_APPROVED,
+            'pica_reviewed_at' => now(),
+            'pica_reviewed_by' => $validated['pica_reviewed_by'],
+            'pica_rejection_reason' => null,
+        ]);
+
+        return redirect()->back()->with('success', 'PICA berhasil disetujui!');
+    }
+
+    public function rejectPica(Request $request, NgReport $ngReport)
+    {
+        if ($ngReport->pica_status !== NgReport::PICA_STATUS_SUBMITTED) {
+            return redirect()->back()->with('error', 'PICA belum disubmit atau sudah direview!');
+        }
+
+        $validated = $request->validate([
+            'pica_reviewed_by' => 'required|string',
+            'pica_rejection_reason' => 'required|string|min:10',
+        ]);
+
+        $ngReport->update([
+            'pica_status' => NgReport::PICA_STATUS_REJECTED,
+            'pica_reviewed_at' => now(),
+            'pica_reviewed_by' => $validated['pica_reviewed_by'],
+            'pica_rejection_reason' => $validated['pica_rejection_reason'],
+        ]);
+
+        return redirect()->back()->with('success', 'PICA ditolak. Silakan upload ulang dengan perbaikan.');
     }
 
     public function cancelPica(NgReport $ngReport)
@@ -285,14 +486,32 @@ class NgReportController extends Controller
             'pica_document' => null,
             'pica_uploaded_at' => null,
             'pica_uploaded_by' => null,
-            'status' => NgReport::STATUS_OPEN,
+            'pica_status' => null,
+            'pica_reviewed_at' => null,
+            'pica_reviewed_by' => null,
+            'pica_rejection_reason' => null,
         ]);
 
-        return redirect()->back()->with('success', 'PICA berhasil dibatalkan! Silakan upload ulang PICA yang sudah direvisi.');
+        return redirect()->back()->with('success', 'PICA berhasil dibatalkan!');
+    }
+
+    public function downloadTemplate()
+    {
+        $templatePath = storage_path('app/public/' . self::TEMPLATE_PATH);
+
+        if (!file_exists($templatePath)) {
+            return redirect()->back()->with('error', 'Template belum diupload! Silakan hubungi admin.');
+        }
+
+        return response()->download($templatePath, 'Template-Temporary-Action.pdf');
     }
 
     public function closeReport(NgReport $ngReport)
     {
+        if (!$ngReport->canBeClosed()) {
+            return redirect()->back()->with('error', 'Laporan hanya bisa ditutup setelah Temporary Action dan PICA disetujui!');
+        }
+
         $ngReport->update([
             'status' => NgReport::STATUS_CLOSED,
         ]);
@@ -302,6 +521,7 @@ class NgReportController extends Controller
 
     public function destroy(NgReport $ngReport)
     {
+        // Delete NG images
         if (!empty($ngReport->ng_images) && is_array($ngReport->ng_images)) {
             foreach ($ngReport->ng_images as $image) {
                 if ($image && Storage::disk('public')->exists($image)) {
@@ -310,6 +530,7 @@ class NgReportController extends Controller
             }
         }
 
+        // Delete PICA document
         if ($ngReport->pica_document && Storage::disk('public')->exists($ngReport->pica_document)) {
             Storage::disk('public')->delete($ngReport->pica_document);
         }

@@ -9,10 +9,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class PengembalianMaterial extends Model
 {
     use HasFactory, SoftDeletes;
+
     protected $fillable = [
         'pengembalian_id',
         'transaksi_material_id',
         'tanggal_pengembalian',
+        'pic',
         'qty_pengembalian',
         'foto',
         'keterangan',

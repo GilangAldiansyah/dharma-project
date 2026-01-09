@@ -19,6 +19,7 @@ class TransaksiMaterialController extends Controller
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->search;
                 $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhere('pic', 'like', "%{$search}%")
                     ->orWhereHas('material', function ($q) use ($search) {
                         $q->where('nama_material', 'like', "%{$search}%");
                     });
@@ -52,11 +53,11 @@ class TransaksiMaterialController extends Controller
             return $item;
         });
 
-        // Get statistics based on current filters
         $statsQuery = TransaksiMaterial::query()
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->search;
                 $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhere('pic', 'like', "%{$search}%")
                     ->orWhereHas('material', function ($q) use ($search) {
                         $q->where('nama_material', 'like', "%{$search}%");
                     });
@@ -111,6 +112,7 @@ class TransaksiMaterialController extends Controller
         $validated = $request->validate([
             'tanggal' => 'required|date',
             'shift' => 'required|integer|in:1,2,3',
+            'pic' => 'required|string|max:100',
             'material_id' => 'required|exists:materials,id',
             'part_material_id' => 'nullable|exists:part_materials,id',
             'qty' => 'required|numeric|min:0.01',
@@ -157,6 +159,7 @@ class TransaksiMaterialController extends Controller
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->search;
                 $query->where('transaksi_id', 'like', "%{$search}%")
+                    ->orWhere('pic', 'like', "%{$search}%")
                     ->orWhereHas('material', function ($q) use ($search) {
                         $q->where('nama_material', 'like', "%{$search}%");
                     });

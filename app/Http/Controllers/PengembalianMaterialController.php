@@ -18,6 +18,7 @@ class PengembalianMaterialController extends Controller
         $validated = $request->validate([
             'transaksi_material_id' => 'required|exists:transaksi_materials,id',
             'tanggal_pengembalian' => 'required|date',
+            'pic' => 'required|string|max:100',
             'qty_pengembalian' => 'required|numeric|min:0.01',
             'keterangan' => 'nullable|string|max:500',
             'foto.*' => 'nullable|image|max:5120',
@@ -51,7 +52,6 @@ class PengembalianMaterialController extends Controller
 
             $validated['user_id'] = Auth::id();
 
-            // Handle foto upload
             if ($request->hasFile('foto')) {
                 $fotoPaths = [];
                 foreach ($request->file('foto') as $foto) {
@@ -90,7 +90,6 @@ class PengembalianMaterialController extends Controller
 
             Log::info('Deleting pengembalian', ['id' => $id, 'pengembalian_id' => $pengembalian->pengembalian_id]);
 
-            // Delete photos from storage
             if ($pengembalian->foto && is_array($pengembalian->foto)) {
                 foreach ($pengembalian->foto as $foto) {
                     if (Storage::disk('public')->exists($foto)) {
@@ -118,20 +117,20 @@ class PengembalianMaterialController extends Controller
     }
 
     public function getPengembalianHistory($transaksiId)
-{
-    $pengembalian = PengembalianMaterial::with('user')
-        ->where('transaksi_material_id', $transaksiId)
-        ->orderBy('tanggal_pengembalian', 'desc')
-        ->get();
+    {
+        $pengembalian = PengembalianMaterial::with('user')
+            ->where('transaksi_material_id', $transaksiId)
+            ->orderBy('tanggal_pengembalian', 'desc')
+            ->get();
 
-    $totalPengembalian = $pengembalian->sum('qty_pengembalian');
+        $totalPengembalian = $pengembalian->sum('qty_pengembalian');
 
-    $tanggalPengembalianTerakhir = $pengembalian->first()?->tanggal_pengembalian;
+        $tanggalPengembalianTerakhir = $pengembalian->first()?->tanggal_pengembalian;
 
-    return response()->json([
-        'pengembalian' => $pengembalian,
-        'totalPengembalian' => $totalPengembalian,
-        'tanggalPengembalianTerakhir' => $tanggalPengembalianTerakhir,
-    ]);
-}
+        return response()->json([
+            'pengembalian' => $pengembalian,
+            'totalPengembalian' => $totalPengembalian,
+            'tanggalPengembalianTerakhir' => $tanggalPengembalianTerakhir,
+        ]);
+    }
 }
