@@ -382,7 +382,7 @@ const removeImportRow = (index: number) => {
                             />
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-1">Telepon (angka saja)</label>
+                            <label class="block text-sm font-medium mb-1">Telepon</label>
                             <div class="relative">
                                 <input
                                     v-model="form.phone"
@@ -404,7 +404,6 @@ const removeImportRow = (index: number) => {
                                 </div>
                             </div>
                             <p v-if="form.errors.phone" class="text-xs text-red-600 mt-1">{{ form.errors.phone }}</p>
-                            <p v-else class="text-xs text-gray-500 mt-1">Hanya angka. Minimal 8 digit, maksimal 15 digit</p>
                         </div>
                     </div>
 

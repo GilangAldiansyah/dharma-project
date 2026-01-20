@@ -91,16 +91,16 @@ const toggleAutoRefresh = () => {
 </script>
 
 <template>
-    <Head title="ESP32 Monitor" />
+    <Head title="Robot Information" />
     <AppLayout :breadcrumbs="[
-        { title: 'ESP32 Monitor', href: '/esp32/monitor' }
+        { title: 'Robot Information', href: '/esp32/monitor' }
     ]">
         <div class="p-4 space-y-4">
             <!-- Header -->
             <div class="flex justify-between items-center">
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Activity class="w-6 h-6 text-blue-600" />
-                    ESP32 Device Monitor
+                    Robot Information
                 </h1>
                 <div class="flex items-center gap-2">
                     <button
@@ -125,7 +125,6 @@ const toggleAutoRefresh = () => {
                 </div>
             </div>
 
-            <!-- Stats Summary -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="bg-white dark:bg-sidebar border border-sidebar-border rounded-lg p-4">
                     <div class="text-sm text-gray-600 dark:text-gray-400">Total Devices</div>

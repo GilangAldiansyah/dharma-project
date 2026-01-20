@@ -115,13 +115,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/pengembalian/{pengembalian}', [PengembalianMaterialController::class, 'destroy'])->name('pengembalian.destroy');
     Route::get('/transaksi/{transaksi}/pengembalian-history', [PengembalianMaterialController::class, 'getPengembalianHistory']);
 
-    Route::prefix('maintenance/operations')->group(function () {
-        Route::post('/start', [LineOperationController::class, 'startOperation'])->name('maintenance.operations.start');
-        Route::post('/{operationId}/stop', [LineOperationController::class, 'stopOperation'])->name('maintenance.operations.stop');
-        Route::get('/lines/{lineId}/current', [LineOperationController::class, 'getCurrentOperation'])->name('maintenance.operations.current');
-        Route::get('/lines/{lineId}/history', [LineOperationController::class, 'getOperationHistory'])->name('maintenance.operations.history');
-    });
-
     Route::get('/maintenance', [MaintenanceController::class, 'index'])->name('maintenance.index');
     Route::get('/maintenance/dashboard', [MaintenanceController::class, 'dashboard'])->name('maintenance.dashboard');
     Route::post('/maintenance', [MaintenanceController::class, 'store'])->name('maintenance.store');
@@ -138,11 +131,27 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/{id}/metrics', [MachineController::class, 'metrics'])->name('metrics');
     });
 
-    Route::prefix('maintenance/lines')->group(function () {
-        Route::get('/', [LineController::class, 'index'])->name('maintenance.lines.index');
-        Route::post('/', [LineController::class, 'store'])->name('maintenance.lines.store');
-        Route::put('/{id}', [LineController::class, 'update'])->name('maintenance.lines.update');
-        Route::delete('/{id}', [LineController::class, 'destroy'])->name('maintenance.lines.destroy');
+    Route::prefix('maintenance/lines')->name('maintenance.lines.')->group(function () {
+        Route::get('/', [LineController::class, 'index'])->name('index');
+        Route::post('/', [LineController::class, 'store'])->name('store');
+        Route::put('/{id}', [LineController::class, 'update'])->name('update');
+        Route::delete('/{id}', [LineController::class, 'destroy'])->name('destroy');
+        Route::post('/{id}/reset', [LineController::class, 'resetMetrics'])->name('reset');
+        Route::post('/line-stop', [LineController::class, 'lineStop'])->name('line-stop');
+        Route::post('/scan-qr', [LineController::class, 'scanQrCode'])->name('scan-qr');
+        Route::post('/reports/{reportId}/complete', [LineController::class, 'quickComplete'])->name('reports.complete');
+        Route::get('/{lineId}/active-reports', [LineController::class, 'getActiveReports'])->name('active-reports');
+        Route::post('/{line}/reset-metrics', [LineController::class, 'resetMetrics'])->name('reset-metrics');
+        Route::get('/{line}/history', [LineController::class, 'history'])->name('history');
+        Route::get('/{line}/summary', [LineController::class, 'getSummary'])->name('summary');
+    });
+
+    Route::prefix('maintenance/operations')->group(function () {
+        Route::post('/start', [LineOperationController::class, 'startOperation'])->name('maintenance.operations.start');
+        Route::post('/{operationId}/pause', [LineOperationController::class, 'pauseOperation'])->name('maintenance.operations.pause');
+        Route::post('/{operationId}/resume', [LineOperationController::class, 'resumeOperation'])->name('maintenance.operations.resume');
+        Route::post('/{operationId}/stop', [LineOperationController::class, 'stopOperation'])->name('maintenance.operations.stop');
+        Route::get('/lines/{lineId}/current', [LineOperationController::class, 'getCurrentOperation'])->name('maintenance.operations.current');
     });
 });
 

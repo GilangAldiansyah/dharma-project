@@ -18,6 +18,9 @@ class LineOperation extends Model
         'started_by',
         'stopped_at',
         'stopped_by',
+        'paused_at',
+        'resumed_at',
+        'total_pause_minutes',
         'duration_minutes',
         'mtbf_hours',
         'status',
@@ -27,7 +30,11 @@ class LineOperation extends Model
     protected $casts = [
         'started_at' => 'datetime',
         'stopped_at' => 'datetime',
-        'mtbf_hours' => 'decimal:2',
+        'paused_at' => 'datetime',
+        'resumed_at' => 'datetime',
+        'mtbf_hours' => 'decimal:4',
+        'total_pause_minutes' => 'decimal:4',
+        'duration_minutes' => 'decimal:4',
     ];
 
     public function line(): BelongsTo
@@ -45,12 +52,70 @@ class LineOperation extends Model
         return $this->status === 'running';
     }
 
+    public function isPaused(): bool
+    {
+        return $this->status === 'paused';
+    }
+
+    public function pause(string $pausedBy = 'System'): void
+    {
+        if ($this->status !== 'running') {
+            return;
+        }
+
+        $this->update([
+            'status' => 'paused',
+            'paused_at' => now(),
+            'notes' => ($this->notes ? $this->notes . "\n" : '') . "Paused by {$pausedBy} at " . now()->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function resume(string $resumedBy = 'System'): void
+    {
+        if ($this->status !== 'paused') {
+            return;
+        }
+
+        $pauseDurationSeconds = $this->paused_at->diffInSeconds(now());
+        $pauseDurationMinutes = $pauseDurationSeconds / 60;
+
+        $this->update([
+            'status' => 'running',
+            'resumed_at' => now(),
+            'total_pause_minutes' => ($this->total_pause_minutes ?? 0) + $pauseDurationMinutes,
+            'notes' => ($this->notes ? $this->notes . "\n" : '') .
+                    "Resumed by {$resumedBy} at " . now()->format('Y-m-d H:i:s') .
+                    " (paused for " . gmdate('i:s', $pauseDurationSeconds) . ")",
+        ]);
+
+        $this->paused_at = null;
+        $this->save();
+    }
+
     public function calculateMetrics(): void
     {
         if ($this->started_at && $this->stopped_at) {
-            $this->duration_minutes = $this->started_at->diffInMinutes($this->stopped_at);
-            $this->mtbf_hours = round($this->duration_minutes / 60, 2);
+            $totalSeconds = $this->started_at->diffInSeconds($this->stopped_at);
+            $pauseMinutes = $this->total_pause_minutes ?? 0;
+            $pauseSeconds = $pauseMinutes * 60;
+
+            $netSeconds = max(0, $totalSeconds - $pauseSeconds);
+            $netMinutes = $netSeconds / 60;
+
+            $this->duration_minutes = $netMinutes;
+
+            $failuresCount = $this->maintenanceReports()
+                ->where('status', 'Selesai')
+                ->count();
+
+            if ($failuresCount > 0) {
+                $this->mtbf_hours = $netSeconds / 3600 / $failuresCount;
+            } else {
+                $this->mtbf_hours = $netSeconds / 3600;
+            }
+
             $this->save();
+            $this->line->recalculateMetrics();
         }
     }
 
@@ -60,19 +125,53 @@ class LineOperation extends Model
             return null;
         }
 
-        $hours = floor($this->duration_minutes / 60);
-        $minutes = $this->duration_minutes % 60;
+        $totalSeconds = $this->duration_minutes * 60;
+        $hours = floor($totalSeconds / 3600);
+        $minutes = floor(($totalSeconds % 3600) / 60);
+        $seconds = floor($totalSeconds % 60);
 
         if ($hours > 0) {
-            return "{$hours}h {$minutes}m";
+            return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
         }
-
-        return "{$minutes}m";
+        return sprintf('%02d:%02d', $minutes, $seconds);
     }
 
-    /**
-     * Generate unique operation number
-     */
+    public function getFormattedPauseDurationAttribute(): ?string
+    {
+        if (!$this->total_pause_minutes) {
+            return null;
+        }
+
+        $totalSeconds = $this->total_pause_minutes * 60;
+        $hours = floor($totalSeconds / 3600);
+        $minutes = floor(($totalSeconds % 3600) / 60);
+        $seconds = floor($totalSeconds % 60);
+
+        if ($hours > 0) {
+            return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+        }
+        return sprintf('%02d:%02d', $minutes, $seconds);
+    }
+
+    public function getTotalRepairMinutesAttribute(): float
+    {
+        return $this->maintenanceReports()
+            ->where('status', 'Selesai')
+            ->sum('repair_duration_minutes') ?? 0;
+    }
+
+    public function getNetOperationMinutesAttribute(): float
+    {
+        if (!$this->started_at || !$this->stopped_at) {
+            return 0;
+        }
+
+        $totalSeconds = $this->started_at->diffInSeconds($this->stopped_at);
+        $pauseSeconds = ($this->total_pause_minutes ?? 0) * 60;
+
+        return max(0, ($totalSeconds - $pauseSeconds) / 60);
+    }
+
     public static function generateOperationNumber(): string
     {
         $date = now()->format('Ymd');
@@ -80,25 +179,21 @@ class LineOperation extends Model
         return "OP-{$date}-" . str_pad($count, 4, '0', STR_PAD_LEFT);
     }
 
-    /**
-     * Scope: Running operations
-     */
     public function scopeRunning($query)
     {
         return $query->where('status', 'running');
     }
 
-    /**
-     * Scope: Stopped operations
-     */
+    public function scopePaused($query)
+    {
+        return $query->where('status', 'paused');
+    }
+
     public function scopeStopped($query)
     {
         return $query->where('status', 'stopped');
     }
 
-    /**
-     * Scope: Completed operations (stopped with both dates recorded)
-     */
     public function scopeCompleted($query)
     {
         return $query->where('status', 'stopped')
@@ -106,9 +201,6 @@ class LineOperation extends Model
             ->whereNotNull('stopped_at');
     }
 
-    /**
-     * Scope: By line
-     */
     public function scopeByLine($query, int $lineId)
     {
         return $query->where('line_id', $lineId);

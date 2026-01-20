@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, watch, nextTick } from 'vue';
-import { Search, Plus, Package, Eye, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight, Download, Undo2, History, ChevronDown, ChevronUp } from 'lucide-vue-next';
+import { Search, Plus, Package, Eye, Trash2, X, Camera, Calendar, User, Hash, ChevronLeft, ChevronRight, Download, Undo2, History, ChevronDown, ChevronUp, Loader2 } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
 interface Material {
@@ -89,6 +89,10 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const MAX_WIDTH = 1920;
+const MAX_HEIGHT = 1920;
+const COMPRESSION_QUALITY = 0.8;
+
 const searchQuery = ref(props.filters.search || '');
 const filterShift = ref(props.filters.shift || '');
 const filterDateFrom = ref(props.filters.date_from || '');
@@ -115,6 +119,8 @@ const previewImages = ref<string[]>([]);
 const pengembalianPreviewImages = ref<string[]>([]);
 const currentImageIndex = ref(0);
 const currentImageList = ref<string[]>([]);
+const isCompressingImage = ref(false);
+const compressionProgress = ref('');
 
 const form = useForm({
     tanggal: new Date().toISOString().split('T')[0],
@@ -134,6 +140,83 @@ const pengembalianForm = useForm({
     keterangan: '',
     foto: [] as File[],
 });
+
+const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+};
+
+const compressImage = (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onerror = () => reject(new Error('Gagal membaca file'));
+
+        reader.onload = (e) => {
+            const img = new Image();
+
+            img.onerror = () => reject(new Error('Gagal memuat gambar'));
+
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+                    if (width > height) {
+                        height = (height / width) * MAX_WIDTH;
+                        width = MAX_WIDTH;
+                    } else {
+                        width = (width / height) * MAX_HEIGHT;
+                        height = MAX_HEIGHT;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error('Gagal mendapatkan canvas context'));
+                    return;
+                }
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob(
+                    (blob) => {
+                        if (!blob) {
+                            reject(new Error('Gagal mengkompresi gambar'));
+                            return;
+                        }
+
+                        const compressedFile = new File(
+                            [blob],
+                            file.name.replace(/\.[^/.]+$/, '.jpg'),
+                            {
+                                type: 'image/jpeg',
+                                lastModified: Date.now()
+                            }
+                        );
+
+                        resolve(compressedFile);
+                    },
+                    'image/jpeg',
+                    COMPRESSION_QUALITY
+                );
+            };
+
+            img.src = e.target?.result as string;
+        };
+
+        reader.readAsDataURL(file);
+    });
+};
 
 const formatQty = (qty: number) => {
     return parseFloat(qty.toString());
@@ -237,7 +320,6 @@ const prevImage = () => {
         currentImageIndex.value--;
     }
 };
-
 const exportToExcel = async () => {
     try {
         const exportButton = document.querySelector('[title="Export ke Excel"]') as HTMLButtonElement;
@@ -429,10 +511,6 @@ const deleteMultiple = () => {
     }
 };
 
-watch(() => props.transaksi.data, () => {
-    selectAll.value = selectedItems.value.length === props.transaksi.data.length && props.transaksi.data.length > 0;
-}, { deep: true });
-
 const openModal = () => {
     showModal.value = true;
     form.reset();
@@ -481,31 +559,6 @@ const closePengembalianModal = () => {
     pengembalianPreviewImages.value = [];
 };
 
-const handlePengembalianFileChange = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const files = Array.from(target.files || []);
-
-    if (files.length + pengembalianForm.foto.length > 5) {
-        alert('Maksimal 5 foto');
-        return;
-    }
-
-    pengembalianForm.foto = [...pengembalianForm.foto, ...files].slice(0, 5);
-
-    files.forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            pengembalianPreviewImages.value.push(e.target?.result as string);
-        };
-        reader.readAsDataURL(file);
-    });
-};
-
-const removePengembalianImage = (index: number) => {
-    pengembalianForm.foto.splice(index, 1);
-    pengembalianPreviewImages.value.splice(index, 1);
-};
-
 const submitPengembalian = () => {
     pengembalianForm.post('/pengembalian', {
         onSuccess: () => {
@@ -521,8 +574,7 @@ const viewPengembalianHistory = async (transaksi: Transaksi) => {
         pengembalianHistory.value = data.pengembalian;
         selectedTransaksi.value = { ...transaksi, total_pengembalian: data.totalPengembalian };
         showPengembalianHistoryModal.value = true;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (error) {
+    } catch {
         alert('Gagal memuat riwayat pengembalian');
     }
 };
@@ -546,8 +598,7 @@ const searchMaterial = async () => {
         const contentType = response.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) throw new Error("Response is not JSON");
         searchResults.value = await response.json();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (error) {
+    } catch {
         searchResults.value = [];
         alert('Gagal mencari material. Silakan coba lagi.');
     } finally {
@@ -566,27 +617,132 @@ const selectMaterial = (material: Material) => {
     searchResults.value = [];
     searchMaterialQuery.value = '';
 };
-
-const handleFileChange = (event: Event) => {
+const handleFileChange = async (event: Event) => {
     const target = event.target as HTMLInputElement;
     const files = Array.from(target.files || []);
+
+    if (files.length === 0) return;
+
     if (files.length + form.foto.length > 5) {
         alert('Maksimal 5 foto');
+        target.value = '';
         return;
     }
-    form.foto = [...form.foto, ...files].slice(0, 5);
-    files.forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            previewImages.value.push(e.target?.result as string);
-        };
-        reader.readAsDataURL(file);
-    });
+
+    isCompressingImage.value = true;
+    const compressedFiles: File[] = [];
+    const newPreviewImages: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        compressionProgress.value = `Memproses gambar ${i + 1} dari ${files.length}...`;
+
+        if (!file.type.startsWith('image/')) {
+            alert(`File "${file.name}" bukan gambar yang valid`);
+            continue;
+        }
+
+        try {
+            const compressedFile = await compressImage(file);
+            const originalSize = formatFileSize(file.size);
+            const compressedSize = formatFileSize(compressedFile.size);
+            const savedPercent = Math.round((1 - compressedFile.size / file.size) * 100);
+
+            console.log(`Kompresi berhasil: ${file.name}`);
+            console.log(`  Ukuran asli: ${originalSize}`);
+            console.log(`  Ukuran terkompresi: ${compressedSize}`);
+            console.log(`  Hemat: ${savedPercent}%`);
+
+            compressedFiles.push(compressedFile);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                newPreviewImages.push(e.target?.result as string);
+            };
+            reader.readAsDataURL(compressedFile);
+        } catch (error) {
+            console.error(`Gagal memproses ${file.name}:`, error);
+            alert(`Gagal memproses gambar "${file.name}". Silakan coba lagi.`);
+        }
+    }
+
+    form.foto = [...form.foto, ...compressedFiles].slice(0, 5);
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+    previewImages.value = [...previewImages.value, ...newPreviewImages].slice(0, 5);
+
+    isCompressingImage.value = false;
+    compressionProgress.value = '';
+    target.value = '';
+};
+
+const handlePengembalianFileChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    const files = Array.from(target.files || []);
+
+    if (files.length === 0) return;
+
+    if (files.length + pengembalianForm.foto.length > 5) {
+        alert('Maksimal 5 foto');
+        target.value = '';
+        return;
+    }
+
+    isCompressingImage.value = true;
+    const compressedFiles: File[] = [];
+    const newPreviewImages: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        compressionProgress.value = `Memproses gambar ${i + 1} dari ${files.length}...`;
+
+        if (!file.type.startsWith('image/')) {
+            alert(`File "${file.name}" bukan gambar yang valid`);
+            continue;
+        }
+
+        try {
+            const compressedFile = await compressImage(file);
+            const originalSize = formatFileSize(file.size);
+            const compressedSize = formatFileSize(compressedFile.size);
+            const savedPercent = Math.round((1 - compressedFile.size / file.size) * 100);
+
+            console.log(`Kompresi berhasil: ${file.name}`);
+            console.log(`  Ukuran asli: ${originalSize}`);
+            console.log(`  Ukuran terkompresi: ${compressedSize}`);
+            console.log(`  Hemat: ${savedPercent}%`);
+
+            compressedFiles.push(compressedFile);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                newPreviewImages.push(e.target?.result as string);
+            };
+            reader.readAsDataURL(compressedFile);
+        } catch (error) {
+            console.error(`Gagal memproses ${file.name}:`, error);
+            alert(`Gagal memproses gambar "${file.name}". Silakan coba lagi.`);
+        }
+    }
+
+    pengembalianForm.foto = [...pengembalianForm.foto, ...compressedFiles].slice(0, 5);
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+    pengembalianPreviewImages.value = [...pengembalianPreviewImages.value, ...newPreviewImages].slice(0, 5);
+
+    isCompressingImage.value = false;
+    compressionProgress.value = '';
+    target.value = '';
 };
 
 const removeImage = (index: number) => {
     form.foto.splice(index, 1);
     previewImages.value.splice(index, 1);
+};
+
+const removePengembalianImage = (index: number) => {
+    pengembalianForm.foto.splice(index, 1);
+    pengembalianPreviewImages.value.splice(index, 1);
 };
 
 const submit = () => {
@@ -598,6 +754,10 @@ const submit = () => {
 };
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(() => props.transaksi.data, () => {
+    selectAll.value = selectedItems.value.length === props.transaksi.data.length && props.transaksi.data.length > 0;
+}, { deep: true });
 
 watch([searchQuery, filterShift, filterDateFrom, filterDateTo, filterHasReturn], () => {
     if (searchTimer) {
@@ -1300,19 +1460,28 @@ watch(searchMaterialQuery, () => {
                     <div>
                         <label class="block text-sm font-medium mb-2">Foto (Opsional)</label>
                         <div class="flex items-center gap-4">
-                            <label class="cursor-pointer flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-                                <Camera class="w-4 h-4" />
-                                Pilih Foto
+                            <label :class="[
+                                'cursor-pointer flex items-center gap-2 px-4 py-2 text-white rounded-md transition-colors',
+                                isCompressingImage ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                            ]">
+                                <Loader2 v-if="isCompressingImage" class="w-4 h-4 animate-spin" />
+                                <Camera v-else class="w-4 h-4" />
+                                {{ isCompressingImage ? 'Memproses...' : 'Pilih Foto' }}
                                 <input
                                     type="file"
                                     accept="image/*"
                                     multiple
                                     @change="handleFileChange"
                                     class="hidden"
-                                    :disabled="form.foto.length >= 5"
+                                    :disabled="form.foto.length >= 5 || isCompressingImage"
                                 />
                             </label>
                             <span class="text-sm text-gray-500">{{ form.foto.length }}/5 foto</span>
+                        </div>
+
+                        <div v-if="isCompressingImage" class="mt-2 text-xs text-blue-600 flex items-center gap-2">
+                            <Loader2 class="w-3 h-3 animate-spin" />
+                            {{ compressionProgress }}
                         </div>
 
                         <div v-if="previewImages.length > 0" class="mt-4 grid grid-cols-5 gap-2">
@@ -1340,7 +1509,7 @@ watch(searchMaterialQuery, () => {
                     <div class="flex gap-3 pt-4 border-t border-sidebar-border">
                         <button
                             type="submit"
-                            :disabled="form.processing || !selectedMaterial"
+                            :disabled="form.processing || !selectedMaterial || isCompressingImage"
                             class="flex-1 px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                         >
                             {{ form.processing ? 'Menyimpan...' : 'Simpan Transaksi' }}
@@ -1349,6 +1518,7 @@ watch(searchMaterialQuery, () => {
                             type="button"
                             @click="closeModal"
                             class="px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                            :disabled="isCompressingImage"
                         >
                             Batal
                         </button>
@@ -1356,7 +1526,6 @@ watch(searchMaterialQuery, () => {
                 </form>
             </div>
         </div>
-
         <div v-if="showPengembalianModal && selectedTransaksi" class="fixed inset-0 backdrop-blur-sm bg-white/30 dark:bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-sidebar rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div class="flex items-center justify-between p-6 border-b border-sidebar-border sticky top-0 bg-white dark:bg-sidebar z-10">
@@ -1463,19 +1632,28 @@ watch(searchMaterialQuery, () => {
                     <div>
                         <label class="block text-sm font-medium mb-2">Foto (Opsional)</label>
                         <div class="flex items-center gap-4">
-                            <label class="cursor-pointer flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors">
-                                <Camera class="w-4 h-4" />
-                                Pilih Foto
+                            <label :class="[
+                                'cursor-pointer flex items-center gap-2 px-4 py-2 text-white rounded-md transition-colors',
+                                isCompressingImage ? 'bg-gray-400 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-700'
+                            ]">
+                                <Loader2 v-if="isCompressingImage" class="w-4 h-4 animate-spin" />
+                                <Camera v-else class="w-4 h-4" />
+                                {{ isCompressingImage ? 'Memproses...' : 'Pilih Foto' }}
                                 <input
                                     type="file"
                                     accept="image/*"
                                     multiple
                                     @change="handlePengembalianFileChange"
                                     class="hidden"
-                                    :disabled="pengembalianForm.foto.length >= 5"
+                                    :disabled="pengembalianForm.foto.length >= 5 || isCompressingImage"
                                 />
                             </label>
                             <span class="text-sm text-gray-500">{{ pengembalianForm.foto.length }}/5 foto</span>
+                        </div>
+
+                        <div v-if="isCompressingImage" class="mt-2 text-xs text-orange-600 flex items-center gap-2">
+                            <Loader2 class="w-3 h-3 animate-spin" />
+                            {{ compressionProgress }}
                         </div>
 
                         <div v-if="pengembalianPreviewImages.length > 0" class="mt-4 grid grid-cols-5 gap-2">
@@ -1503,7 +1681,7 @@ watch(searchMaterialQuery, () => {
                     <div class="flex gap-3 pt-4 border-t border-sidebar-border">
                         <button
                             type="submit"
-                            :disabled="pengembalianForm.processing"
+                            :disabled="pengembalianForm.processing || isCompressingImage"
                             class="flex-1 px-6 py-3 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                         >
                             {{ pengembalianForm.processing ? 'Menyimpan...' : 'Simpan Pengembalian' }}
@@ -1512,6 +1690,7 @@ watch(searchMaterialQuery, () => {
                             type="button"
                             @click="closePengembalianModal"
                             class="px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                            :disabled="isCompressingImage"
                         >
                             Batal
                         </button>
@@ -1613,44 +1792,43 @@ watch(searchMaterialQuery, () => {
                 </div>
             </div>
         </div>
+        <div v-if="showImageModal" class="fixed inset-0 backdrop-blur-sm bg-black/80 flex items-center justify-center z-50 p-4">
+            <div class="relative w-full max-w-6xl h-full max-h-[90vh] flex items-center justify-center">
+                <button
+                    @click="closeImageModal"
+                    class="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <X class="w-6 h-6" />
+                </button>
 
-    <div v-if="showImageModal" class="fixed inset-0 backdrop-blur-sm bg-black/80 flex items-center justify-center z-50 p-4">
-        <div class="relative w-full max-w-6xl h-full max-h-[90vh] flex items-center justify-center">
-            <button
-                @click="closeImageModal"
-                class="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-            >
-                <X class="w-6 h-6" />
-            </button>
+                <button
+                    v-if="currentImageIndex > 0"
+                    @click="prevImage"
+                    class="absolute left-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <ChevronLeft class="w-6 h-6" />
+                </button>
 
-            <button
-                v-if="currentImageIndex > 0"
-                @click="prevImage"
-                class="absolute left-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-            >
-                <ChevronLeft class="w-6 h-6" />
-            </button>
+                <div class="flex items-center justify-center w-full h-full">
+                    <img
+                        :src="currentImageList[currentImageIndex]"
+                        class="max-w-full max-h-full object-contain rounded-lg"
+                        :alt="`Foto ${currentImageIndex + 1}`"
+                    />
+                </div>
 
-            <div class="flex items-center justify-center w-full h-full">
-                <img
-                    :src="currentImageList[currentImageIndex]"
-                    class="max-w-full max-h-full object-contain rounded-lg"
-                    :alt="`Foto ${currentImageIndex + 1}`"
-                />
-            </div>
+                <button
+                    v-if="currentImageIndex < currentImageList.length - 1"
+                    @click="nextImage"
+                    class="absolute right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
+                >
+                    <ChevronRight class="w-6 h-6"/>
+                </button>
 
-            <button
-                v-if="currentImageIndex < currentImageList.length - 1"
-                @click="nextImage"
-                class="absolute right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-10"
-            >
-                <ChevronRight class="w-6 h-6"/>
-            </button>
-
-            <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-white/10 text-white rounded-full text-sm">
-                {{ currentImageIndex + 1 }} / {{ currentImageList.length }}
+                <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-white/10 text-white rounded-full text-sm">
+                    {{ currentImageIndex + 1 }} / {{ currentImageList.length }}
+                </div>
             </div>
         </div>
-    </div>
-</AppLayout>
+    </AppLayout>
 </template>

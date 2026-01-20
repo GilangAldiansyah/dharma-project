@@ -355,7 +355,7 @@ onUnmounted(() => {
                                     Periode ini
                                 </p>
                                 <p class="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                                    ~{{ avgStopsPerDay }}/hari
+                                    {{ avgStopsPerDay }}/hari
                                 </p>
                             </div>
                         </div>
@@ -927,7 +927,6 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <!-- Modal Footer -->
                     <div class="border-t-2 border-sidebar-border p-4 bg-gray-50 dark:bg-gray-750">
                         <button
                             @click="closeMachineBreakdown"

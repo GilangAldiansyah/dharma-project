@@ -64,13 +64,13 @@ class WelcomeController extends Controller
                 ],
                 [
                     'id' => 'esp32-monitor',
-                    'title' => 'ESP32 Monitor',
-                    'description' => 'Sistem monitoring real-time untuk ESP32 counter devices',
+                    'title' => 'Robot Information',
+                    'description' => 'Sistem monitoring real-time counter devices robot',
                     'icon' => 'Bot',
                     'color' => 'black',
                     'route' => '/esp32/monitor',
                     'features' => [
-                        'Real-time device monitoring',
+                        'Real-time robot monitoring',
                         'Relay status control',
                         'History logs & analytics'
                     ]

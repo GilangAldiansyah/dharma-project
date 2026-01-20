@@ -10,67 +10,142 @@ use Illuminate\Support\Facades\Log;
 
 class LineOperationController extends Controller
 {
-   public function startOperation(Request $request)
-{
-    try {
-        $validated = $request->validate([
-            'line_id' => 'required|exists:lines,id',
-            'started_by' => 'nullable|string|max:100',
-            'notes' => 'nullable|string',
-        ]);
+    public function startOperation(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'line_id' => 'required|exists:lines,id',
+                'started_by' => 'nullable|string|max:100',
+                'notes' => 'nullable|string',
+            ]);
 
-        DB::beginTransaction();
+            DB::beginTransaction();
 
-        $line = Line::findOrFail($validated['line_id']);
+            $line = Line::findOrFail($validated['line_id']);
+            $runningOperation = $line->currentOperation;
 
-        $runningOperation = $line->currentOperation;
+            if ($runningOperation) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Line sudah dalam status operasi.',
+                ], 400);
+            }
 
-        if ($runningOperation) {
+            $operation = LineOperation::create([
+                'line_id' => $validated['line_id'],
+                'operation_number' => LineOperation::generateOperationNumber(),
+                'started_at' => now(),
+                'started_by' => $validated['started_by'] ?: 'System',
+                'status' => 'running',
+                'notes' => $validated['notes'],
+            ]);
+
+            $line->update([
+                'status' => 'operating',
+                'last_operation_start' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Operasi berhasil dimulai',
+                'data' => $operation,
+            ]);
+
+        } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Start operation error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Line sudah dalam status operasi.',
-            ], 400);
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $operation = LineOperation::create([
-            'line_id' => $validated['line_id'],
-            'operation_number' => LineOperation::generateOperationNumber(),
-            'started_at' => now(),
-            'started_by' => $validated['started_by'] ?: 'System',
-            'status' => 'running',
-            'notes' => $validated['notes'],
-        ]);
-
-        $line->update([
-            'status' => 'operating',
-            'last_operation_start' => now(),
-        ]);
-
-        DB::commit();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Operasi berhasil dimulai',
-            'data' => $operation,
-        ]);
-
-    } catch (\Illuminate\Validation\ValidationException $e) {
-        DB::rollBack();
-        return response()->json([
-            'success' => false,
-            'message' => 'Validasi gagal',
-            'errors' => $e->errors(),
-        ], 422);
-
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response()->json([
-            'success' => false,
-            'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
-        ], 500);
     }
-}
+
+    public function pauseOperation(Request $request, int $operationId)
+    {
+        try {
+            $validated = $request->validate([
+                'paused_by' => 'nullable|string|max:100',
+            ]);
+
+            DB::beginTransaction();
+
+            $operation = LineOperation::findOrFail($operationId);
+
+            if ($operation->status !== 'running') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Operasi tidak sedang berjalan.',
+                ], 400);
+            }
+
+            $operation->pause($validated['paused_by'] ?? 'System');
+
+            $operation->line->update(['status' => 'paused']);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Operasi di-pause',
+                'data' => $operation->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Pause operation error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal pause operasi: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function resumeOperation(Request $request, int $operationId)
+    {
+        try {
+            $validated = $request->validate([
+                'resumed_by' => 'nullable|string|max:100',
+            ]);
+
+            DB::beginTransaction();
+
+            $operation = LineOperation::findOrFail($operationId);
+
+            if ($operation->status !== 'paused') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Operasi tidak dalam status pause.',
+                ], 400);
+            }
+
+            $operation->resume($validated['resumed_by'] ?? 'System');
+
+            $operation->line->update(['status' => 'operating']);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Operasi dilanjutkan',
+                'data' => $operation->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Resume operation error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal resume operasi: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function stopOperation(Request $request, int $operationId)
     {
         try {
@@ -99,10 +174,17 @@ class LineOperationController extends Controller
             ]);
 
             $operation->calculateMetrics();
-            $operation->line->update([
+
+            $line = $operation->line;
+            $line->update([
                 'status' => 'stopped',
                 'last_line_stop' => now(),
             ]);
+
+            $line->recalculateMetrics();
+
+            $line->refresh();
+            $line->load('currentOperation', 'machines');
 
             DB::commit();
 
@@ -111,7 +193,7 @@ class LineOperationController extends Controller
                 'message' => 'Operasi line dihentikan!',
                 'data' => [
                     'operation' => $operation->fresh(),
-                    'line' => $operation->line->fresh(),
+                    'line' => $line,
                 ],
             ]);
 
@@ -147,27 +229,6 @@ class LineOperationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengambil data operasi: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    public function getOperationHistory(Request $request, int $lineId)
-    {
-        try {
-            $operations = LineOperation::where('line_id', $lineId)
-                ->with('maintenanceReports')
-                ->orderBy('started_at', 'desc')
-                ->paginate($request->get('per_page', 20));
-
-            return response()->json([
-                'success' => true,
-                'data' => $operations,
-            ]);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Gagal mengambil riwayat operasi: ' . $e->getMessage(),
             ], 500);
         }
     }
