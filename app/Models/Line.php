@@ -24,6 +24,7 @@ class Line extends Model
         'description',
         'total_operation_hours',
         'total_repair_hours',
+        'uptime_hours',
         'total_failures',
         'is_archived',
         'period_start',
@@ -37,6 +38,7 @@ class Line extends Model
         'last_line_stop' => 'datetime',
         'total_operation_hours' => 'decimal:4',
         'total_repair_hours' => 'decimal:4',
+        'uptime_hours' => 'decimal:4',
         'is_archived' => 'boolean',
         'period_start' => 'date',
         'period_end' => 'date',
@@ -172,6 +174,8 @@ class Line extends Model
         });
 
         $this->total_repair_hours = round($totalRepairSeconds / 3600, 4);
+        $this->uptime_hours = max(0, $this->total_operation_hours - $this->total_repair_hours);
+        $this->uptime_hours = round($this->total_operation_hours - $this->total_repair_hours, 4);
 
         $this->total_failures = $reports->count();
 
@@ -181,7 +185,8 @@ class Line extends Model
 
         foreach ($this->machines()->where('is_archived', false)->get() as $machine) {
             $machine->update([
-                'total_operation_hours' => $operationHours
+                'total_operation_hours' => $operationHours,
+                'uptime_hours' => $this->uptime_hours
             ]);
 
             $machine->recalculateMetrics();
@@ -202,6 +207,7 @@ class Line extends Model
             $this->update([
                 'total_operation_hours' => 0,
                 'total_repair_hours' => 0,
+                'uptime_hours' => 0,
                 'total_failures' => 0,
                 'status' => 'stopped',
                 'last_operation_start' => null,

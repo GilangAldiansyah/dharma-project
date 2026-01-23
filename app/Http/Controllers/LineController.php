@@ -68,6 +68,7 @@ class LineController extends Controller
                 'active_reports_count' => $line->active_reports_count,
                 'total_operation_hours' => (float) ($line->total_operation_hours ?? 0),
                 'total_repair_hours' => (float) ($line->total_repair_hours ?? 0),
+                'uptime_hours' => (float) ($line->uptime_hours ?? 0),
                 'total_failures' => (int) ($line->total_failures ?? 0),
                 'current_operation' => $line->currentOperation ? [
                     'id' => $line->currentOperation->id,
@@ -206,6 +207,7 @@ class LineController extends Controller
                 $line->update([
                     'total_operation_hours' => 0,
                     'total_repair_hours' => 0,
+                    'uptime_hours' => 0,
                     'total_failures' => 0,
                     'total_line_stops' => 0,
                     'average_mtbf' => null,
@@ -287,6 +289,7 @@ class LineController extends Controller
                             'plant' => $archived->plant,
                             'total_operation_hours' => (float) $archived->total_operation_hours,
                             'total_repair_hours' => (float) $archived->total_repair_hours,
+                            'uptime_hours' => (float) ($archived->uptime_hours ?? 0),
                             'total_failures' => (int) $archived->total_failures,
                             'total_line_stops' => (int) $archived->total_line_stops,
                             'average_mtbf' => $avgMtbf,
@@ -318,23 +321,76 @@ class LineController extends Controller
         }
     }
 
-    public function getSummary(int $id)
+    public function getSummary(Request $request, int $id)
     {
         try {
             $line = Line::where('is_archived', false)->findOrFail($id);
 
-            $archivedLines = Line::where('parent_line_id', $line->id)
+            // ← TAMBAHAN: Validasi filter
+            $filterType = $request->input('filter_type', 'all'); // all, week, month, custom
+            $startDate = $request->input('start_date');
+            $endDate = $request->input('end_date');
+
+            // ← TAMBAHAN: Query archived lines dengan filter
+            $archivedLinesQuery = Line::where('parent_line_id', $line->id)
                 ->where('is_archived', true)
                 ->with(['machines' => function($q) {
                     $q->where('is_archived', true);
-                }])
-                ->get();
+                }]);
+
+            // ← TAMBAHAN: Apply filter berdasarkan tipe
+            if ($filterType === 'week') {
+                $startDate = Carbon::now()->startOfWeek();
+                $endDate = Carbon::now()->endOfWeek();
+                $archivedLinesQuery->whereBetween('period_end', [$startDate, $endDate]);
+            } elseif ($filterType === 'month') {
+                $startDate = Carbon::now()->startOfMonth();
+                $endDate = Carbon::now()->endOfMonth();
+                $archivedLinesQuery->whereBetween('period_end', [$startDate, $endDate]);
+            } elseif ($filterType === 'custom' && $startDate && $endDate) {
+                $startDate = Carbon::parse($startDate)->startOfDay();
+                $endDate = Carbon::parse($endDate)->endOfDay();
+                $archivedLinesQuery->whereBetween('period_end', [$startDate, $endDate]);
+            }
+
+            $archivedLines = $archivedLinesQuery->orderBy('period_end', 'desc')->get();
+
+            // ← TAMBAHAN: Hitung total dengan filter
+            $filteredOperation = $archivedLines->sum('total_operation_hours');
+            $filteredRepair = $archivedLines->sum('total_repair_hours');
+            $filteredUptime = $archivedLines->sum('uptime_hours');
+            $filteredFailures = $archivedLines->sum('total_failures');
+            $filteredLineStops = $archivedLines->sum('total_line_stops');
+
+            // ← TAMBAHAN: Cek apakah periode saat ini termasuk dalam filter
+            $includeCurrentPeriod = false;
+            $currentPeriodStart = $line->current_period_start ?? $line->created_at;
+
+            if ($filterType === 'all') {
+                $includeCurrentPeriod = true;
+            } elseif ($filterType === 'week') {
+                $includeCurrentPeriod = $currentPeriodStart->between(Carbon::now()->startOfWeek(), Carbon::now()->endOfWeek());
+            } elseif ($filterType === 'month') {
+                $includeCurrentPeriod = $currentPeriodStart->between(Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth());
+            } elseif ($filterType === 'custom' && $startDate && $endDate) {
+                $includeCurrentPeriod = $currentPeriodStart->between($startDate, $endDate);
+            }
+
+            // ← PERBAIKAN: Total dengan kondisi
+            if ($includeCurrentPeriod) {
+                $filteredOperation += $line->total_operation_hours;
+                $filteredRepair += $line->total_repair_hours;
+                $filteredUptime += $line->uptime_hours;
+                $filteredFailures += $line->total_failures;
+                $filteredLineStops += $line->total_line_stops;
+            }
 
             $totalAllTime = [
-                'operation_hours' => $line->total_operation_hours + $archivedLines->sum('total_operation_hours'),
-                'repair_hours' => $line->total_repair_hours + $archivedLines->sum('total_repair_hours'),
-                'failures' => $line->total_failures + $archivedLines->sum('total_failures'),
-                'line_stops' => $line->total_line_stops + $archivedLines->sum('total_line_stops'),
+                'operation_hours' => $filteredOperation,
+                'repair_hours' => $filteredRepair,
+                'uptime_hours' => $filteredUptime,
+                'failures' => $filteredFailures,
+                'line_stops' => $filteredLineStops,
             ];
 
             $currentMachines = $line->machines()->where('is_archived', false)->whereNotNull('mttr_hours')->get();
@@ -362,17 +418,25 @@ class LineController extends Controller
                 'current_period' => [
                     'operation_hours' => (float) $line->total_operation_hours,
                     'repair_hours' => (float) $line->total_repair_hours,
+                    'uptime_hours' => (float) ($line->uptime_hours ?? 0),
                     'failures' => (int) $line->total_failures,
                     'mtbf' => $currentMtbf,
                     'mttr' => $currentMttr,
+                    'included_in_filter' => $includeCurrentPeriod, // ← TAMBAHAN
                 ],
                 'total_all_time' => $totalAllTime,
-                'periods_count' => $archivedLines->count() + 1,
+                'periods_count' => ($includeCurrentPeriod ? 1 : 0) + $archivedLines->count(), // ← PERBAIKAN
+                'filter_info' => [ // ← TAMBAHAN
+                    'type' => $filterType,
+                    'start_date' => $startDate ? $startDate->format('Y-m-d') : null,
+                    'end_date' => $endDate ? $endDate->format('Y-m-d') : null,
+                ],
                 'archived_periods' => $archivedLines->map(function($a) {
                     return [
                         'period' => $a->period_start->format('d M Y') . ' - ' . $a->period_end->format('d M Y H:i'),
                         'operation_hours' => (float) $a->total_operation_hours,
                         'repair_hours' => (float) $a->total_repair_hours,
+                        'uptime_hours' => (float) ($a->uptime_hours ?? 0),
                         'failures' => (int) $a->total_failures,
                     ];
                 }),

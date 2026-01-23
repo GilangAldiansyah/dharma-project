@@ -5,8 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Esp32Device;
 use App\Models\Esp32Log;
+use App\Models\Esp32ProductionHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
+
 class ESP32ApiController extends Controller
 {
     public function postData(Request $request)
@@ -15,39 +18,104 @@ class ESP32ApiController extends Controller
             $validated = $request->validate([
                 'device_id' => 'required|string|max:100',
                 'counter_a' => 'required|integer',
-                'counter_b' => 'required|integer',
-                'max_count' => 'required|integer',
-                'relay_status' => 'required|boolean',
-                'error_B' => 'required|boolean',
+                'counter_b' => 'nullable|integer',
+                'relay_status' => 'nullable|boolean',
+                'error_B' => 'nullable|boolean',
             ]);
 
-            $device = Esp32Device::updateOrCreate(
-                ['device_id' => $validated['device_id']],
-                [
+            $oldDevice = Esp32Device::where('device_id', $validated['device_id'])->first();
+
+            if (!$oldDevice) {
+                $device = Esp32Device::create([
+                    'device_id' => $validated['device_id'],
                     'counter_a' => $validated['counter_a'],
-                    'counter_b' => $validated['counter_b'],
-                    'max_count' => $validated['max_count'],
-                    'relay_status' => $validated['relay_status'],
-                    'error_b' => $validated['error_B'],
+                    'counter_b' => $validated['counter_b'] ?? 0,
+                    'reject' => 0,
+                    'cycle_time' => 3,
+                    'max_count' => 100,
+                    'max_stroke' => 0,
+                    'loading_time' => 300,
+                    'production_started_at' => now(),
+                    'relay_status' => $validated['relay_status'] ?? false,
+                    'error_b' => $validated['error_B'] ?? false,
                     'last_update' => now(),
-                ]
-            );
+                ]);
 
-            // Log data setiap 1 menit
-            $lastLog = Esp32Log::where('device_id', $validated['device_id'])
-                ->orderBy('logged_at', 'desc')
-                ->first();
+                Esp32Log::create([
+                    'device_id' => $validated['device_id'],
+                    'counter_a' => $validated['counter_a'],
+                    'counter_b' => $validated['counter_b'] ?? 0,
+                    'reject' => 0,
+                    'cycle_time' => 3,
+                    'max_count' => 100,
+                    'max_stroke' => 0,
+                    'loading_time' => 300,
+                    'production_started_at' => $device->production_started_at,
+                    'relay_status' => $validated['relay_status'] ?? false,
+                    'error_b' => $validated['error_B'] ?? false,
+                    'logged_at' => now(),
+                ]);
 
-            $shouldLog = !$lastLog || $lastLog->logged_at->diffInSeconds(now()) >= 60;
+                return response()->json([
+                    'success' => true,
+                    'message' => "Device {$validated['device_id']} registered successfully"
+                ], 200);
+            }
+
+            $shouldLog = false;
+
+            if ($oldDevice->counter_a != $validated['counter_a'] ||
+                $oldDevice->counter_b != ($validated['counter_b'] ?? 0) ||
+                $oldDevice->error_b != ($validated['error_B'] ?? false)) {
+                $shouldLog = true;
+            }
+
+            $productionStartedAt = $oldDevice->production_started_at;
+
+            if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
+                $this->saveProductionHistory($oldDevice);
+                $productionStartedAt = now();
+            }
+            elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
+                if ($oldDevice->cycle_time > 0) {
+                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time);
+                } else {
+                    $productionStartedAt = now();
+                }
+            }
+            elseif (!$productionStartedAt && $validated['counter_a'] > 0) {
+                if ($oldDevice->cycle_time > 0) {
+                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time);
+                } else {
+                    $productionStartedAt = now();
+                }
+            }
+            elseif (!$productionStartedAt) {
+                $productionStartedAt = now();
+            }
+
+            $oldDevice->update([
+                'counter_a' => $validated['counter_a'],
+                'counter_b' => $validated['counter_b'] ?? $oldDevice->counter_b,
+                'relay_status' => $validated['relay_status'] ?? $oldDevice->relay_status,
+                'error_b' => $validated['error_B'] ?? $oldDevice->error_b,
+                'production_started_at' => $productionStartedAt,
+                'last_update' => now(),
+            ]);
 
             if ($shouldLog) {
                 Esp32Log::create([
                     'device_id' => $validated['device_id'],
                     'counter_a' => $validated['counter_a'],
-                    'counter_b' => $validated['counter_b'],
-                    'max_count' => $validated['max_count'],
-                    'relay_status' => $validated['relay_status'],
-                    'error_b' => $validated['error_B'],
+                    'counter_b' => $validated['counter_b'] ?? $oldDevice->counter_b,
+                    'reject' => $oldDevice->reject,
+                    'cycle_time' => $oldDevice->cycle_time,
+                    'max_count' => $oldDevice->max_count,
+                    'max_stroke' => $oldDevice->max_stroke,
+                    'loading_time' => $oldDevice->loading_time,
+                    'production_started_at' => $productionStartedAt,
+                    'relay_status' => $validated['relay_status'] ?? $oldDevice->relay_status,
+                    'error_b' => $validated['error_B'] ?? $oldDevice->error_b,
                     'logged_at' => now(),
                 ]);
 
@@ -59,12 +127,6 @@ class ESP32ApiController extends Controller
                         ->delete();
                 }
             }
-
-            Log::info("ESP32 data received", [
-                'device_id' => $validated['device_id'],
-                'counter_a' => $validated['counter_a'],
-                'counter_b' => $validated['counter_b'],
-            ]);
 
             return response()->json([
                 'success' => true,
@@ -90,12 +152,44 @@ class ESP32ApiController extends Controller
         }
     }
 
-    /**
-     * Get status semua devices
-     *
-     * @route GET /api/esp32/status
-     * @access Protected (auth:sanctum)
-     */
+    private function saveProductionHistory(Esp32Device $device)
+    {
+        if (!$device->production_started_at || $device->counter_a == 0) {
+            return;
+        }
+
+        $productionStarted = Carbon::parse($device->production_started_at);
+        $productionFinished = now();
+
+        $actualTimeSeconds = $productionFinished->timestamp - $productionStarted->timestamp;
+        $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
+        $delaySeconds = $actualTimeSeconds - $expectedTimeSeconds;
+
+        if (abs($delaySeconds) <= $device->cycle_time) {
+            $completionStatus = 'on_time';
+        } elseif ($delaySeconds > 0) {
+            $completionStatus = 'delayed';
+        } else {
+            $completionStatus = 'ahead';
+        }
+
+        Esp32ProductionHistory::create([
+            'device_id' => $device->device_id,
+            'total_counter_a' => $device->counter_a,
+            'total_counter_b' => $device->counter_b,
+            'total_reject' => $device->reject,
+            'cycle_time' => $device->cycle_time,
+            'max_count' => $device->max_count,
+            'max_stroke' => $device->max_stroke,
+            'expected_time_seconds' => $expectedTimeSeconds,
+            'actual_time_seconds' => $actualTimeSeconds,
+            'delay_seconds' => $delaySeconds,
+            'production_started_at' => $productionStarted,
+            'production_finished_at' => $productionFinished,
+            'completion_status' => $completionStatus,
+        ]);
+    }
+
     public function getStatus()
     {
         try {
@@ -113,12 +207,6 @@ class ESP32ApiController extends Controller
         }
     }
 
-    /**
-     * Get history log dari device tertentu
-     *
-     * @route GET /api/esp32/history/{deviceId}
-     * @access Protected (auth:sanctum)
-     */
     public function getHistory($deviceId)
     {
         try {
@@ -139,12 +227,6 @@ class ESP32ApiController extends Controller
         }
     }
 
-    /**
-     * Get daftar semua device IDs
-     *
-     * @route GET /api/esp32/devices
-     * @access Protected (auth:sanctum)
-     */
     public function getDevices()
     {
         try {

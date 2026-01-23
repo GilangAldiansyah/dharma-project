@@ -34,6 +34,11 @@ interface LineStop {
     plant: string;
     total_stops: number;
     total_downtime_minutes: number;
+    total_operation_hours: number;
+    total_repair_hours: number;
+    uptime_hours: number;
+    average_mttr: string | null;
+    average_mtbf: number | null;
     machines: Machine[];
 }
 
@@ -76,6 +81,7 @@ interface Props {
     overallStats: {
         total_line_stops: number;
         total_downtime_hours: number;
+        total_uptime_hours: number;
         avg_mttr_hours: number;
         avg_mtbf_hours: number;
         active_maintenance: number;
@@ -214,14 +220,25 @@ const exportData = async () => {
 };
 
 const formatMinutesToHours = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    const hours = (minutes / 60).toFixed(2);
+    return `${hours}h`;
 };
 
 const formatHours = (hours: number | null): string => {
     if (hours === null || hours === 0) return 'N/A';
     return `${hours.toFixed(2)}h`;
+};
+
+const formatMttrToHours = (timeString: string | null): string => {
+    if (!timeString) return 'N/A';
+
+    const parts = timeString.split(':');
+    if (parts.length !== 3) return timeString;
+    const hours = parseInt(parts[0]);
+    const minutes = parseInt(parts[1]);
+    const seconds = parseInt(parts[2]);
+    const totalHours = hours + (minutes / 60) + (seconds / 3600);
+    return `${totalHours.toFixed(2)}h`;
 };
 
 const formatDate = (dateString: string) => {
@@ -334,7 +351,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Main Statistics Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 lg:gap-6">
                 <!-- Total Line Stops -->
                 <div class="group bg-white dark:bg-sidebar rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-sidebar-border">
                     <div class="p-6">
@@ -371,7 +388,7 @@ onUnmounted(() => {
                                 <Clock class="w-6 h-6 text-red-600 dark:text-red-400" />
                             </div>
                             <div class="px-3 py-1.5 bg-red-50 dark:bg-red-900/20 rounded-full">
-                                <span class="text-xs font-bold text-red-700 dark:text-red-400">Hours</span>
+                                <span class="text-xs font-bold text-red-700 dark:text-red-400">Down</span>
                             </div>
                         </div>
                         <div>
@@ -384,6 +401,29 @@ onUnmounted(() => {
                         </div>
                     </div>
                     <div class="h-1.5 bg-gradient-to-r from-red-500 via-red-600 to-red-700"></div>
+                </div>
+
+                <!-- Total Uptime (NEW) -->
+                <div class="group bg-white dark:bg-sidebar rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-sidebar-border">
+                    <div class="p-6">
+                        <div class="flex items-start justify-between mb-4">
+                            <div class="p-3 bg-gradient-to-br from-green-100 to-emerald-200 dark:from-green-900/30 dark:to-emerald-800/30 rounded-xl group-hover:scale-110 transition-transform duration-300 shadow-sm">
+                                <Zap class="w-6 h-6 text-green-600 dark:text-green-400" />
+                            </div>
+                            <div class="px-3 py-1.5 bg-green-50 dark:bg-green-900/20 rounded-full">
+                                <span class="text-xs font-bold text-green-700 dark:text-green-400">Up</span>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">Total Uptime</p>
+                            <p class="text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white mb-2">{{ overallStats.total_uptime_hours.toFixed(1) }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500 flex items-center gap-1.5">
+                                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                                Operasi - Repair
+                            </p>
+                        </div>
+                    </div>
+                    <div class="h-1.5 bg-gradient-to-r from-green-500 via-green-600 to-green-700"></div>
                 </div>
 
                 <!-- MTTR -->
@@ -413,23 +453,23 @@ onUnmounted(() => {
                 <div class="group bg-white dark:bg-sidebar rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-sidebar-border">
                     <div class="p-6">
                         <div class="flex items-start justify-between mb-4">
-                            <div class="p-3 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-xl group-hover:scale-110 transition-transform duration-300 shadow-sm">
-                                <TrendingUp class="w-6 h-6 text-green-600 dark:text-green-400" />
+                            <div class="p-3 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-xl group-hover:scale-110 transition-transform duration-300 shadow-sm">
+                                <TrendingUp class="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                             </div>
-                            <div class="px-3 py-1.5 bg-green-50 dark:bg-green-900/20 rounded-full">
-                                <span class="text-xs font-bold text-green-700 dark:text-green-400">MTBF</span>
+                            <div class="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-full">
+                                <span class="text-xs font-bold text-indigo-700 dark:text-indigo-400">MTBF</span>
                             </div>
                         </div>
                         <div>
                             <p class="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">Between Failures</p>
                             <p class="text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white mb-2">{{ formatHours(overallStats.avg_mtbf_hours) }}</p>
                             <p class="text-xs text-gray-500 dark:text-gray-500 flex items-center gap-1.5">
-                                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                                <span class="w-2 h-2 bg-indigo-500 rounded-full"></span>
                                 Mean Time Between Fail
                             </p>
                         </div>
                     </div>
-                    <div class="h-1.5 bg-gradient-to-r from-green-500 via-green-600 to-green-700"></div>
+                    <div class="h-1.5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-indigo-700"></div>
                 </div>
 
                 <!-- Active Maintenance -->
@@ -437,7 +477,7 @@ onUnmounted(() => {
                     <div class="p-6">
                         <div class="flex items-start justify-between mb-4">
                             <div class="p-3 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/30 dark:to-orange-800/30 rounded-xl group-hover:scale-110 transition-transform duration-300 shadow-sm">
-                                <Zap class="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                                <Factory class="w-6 h-6 text-orange-600 dark:text-orange-400" />
                             </div>
                             <div class="px-3 py-1.5 bg-orange-50 dark:bg-orange-900/20 rounded-full">
                                 <span class="text-xs font-bold text-orange-700 dark:text-orange-400">Active</span>
@@ -525,24 +565,27 @@ onUnmounted(() => {
                             <Factory class="w-16 h-16 mx-auto mb-3 opacity-30" />
                             <p class="font-medium">Tidak ada data untuk periode ini</p>
                         </div>
-
                         <Teleport to="body">
                             <div
                                 v-if="hoveredLineBar !== null && lineStopByLine[hoveredLineBar]"
                                 class="fixed pointer-events-none z-[9999] -translate-x-1/2"
                                 :style="tooltipPosition"
                             >
-                                <div class="bg-gray-900 text-white text-xs rounded-lg shadow-2xl p-3 min-w-[200px]">
+                                <div class="bg-gray-900 text-white text-xs rounded-lg shadow-2xl p-3 min-w-[220px]">
                                     <div class="font-bold mb-1">{{ lineStopByLine[hoveredLineBar].line_name }}</div>
                                     <div class="text-gray-300 text-[10px] mb-2">{{ lineStopByLine[hoveredLineBar].line_code }} - {{ lineStopByLine[hoveredLineBar].plant }}</div>
-                                    <div class="pt-2 border-t border-gray-700">
-                                        <div class="flex justify-between mb-1">
+                                    <div class="pt-2 border-t border-gray-700 space-y-1">
+                                        <div class="flex justify-between">
                                             <span class="text-gray-400">Total Stops:</span>
                                             <span class="text-blue-400 font-bold">{{ lineStopByLine[hoveredLineBar].total_stops }}</span>
                                         </div>
                                         <div class="flex justify-between">
                                             <span class="text-gray-400">Downtime:</span>
                                             <span class="text-red-400 font-bold">{{ formatMinutesToHours(lineStopByLine[hoveredLineBar].total_downtime_minutes) }}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-400">Uptime:</span>
+                                            <span class="text-green-400 font-bold">{{ formatHours(lineStopByLine[hoveredLineBar].uptime_hours) }}</span>
                                         </div>
                                     </div>
                                     <div class="mt-2 text-blue-400 text-center text-[10px] flex items-center justify-center gap-1">
@@ -556,8 +599,6 @@ onUnmounted(() => {
                             </div>
                         </Teleport>
                     </div>
-
-                    <!-- Machine Problem Chart -->
                     <div class="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/10 dark:to-red-900/10 rounded-xl p-6 border border-orange-200 dark:border-orange-800">
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -677,7 +718,6 @@ onUnmounted(() => {
 
                 <!-- Table View -->
                 <div v-if="viewMode === 'table'" id="table-section" class="p-6 space-y-6">
-                    <!-- Line Stop Table -->
                     <div>
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -695,8 +735,12 @@ onUnmounted(() => {
                                         <th class="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">No</th>
                                         <th class="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Line</th>
                                         <th class="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Plant</th>
-                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total Stops</th>
+                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Stops</th>
+                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Operation</th>
                                         <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Downtime</th>
+                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Uptime</th>
+                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">MTTR</th>
+                                        <th class="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">MTBF</th>
                                         <th class="px-6 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Aksi</th>
                                     </tr>
                                 </thead>
@@ -716,7 +760,21 @@ onUnmounted(() => {
                                             <span class="text-sm font-bold text-red-600 dark:text-red-400">{{ line.total_stops }}</span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-right">
-                                            <span class="text-sm font-medium text-gray-900 dark:text-gray-300">{{ formatMinutesToHours(line.total_downtime_minutes) }}</span>
+                                            <span class="text-sm font-semibold text-blue-600 dark:text-blue-400">{{ formatHours(line.total_operation_hours) }}</span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right">
+                                            <span class="text-sm font-semibold text-orange-600 dark:text-orange-400">{{ formatMinutesToHours(line.total_downtime_minutes) }}</span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right">
+                                            <span class="text-sm font-semibold text-green-600 dark:text-green-400">{{ formatHours(line.uptime_hours) }}</span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right">
+                                            <span v-if="line.average_mttr" class="text-sm font-semibold text-purple-600 dark:text-purple-400">{{ formatMttrToHours(line.average_mttr) }}</span>
+                                            <span v-else class="text-xs text-gray-400">-</span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right">
+                                            <span v-if="line.average_mtbf" class="text-sm font-semibold text-indigo-600 dark:text-indigo-400">{{ formatHours(line.average_mtbf) }}</span>
+                                            <span v-else class="text-xs text-gray-400">-</span>
                                         </td>
                                         <td class="px-6 py-4 text-center whitespace-nowrap">
                                             <button
@@ -729,7 +787,7 @@ onUnmounted(() => {
                                         </td>
                                     </tr>
                                     <tr v-if="lineStopByLine.length === 0">
-                                        <td colspan="6" class="px-6 py-12 text-center">
+                                        <td colspan="10" class="px-6 py-12 text-center">
                                             <Factory class="w-12 h-12 mx-auto mb-2 text-gray-400 opacity-50" />
                                             <p class="text-gray-500 font-medium">Tidak ada data untuk periode ini</p>
                                         </td>

@@ -174,7 +174,7 @@ const allNavGroups: NavGroup[] = [
       title: 'Maintenance Monitoring',
         icon: Activity,
         routes: ['/maintenance', '/settings'],
-        dashboardRoute: '/maintenance/dashboard',
+        dashboardRoute: '/maintenance/lines',
         items: [
             {
                 title: 'Dashboard',

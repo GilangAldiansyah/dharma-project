@@ -269,13 +269,12 @@ class MaintenanceController extends Controller
     {
         $startDate = $request->start_date
             ? Carbon::parse($request->start_date)->startOfDay()
-            : Carbon::now()->subDays(30)->startOfDay();
+            : Carbon::now()->startOfMonth()->startOfDay();
 
         $endDate = $request->end_date
             ? Carbon::parse($request->end_date)->endOfDay()
             : Carbon::now()->endOfDay();
 
-        // Plant filter
         $plantFilter = $request->plant;
 
         $lineStopByLine = MaintenanceReport::with('line', 'machine')
@@ -286,9 +285,48 @@ class MaintenanceController extends Controller
             })
             ->get()
             ->groupBy('line_id')
-            ->map(function ($reports, $lineId) {
+            ->map(function ($reports, $lineId) use ($startDate, $endDate) {
                 $line = $reports->first()->line;
                 if (!$line) return null;
+
+                $totalDowntimeMinutes = $reports->sum(function ($report) {
+                    if ($report->line_stopped_at && $report->completed_at) {
+                        return (int) $report->line_stopped_at->diffInMinutes($report->completed_at);
+                    }
+                    return 0;
+                });
+
+                $archivedLines = Line::where('parent_line_id', $line->id)
+                    ->where('is_archived', true)
+                    ->whereBetween('period_end', [$startDate, $endDate])
+                    ->get();
+
+                $totalOperationHours = $line->total_operation_hours + $archivedLines->sum('total_operation_hours');
+                $totalRepairHours = $line->total_repair_hours + $archivedLines->sum('total_repair_hours');
+                $totalUptimeHours = $line->uptime_hours + $archivedLines->sum('uptime_hours');
+                $totalFailures = $line->total_failures + $archivedLines->sum('total_failures');
+
+                $allMachines = collect();
+                $allMachines = $allMachines->merge($line->machines()->where('is_archived', false)->get());
+
+                foreach ($archivedLines as $archivedLine) {
+                    $allMachines = $allMachines->merge($archivedLine->machines()->where('is_archived', true)->get());
+                }
+
+                $avgMttr = null;
+                $machinesWithMttr = $allMachines->whereNotNull('mttr_hours');
+                if ($machinesWithMttr->isNotEmpty()) {
+                    $mttrHours = $machinesWithMttr->avg('mttr_hours');
+                    $hours = floor($mttrHours);
+                    $minutes = round(($mttrHours - $hours) * 60);
+                    $avgMttr = sprintf('%02d:%02d:00', $hours, $minutes);
+                }
+
+                $avgMtbf = null;
+                $machinesWithMtbf = $allMachines->whereNotNull('mtbf_hours');
+                if ($machinesWithMtbf->isNotEmpty()) {
+                    $avgMtbf = round($machinesWithMtbf->avg('mtbf_hours'), 2);
+                }
 
                 return [
                     'line_id' => $lineId,
@@ -296,12 +334,13 @@ class MaintenanceController extends Controller
                     'line_code' => $line->line_code,
                     'plant' => $line->plant,
                     'total_stops' => $reports->count(),
-                    'total_downtime_minutes' => $reports->sum(function ($report) {
-                        if ($report->line_stopped_at && $report->completed_at) {
-                            return (int) $report->line_stopped_at->diffInMinutes($report->completed_at);
-                        }
-                        return 0;
-                    }),
+                    'total_downtime_minutes' => $totalDowntimeMinutes,
+                    'total_operation_hours' => (float) $totalOperationHours,
+                    'total_repair_hours' => (float) $totalRepairHours,
+                    'uptime_hours' => (float) $totalUptimeHours,
+                    'total_failures' => (int) $totalFailures,
+                    'average_mttr' => $avgMttr,
+                    'average_mtbf' => $avgMtbf,
                     'machines' => $reports->groupBy('machine_id')->map(function ($machineReports, $machineId) {
                         $machine = $machineReports->first()->machine;
                         if (!$machine) return null;
@@ -325,23 +364,55 @@ class MaintenanceController extends Controller
             ->sortByDesc('total_stops')
             ->values();
 
-        $lines = Line::all();
-        $mttrMtbfByLine = $lines->map(function ($line) {
-            $mttr = $line->average_mttr;
-            $mtbf = $line->average_mtbf;
+        $lines = Line::where('is_archived', false)->get();
+        $archivedLinesForMttrMtbf = Line::where('is_archived', true)
+            ->whereBetween('period_end', [$startDate, $endDate])
+            ->get();
 
-            return [
-                'line_id' => $line->id,
-                'line_name' => $line->line_name,
-                'line_code' => $line->line_code,
-                'plant' => $line->plant,
-                'mttr_hours' => is_numeric($mttr) ? (float) $mttr : null,
-                'mtbf_hours' => is_numeric($mtbf) ? (float) $mtbf : null,
-                'total_stops' => (int) $line->total_line_stops,
-            ];
-        })->filter(function ($item) {
-            return $item['mttr_hours'] !== null || $item['mtbf_hours'] !== null;
-        })->values();
+        $allLinesForMttrMtbf = $lines->merge($archivedLinesForMttrMtbf)
+            ->groupBy('line_code')
+            ->map(function ($lineGroup) {
+                $currentLine = $lineGroup->firstWhere('is_archived', false);
+                if (!$currentLine) {
+                    $currentLine = $lineGroup->first();
+                }
+
+                $allMachines = collect();
+                foreach ($lineGroup as $line) {
+                    $allMachines = $allMachines->merge($line->machines);
+                }
+
+                $machinesWithMttr = $allMachines->whereNotNull('mttr_hours');
+                $mttrHours = null;
+                if ($machinesWithMttr->isNotEmpty()) {
+                    $avgMttrHours = $machinesWithMttr->avg('mttr_hours');
+                    $mttrHours = (float) $avgMttrHours;
+                }
+
+                $machinesWithMtbf = $allMachines->whereNotNull('mtbf_hours');
+                $mtbfHours = null;
+                if ($machinesWithMtbf->isNotEmpty()) {
+                    $mtbfHours = round($machinesWithMtbf->avg('mtbf_hours'), 2);
+                }
+
+                $totalStops = $lineGroup->sum('total_line_stops');
+
+                return [
+                    'line_id' => $currentLine->id,
+                    'line_name' => $currentLine->line_name,
+                    'line_code' => $currentLine->line_code,
+                    'plant' => $currentLine->plant,
+                    'mttr_hours' => $mttrHours,
+                    'mtbf_hours' => $mtbfHours,
+                    'total_stops' => (int) $totalStops,
+                ];
+            })
+            ->filter(function ($item) {
+                return $item['mttr_hours'] !== null || $item['mtbf_hours'] !== null;
+            })
+            ->values();
+
+        $mttrMtbfByLine = $allLinesForMttrMtbf;
 
         $dailyLineStops = MaintenanceReport::whereBetween('line_stopped_at', [$startDate, $endDate])
             ->whereNotNull('line_stopped_at')
@@ -360,7 +431,6 @@ class MaintenanceController extends Controller
                     'stops_count' => (int) $item->stops_count,
                 ];
             });
-
 
         $machineProblemFrequency = MaintenanceReport::with('machine', 'machine.lineModel')
             ->whereBetween('reported_at', [$startDate, $endDate])
@@ -386,7 +456,6 @@ class MaintenanceController extends Controller
             ->take(10)
             ->values();
 
-        // ========== 5. AVERAGE REPAIR TIME BY STATUS ==========
         $avgRepairTimeByStatus = MaintenanceReport::completed()
             ->whereBetween('completed_at', [$startDate, $endDate])
             ->when($plantFilter, function ($q) use ($plantFilter) {
@@ -405,7 +474,6 @@ class MaintenanceController extends Controller
             ->sortKeys()
             ->toArray();
 
-        // ========== 6. TOP PROBLEMS ==========
         $topProblems = MaintenanceReport::whereBetween('reported_at', [$startDate, $endDate])
             ->when($plantFilter, function ($q) use ($plantFilter) {
                 $q->byPlant($plantFilter);
@@ -424,7 +492,6 @@ class MaintenanceController extends Controller
                 ];
             });
 
-        // ========== 7. OVERALL STATISTICS ==========
         $completedReportsForStats = MaintenanceReport::completed()
             ->whereBetween('completed_at', [$startDate, $endDate])
             ->whereNotNull('started_at')
@@ -440,7 +507,6 @@ class MaintenanceController extends Controller
             $avgMttrSeconds = $totalSeconds / $completedReportsForStats->count();
             $avgMttrHours = round($avgMttrSeconds / 3600, 2);
         }
-
 
         $completedOperations = LineOperation::completed()
             ->whereBetween('started_at', [$startDate, $endDate])
@@ -471,12 +537,26 @@ class MaintenanceController extends Controller
                 return 0;
             });
 
+        $activeLines = Line::where('is_archived', false)
+            ->when($plantFilter, fn($q) => $q->where('plant', $plantFilter))
+            ->get();
+
+        $archivedLinesInPeriod = Line::where('is_archived', true)
+            ->whereBetween('period_end', [$startDate, $endDate])
+            ->when($plantFilter, fn($q) => $q->where('plant', $plantFilter))
+            ->get();
+
+        $totalOperationHours = $activeLines->sum('total_operation_hours') + $archivedLinesInPeriod->sum('total_operation_hours');
+        $totalRepairHours = $activeLines->sum('total_repair_hours') + $archivedLinesInPeriod->sum('total_repair_hours');
+        $totalUptimeHours = max(0, $totalOperationHours - $totalRepairHours);
+
         $overallStats = [
             'total_line_stops' => MaintenanceReport::whereBetween('line_stopped_at', [$startDate, $endDate])
                 ->whereNotNull('line_stopped_at')
                 ->when($plantFilter, fn($q) => $q->byPlant($plantFilter))
                 ->count(),
             'total_downtime_hours' => round($totalDowntimeMinutes / 60, 2),
+            'total_uptime_hours' => round($totalUptimeHours, 2),
             'avg_mttr_hours' => $avgMttrHours ?? 0,
             'avg_mtbf_hours' => $avgMtbfHours ?? 0,
             'active_maintenance' => MaintenanceReport::whereIn('status', ['Dilaporkan', 'Sedang Diperbaiki'])
@@ -484,15 +564,15 @@ class MaintenanceController extends Controller
                 ->count(),
         ];
 
-        // ========== 8. LINE STATUS DISTRIBUTION ==========
-        $lineStatusDistribution = Line::when($plantFilter, fn($q) => $q->where('plant', $plantFilter))
+        $lineStatusDistribution = Line::where('is_archived', false)
+            ->when($plantFilter, fn($q) => $q->where('plant', $plantFilter))
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->get()
             ->pluck('count', 'status')
             ->toArray();
 
-        $plants = Line::distinct()->pluck('plant');
+        $plants = Line::where('is_archived', false)->distinct()->pluck('plant');
 
         return Inertia::render('Maintenance/Dashboard', [
             'lineStopByLine' => $lineStopByLine,

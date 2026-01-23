@@ -81,7 +81,7 @@ class WelcomeController extends Controller
                     'description' => 'Sistem Monitoring Line Stop',
                     'icon' => 'Activity',
                     'color' => 'orange',
-                    'route' => '/maintenance',
+                    'route' => '/maintenance/lines',
                     'features' => [
                         'Laporan Maintenance Mesin',
                         'Barcode Scanning Support',

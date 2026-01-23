@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { ref, nextTick, onUnmounted } from 'vue';
+import { ref, nextTick, onUnmounted, computed } from 'vue';
 import QRCode from 'qrcode';
 import jsQR from 'jsqr';
 import {
@@ -77,6 +77,7 @@ interface Line {
     active_reports_count: number;
     total_operation_hours: number;
     total_repair_hours: number;
+    uptime_hours: number;
     total_failures: number;
     machines: Machine[];
     current_operation?: LineOperation;
@@ -103,6 +104,7 @@ interface ArchivedPeriod {
         plant: string;
         total_operation_hours: number;
         total_repair_hours: number;
+        uptime_hours: number;
         total_failures: number;
         total_line_stops: number;
         average_mtbf: number | null;
@@ -129,21 +131,30 @@ interface SummaryData {
     current_period: {
         operation_hours: number;
         repair_hours: number;
+        uptime_hours: number;
         failures: number;
         mtbf: number | null;
         mttr: string | null;
+        included_in_filter: boolean;
     };
     total_all_time: {
         operation_hours: number;
         repair_hours: number;
+        uptime_hours: number;
         failures: number;
         line_stops: number;
     };
     periods_count: number;
+    filter_info: {
+        type: string;
+        start_date: string | null;
+        end_date: string | null;
+    };
     archived_periods: Array<{
         period: string;
         operation_hours: number;
         repair_hours: number;
+        uptime_hours: number;
         failures: number;
     }>;
 }
@@ -170,12 +181,16 @@ interface Props {
 }
 const props = defineProps<Props>();
 
-// Filter States
 const searchQuery = ref(props.filters.search || '');
 const plantFilter = ref(props.filters.plant || '');
 const statusFilter = ref(props.filters.status || '');
+const showFilterExpand = ref(false);
+const summaryFilter = ref({
+    type: 'all',
+    start_date: '',
+    end_date: '',
+});
 
-// Modal States
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const showQrModal = ref(false);
@@ -186,7 +201,6 @@ const showResetConfirmModal = ref(false);
 const showHistoryModal = ref(false);
 const showSummaryModal = ref(false);
 
-// Data States
 const selectedLine = ref<Line | null>(null);
 const expandedLines = ref<Set<number>>(new Set());
 const activeReports = ref<MaintenanceReport[]>([]);
@@ -196,7 +210,6 @@ const isLoadingHistory = ref(false);
 const isLoadingSummary = ref(false);
 const expandedHistoryPeriods = ref<Set<number>>(new Set());
 
-// QR Scanner States
 const videoRef = ref<HTMLVideoElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const isScanning = ref(false);
@@ -208,7 +221,6 @@ const scanMode = ref<'start' | 'line-stop' | 'pause' | 'resume' | 'stop' | 'comp
 let stream: MediaStream | null = null;
 let scanInterval: number | null = null;
 
-// Form States
 const actionForm = ref({
     line_id: null as number | null,
     operation_id: null as number | null,
@@ -234,7 +246,7 @@ const editForm = useForm({
     plant: '',
     description: '',
 });
-// Search & Filter
+
 const search = () => {
     router.get('/maintenance/lines', {
         search: searchQuery.value,
@@ -243,7 +255,6 @@ const search = () => {
     }, { preserveState: true, preserveScroll: true });
 };
 
-// Toggle Expand
 const toggleLineExpand = (lineId: number) => {
     if (expandedLines.value.has(lineId)) {
         expandedLines.value.delete(lineId);
@@ -268,7 +279,6 @@ const isHistoryPeriodExpanded = (index: number) => {
     return expandedHistoryPeriods.value.has(index);
 };
 
-// Format Duration
 const formatDuration = (hours: number): string => {
     const h = Math.floor(hours);
     const m = Math.floor((hours - h) * 60);
@@ -276,7 +286,6 @@ const formatDuration = (hours: number): string => {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
-// Status Helpers
 const getStatusColor = (status: string) => {
     switch (status) {
         case 'operating': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
@@ -359,6 +368,16 @@ const openEditModal = (line: Line) => {
     editForm.plant = line.plant;
     editForm.description = line.description || '';
     showEditModal.value = true;
+};
+
+const submitCreate = () => {
+    createForm.post('/maintenance/lines', {
+        preserveScroll: true,
+        onSuccess: () => {
+            showCreateModal.value = false;
+            createForm.reset();
+        },
+    });
 };
 
 const submitEdit = () => {
@@ -446,13 +465,26 @@ const openHistoryModal = async (line: Line) => {
     }
 };
 
-const openSummaryModal = async (line: Line) => {
-    selectedLine.value = line;
-    showSummaryModal.value = true;
+const fetchSummaryData = async () => {
+    if (!selectedLine.value) return;
+
     isLoadingSummary.value = true;
 
     try {
-        const response = await fetch(`/maintenance/lines/${line.id}/summary`);
+        const params = new URLSearchParams({
+            filter_type: summaryFilter.value.type,
+        });
+
+        if (summaryFilter.value.type === 'custom') {
+            if (summaryFilter.value.start_date) {
+                params.append('start_date', summaryFilter.value.start_date);
+            }
+            if (summaryFilter.value.end_date) {
+                params.append('end_date', summaryFilter.value.end_date);
+            }
+        }
+
+        const response = await fetch(`/maintenance/lines/${selectedLine.value.id}/summary?${params.toString()}`);
         const data = await response.json();
 
         if (data.success) {
@@ -465,6 +497,56 @@ const openSummaryModal = async (line: Line) => {
     } finally {
         isLoadingSummary.value = false;
     }
+};
+const applySummaryFilter = async () => {
+    if (summaryFilter.value.type === 'custom') {
+        if (!summaryFilter.value.start_date || !summaryFilter.value.end_date) {
+            alert('Pilih tanggal mulai dan tanggal akhir!');
+            return;
+        }
+
+        const start = new Date(summaryFilter.value.start_date);
+        const end = new Date(summaryFilter.value.end_date);
+
+        if (start > end) {
+            alert('Tanggal mulai tidak boleh lebih besar dari tanggal akhir!');
+            return;
+        }
+    }
+
+    await fetchSummaryData();
+};
+
+const resetSummaryFilter = async () => {
+    summaryFilter.value = {
+        type: 'all',
+        start_date: '',
+        end_date: '',
+    };
+    await fetchSummaryData();
+};
+
+const getFilterLabel = computed(() => {
+    switch (summaryFilter.value.type) {
+        case 'week': return 'Minggu Ini';
+        case 'month': return 'Bulan Ini';
+        case 'custom': return 'Custom';
+        default: return 'Semua Periode';
+    }
+});
+
+const openSummaryModal = async (line: Line) => {
+    selectedLine.value = line;
+    showSummaryModal.value = true;
+    isLoadingSummary.value = true;
+
+    summaryFilter.value = {
+        type: 'all',
+        start_date: '',
+        end_date: '',
+    };
+
+    await fetchSummaryData();
 };
 
 const viewActiveReports = async (line: Line) => {
@@ -937,17 +1019,18 @@ onUnmounted(() => {
                     <table class="w-full">
                         <thead class="bg-gray-50 dark:bg-sidebar-accent">
                             <tr>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Expand</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">O</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Kode Line</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Nama Line</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Plant</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Status</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Mesin</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Operation</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Repair</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Downtime</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Uptime</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">MTTR</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">MTBF</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Failures</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Fail</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Control</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">QR</th>
                                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Aksi</th>
@@ -966,11 +1049,10 @@ onUnmounted(() => {
                                         </button>
                                     </td>
                                     <td class="px-4 py-3 text-center">
-                                        <span class="font-mono text-sm font-medium">{{ line.line_code }}</span>
+                                        <span class="text-xs">{{ line.line_code }}</span>
                                     </td>
                                     <td class="px-4 py-3 text-center">
-                                        <div class="font-medium">{{ line.line_name }}</div>
-                                        <div v-if="line.description" class="text-xs text-gray-500">{{ line.description }}</div>
+                                        <div class="text-sm">{{ line.line_name }}</div>
                                     </td>
                                     <td class="px-4 py-3 text-sm text-center">{{ line.plant }}</td>
                                     <td class="px-4 py-3 text-center">
@@ -993,6 +1075,13 @@ onUnmounted(() => {
                                         <div class="flex flex-col gap-1">
                                             <span class="font-mono text-sm text-orange-600 dark:text-orange-400 font-semibold">
                                                 {{ formatDuration(line.total_repair_hours) }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                     <td class="px-4 py-3 text-center">
+                                        <div class="flex flex-col gap-1">
+                                            <span class="font-mono text-sm text-green-600 dark:text-green-400 font-semibold">
+                                                {{ formatDuration(line.uptime_hours) }}
                                             </span>
                                         </div>
                                     </td>
@@ -1115,7 +1204,7 @@ onUnmounted(() => {
                                     </td>
                                 </tr>
                                 <tr v-if="isLineExpanded(line.id)" class="bg-gray-50 dark:bg-gray-800">
-                                    <td colspan="14" class="py-2">
+                                    <td colspan="15" class="py-2">
                                         <div class="px-2">
                                             <div v-if="line.machines.length > 0" class="overflow-x-auto">
                                                 <table class="w-full text-sm border border-gray-300 dark:border-gray-600">
@@ -1184,7 +1273,7 @@ onUnmounted(() => {
                                 </tr>
                             </template>
                             <tr v-if="lines.data.length === 0">
-                                <td colspan="14" class="px-4 py-8 text-center text-gray-500">
+                                <td colspan="15" class="px-4 py-8 text-center text-gray-500">
                                     <Factory class="w-12 h-12 mx-auto mb-2 opacity-50" />
                                     <p>Tidak ada data line</p>
                                 </td>
@@ -1276,7 +1365,7 @@ onUnmounted(() => {
                                 <Activity class="w-5 h-5 text-blue-600 dark:text-blue-400" />
                                 <h3 class="font-semibold text-blue-800 dark:text-blue-300">Periode Saat Ini (Aktif)</h3>
                             </div>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                                 <div class="bg-white dark:bg-gray-800 rounded-lg p-3">
                                     <div class="text-xs text-gray-600 dark:text-gray-400">Operation</div>
                                     <div class="text-lg font-semibold text-blue-600">
@@ -1290,9 +1379,21 @@ onUnmounted(() => {
                                     </div>
                                 </div>
                                 <div class="bg-white dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-600 dark:text-gray-400">Uptime</div>
+                                    <div class="text-lg font-semibold text-green-600">
+                                        {{ formatDuration(selectedLine.uptime_hours) }}
+                                    </div>
+                                </div>
+                                <div class="bg-white dark:bg-gray-800 rounded-lg p-3">
                                     <div class="text-xs text-gray-600 dark:text-gray-400">Failures</div>
                                     <div class="text-lg font-semibold text-red-600">
                                         {{ selectedLine.total_failures }}
+                                    </div>
+                                </div>
+                                <div class="bg-white dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-600 dark:text-gray-400">MTTR</div>
+                                    <div class="text-lg font-semibold text-purple-600">
+                                        {{ selectedLine.average_mttr || '-' }}
                                     </div>
                                 </div>
                                 <div class="bg-white dark:bg-gray-800 rounded-lg p-3">
@@ -1307,7 +1408,7 @@ onUnmounted(() => {
                         <div v-if="historyData.history.length > 0">
                             <h3 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                                 <Archive class="w-5 h-5 text-gray-600" />
-                                Periode Sebelumnya ({{ historyData.history.length }} Periode)
+                                Periode Sebelumnya ({{ historyData.history.length }})
                             </h3>
                             <div class="space-y-3">
                                 <div
@@ -1324,7 +1425,7 @@ onUnmounted(() => {
                                                 <Calendar class="w-5 h-5 text-purple-600 dark:text-purple-400" />
                                                 <div>
                                                     <div class="font-semibold text-gray-800 dark:text-gray-200">
-                                                        {{ period.period }}
+                                                        {{ period.period.replace(' 00:00', '') }}
                                                     </div>
                                                     <div v-if="period.reason" class="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                                         Alasan: {{ period.reason }}
@@ -1340,7 +1441,7 @@ onUnmounted(() => {
                                                 class="w-5 h-5 text-gray-500"
                                             />
                                         </div>
-                                        <div class="grid grid-cols-4 gap-3 mt-3">
+                                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-3">
                                             <div>
                                                 <div class="text-xs text-gray-600 dark:text-gray-400">Operation</div>
                                                 <div class="text-sm font-semibold text-blue-600">
@@ -1354,9 +1455,21 @@ onUnmounted(() => {
                                                 </div>
                                             </div>
                                             <div>
+                                                <div class="text-xs text-gray-600 dark:text-gray-400">Uptime</div>
+                                                <div class="text-sm font-semibold text-green-600">
+                                                    {{ formatDuration(period.line.uptime_hours) }}
+                                                </div>
+                                            </div>
+                                            <div>
                                                 <div class="text-xs text-gray-600 dark:text-gray-400">Failures</div>
                                                 <div class="text-sm font-semibold text-red-600">
                                                     {{ period.line.total_failures }}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="text-xs text-gray-600 dark:text-gray-400">MTTR</div>
+                                                <div class="text-sm font-semibold text-purple-600">
+                                                    {{ period.line.average_mttr || '-' }}
                                                 </div>
                                             </div>
                                             <div>
@@ -1434,148 +1547,274 @@ onUnmounted(() => {
                 </DialogContent>
             </Dialog>
             <Dialog :open="showSummaryModal" @update:open="showSummaryModal = $event">
-                <DialogContent class="!max-w-4xl max-h-[85vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle class="flex items-center gap-2">
-                            <BarChart3 class="w-5 h-5 text-indigo-600" />
-                            Summary Keseluruhan
-                        </DialogTitle>
-                        <DialogDescription v-if="selectedLine">
-                            {{ selectedLine.line_name }} - {{ selectedLine.line_code }}
-                        </DialogDescription>
-                    </DialogHeader>
+    <DialogContent class="!max-w-5xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+            <DialogTitle class="flex items-center gap-2">
+                <BarChart3 class="w-5 h-5 text-indigo-600" />
+                Summary Keseluruhan
+            </DialogTitle>
+            <DialogDescription v-if="selectedLine">
+                {{ selectedLine.line_name }} - {{ selectedLine.line_code }}
+            </DialogDescription>
+        </DialogHeader>
 
-                    <div v-if="isLoadingSummary" class="flex items-center justify-center py-12">
-                        <Loader2 class="w-8 h-8 animate-spin text-indigo-600" />
+        <div v-if="isLoadingSummary" class="flex items-center justify-center py-12">
+            <Loader2 class="w-8 h-8 animate-spin text-indigo-600" />
+        </div>
+
+        <div v-else-if="summaryData" class="mt-4 space-y-4">
+            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <button
+                    @click="showFilterExpand = !showFilterExpand"
+                    class="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                >
+                    <div class="flex items-center gap-2">
+                        <Calendar class="w-4 h-4 text-blue-600" />
+                        <span class="text-sm font-medium">Filter Periode: {{ getFilterLabel }}</span>
+                    </div>
+                    <ChevronDown v-if="!showFilterExpand" class="w-4 h-4 text-gray-500" />
+                    <ChevronUp v-else class="w-4 h-4 text-gray-500" />
+                </button>
+
+                <div v-if="showFilterExpand" class="p-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            @click="summaryFilter.type = 'all'; applySummaryFilter()"
+                            :class="[
+                                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                                summaryFilter.type === 'all'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            ]"
+                        >
+                            Semua
+                        </button>
+                        <button
+                            @click="summaryFilter.type = 'week'; applySummaryFilter()"
+                            :class="[
+                                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                                summaryFilter.type === 'week'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            ]"
+                        >
+                            Minggu Ini
+                        </button>
+                        <button
+                            @click="summaryFilter.type = 'month'; applySummaryFilter()"
+                            :class="[
+                                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                                summaryFilter.type === 'month'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            ]"
+                        >
+                            Bulan Ini
+                        </button>
+                        <button
+                            @click="summaryFilter.type = 'custom'"
+                            :class="[
+                                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                                summaryFilter.type === 'custom'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            ]"
+                        >
+                            Custom
+                        </button>
                     </div>
 
-                    <div v-else-if="summaryData" class="mt-4 space-y-4">
-                        <div class="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-6">
-                            <div class="flex items-center gap-2 mb-4">
-                                <TrendingUp class="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-                                <h3 class="text-lg font-semibold text-indigo-800 dark:text-indigo-300">Total Keseluruhan</h3>
-                            </div>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-                                    <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Operation</div>
-                                    <div class="text-2xl font-bold text-blue-600">
-                                        {{ formatDuration(summaryData.total_all_time.operation_hours) }}
-                                    </div>
-                                </div>
-                                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-                                    <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Repair</div>
-                                    <div class="text-2xl font-bold text-orange-600">
-                                        {{ formatDuration(summaryData.total_all_time.repair_hours) }}
-                                    </div>
-                                </div>
-                                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-                                    <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Failures</div>
-                                    <div class="text-2xl font-bold text-red-600">
-                                        {{ summaryData.total_all_time.failures }}
-                                    </div>
-                                </div>
-                                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-                                    <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Periode</div>
-                                    <div class="text-2xl font-bold text-purple-600">
-                                        {{ summaryData.periods_count }}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                                    <Activity class="w-5 h-5 text-blue-600" />
-                                    Periode Saat Ini
-                                </h4>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between items-center">
-                                        <span class="text-sm text-gray-600 dark:text-gray-400">Operation:</span>
-                                        <span class="font-semibold text-blue-600">
-                                            {{ formatDuration(summaryData.current_period.operation_hours) }}
-                                        </span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span class="text-sm text-gray-600 dark:text-gray-400">Repair:</span>
-                                        <span class="font-semibold text-orange-600">
-                                            {{ formatDuration(summaryData.current_period.repair_hours) }}
-                                        </span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span class="text-sm text-gray-600 dark:text-gray-400">Failures:</span>
-                                        <span class="font-semibold text-red-600">
-                                            {{ summaryData.current_period.failures }}
-                                        </span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span class="text-sm text-gray-600 dark:text-gray-400">MTBF:</span>
-                                        <span class="font-semibold text-indigo-600">
-                                            {{ summaryData.current_period.mtbf ? formatDuration(summaryData.current_period.mtbf) : '-' }}
-                                        </span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span class="text-sm text-gray-600 dark:text-gray-400">MTTR:</span>
-                                        <span class="font-semibold text-purple-600">
-                                            {{ summaryData.current_period.mttr || '-' }}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                                    <Archive class="w-5 h-5 text-purple-600" />
-                                    Ringkasan Periode Lama
-                                </h4>
-                                <div v-if="summaryData.archived_periods.length > 0" class="space-y-3 max-h-64 overflow-y-auto">
-                                    <div
-                                        v-for="(period, index) in summaryData.archived_periods"
-                                        :key="index"
-                                        class="p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"
-                                    >
-                                        <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                            {{ period.period }}
-                                        </div>
-                                        <div class="grid grid-cols-3 gap-2 text-xs">
-                                            <div>
-                                                <div class="text-gray-500">Operation</div>
-                                                <div class="font-semibold text-blue-600">
-                                                    {{ formatDuration(period.operation_hours) }}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div class="text-gray-500">Repair</div>
-                                                <div class="font-semibold text-orange-600">
-                                                    {{ formatDuration(period.repair_hours) }}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div class="text-gray-500">Failures</div>
-                                                <div class="font-semibold text-red-600">
-                                                    {{ period.failures }}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-else class="text-center py-4 text-gray-500">
-                                    <p class="text-sm">Belum ada periode sebelumnya</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="border-t pt-3">
+                    <div v-if="summaryFilter.type === 'custom'" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                            v-model="summaryFilter.start_date"
+                            type="date"
+                            placeholder="Tanggal Mulai"
+                            class="rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm dark:bg-gray-700"
+                        />
+                        <input
+                            v-model="summaryFilter.end_date"
+                            type="date"
+                            placeholder="Tanggal Akhir"
+                            class="rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm dark:bg-gray-700"
+                        />
+                        <div class="flex gap-2">
                             <button
-                                @click="showSummaryModal = false"
-                                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-sidebar-accent"
+                                @click="applySummaryFilter"
+                                class="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm flex items-center justify-center gap-1"
                             >
-                                Tutup
+                                <Search class="w-3 h-3" />
+                                Terapkan
+                            </button>
+                            <button
+                                @click="resetSummaryFilter"
+                                class="px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700"
+                                title="Reset"
+                            >
+                                <RotateCcw class="w-3 h-3" />
                             </button>
                         </div>
                     </div>
-                </DialogContent>
-            </Dialog>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-3">
+                    <TrendingUp class="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    <h3 class="text-base font-semibold text-indigo-800 dark:text-indigo-300">
+                        Total {{ getFilterLabel }}
+                    </h3>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Operation</div>
+                        <div class="text-lg sm:text-xl font-bold text-blue-600 truncate">
+                            {{ formatDuration(summaryData.total_all_time.operation_hours) }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Repair</div>
+                        <div class="text-lg sm:text-xl font-bold text-orange-600 truncate">
+                            {{ formatDuration(summaryData.total_all_time.repair_hours) }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Uptime</div>
+                        <div class="text-lg sm:text-xl font-bold text-green-600 truncate">
+                            {{ formatDuration(summaryData.total_all_time.uptime_hours) }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Failures</div>
+                        <div class="text-lg sm:text-xl font-bold text-red-600 truncate">
+                            {{ summaryData.total_all_time.failures }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">MTBF</div>
+                        <div class="text-lg sm:text-xl font-bold text-indigo-600 truncate">
+                            {{ summaryData.total_all_time.failures > 0 ? formatDuration(summaryData.total_all_time.operation_hours / summaryData.total_all_time.failures) : '-' }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">MTTR</div>
+                        <div class="text-lg sm:text-xl font-bold text-purple-600 truncate">
+                            {{ summaryData.total_all_time.failures > 0 ? formatDuration(summaryData.total_all_time.repair_hours / summaryData.total_all_time.failures) : '-' }}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Periode</div>
+                        <div class="text-lg sm:text-xl font-bold text-gray-600 truncate">
+                            {{ summaryData.periods_count }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                        <Activity class="w-5 h-5 text-blue-600" />
+                        Periode Saat Ini
+                    </h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Operation:</span>
+                            <span class="font-semibold text-blue-600">
+                                {{ formatDuration(summaryData.current_period.operation_hours) }}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Repair:</span>
+                            <span class="font-semibold text-orange-600">
+                                {{ formatDuration(summaryData.current_period.repair_hours) }}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Uptime:</span>
+                            <span class="font-semibold text-green-600">
+                                {{ formatDuration(summaryData.current_period.uptime_hours) }}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Failures:</span>
+                            <span class="font-semibold text-red-600">
+                                {{ summaryData.current_period.failures }}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">MTBF:</span>
+                            <span class="font-semibold text-indigo-600">
+                                {{ summaryData.current_period.mtbf ? formatDuration(summaryData.current_period.mtbf) : '-' }}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">MTTR:</span>
+                            <span class="font-semibold text-purple-600">
+                                {{ summaryData.current_period.mttr || '-' }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                        <Archive class="w-5 h-5 text-purple-600" />
+                        Ringkasan Periode Lama
+                    </h4>
+                    <div v-if="summaryData.archived_periods.length > 0" class="space-y-3 max-h-64 overflow-y-auto">
+                        <div
+                            v-for="(period, index) in summaryData.archived_periods"
+                            :key="index"
+                            class="p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"
+                        >
+                            <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                {{ period.period.replace(' 00:00', '') }}
+                            </div>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                <div>
+                                    <div class="text-gray-500">Operation</div>
+                                    <div class="font-semibold text-blue-600">
+                                        {{ formatDuration(period.operation_hours) }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-500">Repair</div>
+                                    <div class="font-semibold text-orange-600">
+                                        {{ formatDuration(period.repair_hours) }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-500">Uptime</div>
+                                    <div class="font-semibold text-green-600">
+                                        {{ formatDuration(period.uptime_hours) }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-500">Failures</div>
+                                    <div class="font-semibold text-red-600">
+                                        {{ period.failures }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-center py-4 text-gray-500">
+                        <p class="text-sm">Belum ada periode sebelumnya</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-t pt-3">
+                <button
+                    @click="showSummaryModal = false"
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-sidebar-accent"
+                >
+                    Tutup
+                </button>
+            </div>
+        </div>
+    </DialogContent>
+</Dialog>
             <Dialog :open="showQrScanModal" @update:open="val => !val && closeQrScanModal()">
                 <DialogContent class="max-w-lg sm:max-w-xl w-[95vw] sm:w-full">
                     <DialogHeader>
@@ -1927,6 +2166,72 @@ onUnmounted(() => {
                             </button>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+            <Dialog :open="showCreateModal" @update:open="showCreateModal = $event">
+                <DialogContent class="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Tambah Line Baru</DialogTitle>
+                        <DialogDescription>
+                            Buat line produksi baru
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form @submit.prevent="submitCreate" class="space-y-4 mt-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">
+                                Nama Line <span class="text-red-600">*</span>
+                            </label>
+                            <input
+                                v-model="createForm.line_name"
+                                type="text"
+                                required
+                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar"
+                            />
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium mb-2">
+                                Plant <span class="text-red-600">*</span>
+                            </label>
+                            <select
+                                v-model="createForm.plant"
+                                required
+                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar"
+                            >
+                                <option value="">Pilih Plant</option>
+                                <option v-for="plant in plants" :key="plant" :value="plant">{{ plant }}</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium mb-2">
+                                Deskripsi <span class="text-gray-500">(opsional)</span>
+                            </label>
+                            <textarea
+                                v-model="createForm.description"
+                                rows="2"
+                                class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar"
+                            ></textarea>
+                        </div>
+
+                        <div class="flex gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <button
+                                type="button"
+                                @click="showCreateModal = false"
+                                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-sidebar-accent"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="submit"
+                                :disabled="createForm.processing"
+                                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                {{ createForm.processing ? 'Menyimpan...' : 'Simpan' }}
+                            </button>
+                        </div>
+                    </form>
                 </DialogContent>
             </Dialog>
             <Dialog :open="showEditModal" @update:open="showEditModal = $event">
