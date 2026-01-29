@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Helpers\DateHelper;
 
 class Esp32ProductionHistory extends Model
 {
@@ -21,6 +22,7 @@ class Esp32ProductionHistory extends Model
         'production_started_at',
         'production_finished_at',
         'completion_status',
+        'shift', // ← TAMBAHAN
     ];
 
     protected $casts = [
@@ -28,9 +30,27 @@ class Esp32ProductionHistory extends Model
         'production_finished_at' => 'datetime',
     ];
 
+    protected $appends = ['shift_label']; // ← TAMBAHAN
+
+    // ← TAMBAHAN: Auto-detect shift saat create
+    protected static function booted()
+    {
+        static::creating(function ($history) {
+            if ($history->production_started_at) {
+                $history->shift = DateHelper::getCurrentShift($history->production_started_at);
+            }
+        });
+    }
+
     public function device(): BelongsTo
     {
         return $this->belongsTo(Esp32Device::class, 'device_id', 'device_id');
+    }
+
+    // ← TAMBAHAN: Accessor untuk shift label
+    public function getShiftLabelAttribute(): string
+    {
+        return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
     }
 
     public function getFormattedDurationAttribute(): string
@@ -55,5 +75,11 @@ class Esp32ProductionHistory extends Model
             return "{$minutes}m {$secs}s";
         }
         return "{$secs}s";
+    }
+
+    // ← TAMBAHAN: Scope untuk filter by shift
+    public function scopeByShift($query, int $shift)
+    {
+        return $query->where('shift', $shift);
     }
 }

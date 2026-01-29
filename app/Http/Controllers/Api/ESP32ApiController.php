@@ -58,7 +58,10 @@ class ESP32ApiController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'message' => "Device {$validated['device_id']} registered successfully"
+                    'message' => "Device {$validated['device_id']} registered successfully",
+                    'new_max_count' => $device->max_count,
+                    'new_cycle_time' => $device->cycle_time,
+                    'reset_counter' => false,
                 ], 200);
             }
 
@@ -119,18 +122,18 @@ class ESP32ApiController extends Controller
                     'logged_at' => now(),
                 ]);
 
-                $totalLogs = Esp32Log::where('device_id', $validated['device_id'])->count();
-                if ($totalLogs > 100) {
-                    Esp32Log::where('device_id', $validated['device_id'])
-                        ->orderBy('logged_at', 'asc')
-                        ->limit($totalLogs - 100)
-                        ->delete();
-                }
+                // ✅ HAPUS LOG YANG LEBIH DARI 48 JAM
+                Esp32Log::where('device_id', $validated['device_id'])
+                    ->where('logged_at', '<', now()->subHours(48))
+                    ->delete();
             }
 
             return response()->json([
                 'success' => true,
-                'message' => "Status for {$validated['device_id']} updated successfully"
+                'message' => "Status for {$validated['device_id']} updated successfully",
+                'new_max_count' => $oldDevice->max_count,
+                'new_cycle_time' => $oldDevice->cycle_time,
+                'reset_counter' => false,
             ], 200);
 
         } catch (\Illuminate\Validation\ValidationException $e) {

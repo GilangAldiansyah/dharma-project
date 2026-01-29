@@ -76,7 +76,9 @@ class LineController extends Controller
                     'started_at' => $line->currentOperation->started_at,
                     'status' => $line->currentOperation->status,
                     'total_pause_minutes' => $line->currentOperation->total_pause_minutes ?? 0,
-                    'formatted_pause_duration' => $line->currentOperation->formatted_pause_duration, // ← Tambahkan
+                    'formatted_pause_duration' => $line->currentOperation->formatted_pause_duration,
+                    'shift' => $line->currentOperation->shift, // ← TAMBAHAN
+                    'shift_label' => $line->currentOperation->shift_label, // ← TAMBAHAN
                 ] : null,
                 'machines' => $line->machines->map(function ($machine) {
                     return [

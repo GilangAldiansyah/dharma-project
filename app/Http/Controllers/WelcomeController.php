@@ -87,6 +87,19 @@ class WelcomeController extends Controller
                         'Barcode Scanning Support',
                         'MTTR & MTBF Calculation'
                     ]
+                ],
+                [
+                    'id' => 'oee-system',
+                    'title' => 'OEE System',
+                    'description' => 'Sistem monitoring OEE (Overall Equipment Effectiveness)',
+                    'icon' => 'TrendingUp',
+                    'color' => 'violet',
+                    'route' => '/oee',
+                    'features' => [
+                        'OEE Dashboard & Analytics',
+                        'Availability, Performance, Quality Metrics',
+                        'Line Comparison & Export'
+                    ]
                 ]
             ]
         ]);

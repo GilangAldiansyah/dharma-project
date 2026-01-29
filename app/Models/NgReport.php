@@ -71,21 +71,34 @@ class NgReport extends Model
     }
 
     protected static function boot()
-    {
-        parent::boot();
+{
+    parent::boot();
 
-        static::creating(function ($report) {
-            if (!$report->report_number) {
-                $report->report_number = 'NG-' . date('Ymd') . '-' . str_pad(static::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
+    static::creating(function ($report) {
+        if (!$report->report_number) {
+            $prefix = 'NG-' . date('Ymd') . '-';
+
+            $lastReport = static::where('report_number', 'LIKE', $prefix . '%')
+                ->orderByRaw('CAST(SUBSTRING(report_number, -4) AS UNSIGNED) DESC')
+                ->first();
+
+            if ($lastReport) {
+                $lastNumber = (int) substr($lastReport->report_number, -4);
+                $nextNumber = $lastNumber + 1;
+            } else {
+                $nextNumber = 1;
             }
-            if (!$report->reported_at) {
-                $report->reported_at = now();
-            }
-            if (!$report->status) {
-                $report->status = self::STATUS_OPEN;
-            }
-        });
-    }
+
+            $report->report_number = $prefix . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+        }
+        if (!$report->reported_at) {
+            $report->reported_at = now();
+        }
+        if (!$report->status) {
+            $report->status = self::STATUS_OPEN;
+        }
+    });
+}
     public function isTaDeadlineExceeded(): bool
     {
         if ($this->ta_submitted_at || $this->status === self::STATUS_CLOSED) {
@@ -156,7 +169,6 @@ class NgReport extends Model
         ];
     }
 
-    // Accessor: Get PICA status config
     public function getPicaStatusConfigAttribute(): array
     {
         $configs = [

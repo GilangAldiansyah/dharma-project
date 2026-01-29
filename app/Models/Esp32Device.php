@@ -4,12 +4,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Carbon\Carbon;
 
 class Esp32Device extends Model
 {
     protected $fillable = [
         'device_id',
+        'line_id', // ✅ Added
         'counter_a',
         'counter_b',
         'reject',
@@ -38,6 +40,12 @@ class Esp32Device extends Model
         'is_completed',
         'has_counter_b'
     ];
+
+    // ✅ New relation
+    public function line(): BelongsTo
+    {
+        return $this->belongsTo(Line::class);
+    }
 
     public function logs(): HasMany
     {
@@ -69,7 +77,6 @@ class Esp32Device extends Model
     public function getDelaySecondsAttribute(): int
     {
         if (!$this->production_started_at || $this->cycle_time == 0) return 0;
-
         $productionStarted = Carbon::parse($this->production_started_at);
         $actualCounter = $this->counter_a;
 

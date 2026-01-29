@@ -1,5 +1,7 @@
 <?php
+
 namespace App\Helpers;
+
 use Carbon\Carbon;
 
 class DateHelper
@@ -9,8 +11,6 @@ class DateHelper
         $datetime = $datetime ?? now();
         $effectiveDate = $datetime->copy();
 
-        // Jika jam sebelum jam 7 pagi, tanggal efektif adalah hari sebelumnya
-        // Karena masih bagian dari shift 2 atau shift 3 hari sebelumnya
         if ($datetime->hour < 7) {
             $effectiveDate->subDay();
         }
@@ -25,13 +25,21 @@ class DateHelper
 
         if ($hour >= 7 && $hour < 16) {
             return 1;
-        }
-        elseif ($hour >= 21 || $hour < 5) {
+        } elseif ($hour >= 21 || $hour < 5) {
             return 2;
-        }
-        else {
+        } else {
             return 3;
         }
+    }
+
+    public static function getShiftLabel(int $shift): string
+    {
+        return match($shift) {
+            1 => 'Shift 1',
+            2 => 'Shift 2',
+            3 => 'Shift 3',
+            default => 'N/A',
+        };
     }
 
     public static function isValidPengembalianDate($tanggalPengembalian): bool
@@ -39,12 +47,19 @@ class DateHelper
         $tanggalPengembalian = Carbon::parse($tanggalPengembalian)->startOfDay();
         $effectiveToday = static::getEffectiveDate()->startOfDay();
 
-        // Tanggal pengembalian harus <= tanggal efektif hari ini
         return $tanggalPengembalian->lte($effectiveToday);
     }
 
     public static function formatDate($date): string
     {
         return Carbon::parse($date)->format('d M Y');
+    }
+
+    public static function getAllShifts():array{
+        return [
+            ['value' => 1, 'label' => 'shift 1'],
+            ['value' => 2, 'label' => 'shift 2'],
+            ['value' => 3, 'label' => 'shift 3'],
+        ];
     }
 }

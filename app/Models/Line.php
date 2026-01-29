@@ -81,55 +81,71 @@ class Line extends Model
         return $this->belongsTo(Line::class, 'parent_line_id');
     }
 
+    // ✅ New relations for ESP32 and OEE
+    public function esp32Device(): HasOne
+    {
+        return $this->hasOne(Esp32Device::class);
+    }
+
+    public function oeeRecords(): HasMany
+    {
+        return $this->hasMany(LineOeeRecord::class);
+    }
+
+    public function latestOeeRecord(): HasOne
+    {
+        return $this->hasOne(LineOeeRecord::class)->latestOfMany('period_end');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_archived', false);
     }
 
     public function getAverageMttrAttribute(): ?string
-{
-    $periodStart = $this->current_period_start ?? $this->created_at;
+    {
+        $periodStart = $this->current_period_start ?? $this->created_at;
 
-    if (!$periodStart) {
-        return null;
-    }
-
-    $completedReports = MaintenanceReport::query()
-        ->whereHas('machine', function ($query) {
-            $query->where('line_id', $this->id)
-                  ->where('is_archived', false);
-        })
-        ->where('status', 'Selesai')
-        ->whereNotNull('repair_duration_minutes')
-        ->whereNotNull('completed_at')
-        ->where('completed_at', '>=', $periodStart)
-        ->get();
-
-    if ($completedReports->isEmpty()) {
-        return null;
-    }
-
-    $totalSeconds = $completedReports->sum(function($report) {
-        return round($report->repair_duration_minutes * 60);
-    });
-
-    $avgSeconds = round($totalSeconds / $completedReports->count());
-
-    $hours = floor($avgSeconds / 3600);
-    $minutes = floor(($avgSeconds % 3600) / 60);
-    $seconds = $avgSeconds % 60;
-
-    return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-}
-
-    public function getAverageMtbfAttribute(): ?float
-        {
-            if ($this->total_failures > 0 && $this->total_operation_hours > 0) {
-                return round($this->total_operation_hours / $this->total_failures, 4);
-            }
-
+        if (!$periodStart) {
             return null;
         }
+
+        $completedReports = MaintenanceReport::query()
+            ->whereHas('machine', function ($query) {
+                $query->where('line_id', $this->id)
+                      ->where('is_archived', false);
+            })
+            ->where('status', 'Selesai')
+            ->whereNotNull('repair_duration_minutes')
+            ->whereNotNull('completed_at')
+            ->where('completed_at', '>=', $periodStart)
+            ->get();
+
+        if ($completedReports->isEmpty()) {
+            return null;
+        }
+
+        $totalSeconds = $completedReports->sum(function($report) {
+            return round($report->repair_duration_minutes * 60);
+        });
+
+        $avgSeconds = round($totalSeconds / $completedReports->count());
+
+        $hours = floor($avgSeconds / 3600);
+        $minutes = floor(($avgSeconds % 3600) / 60);
+        $seconds = $avgSeconds % 60;
+
+        return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+    }
+
+    public function getAverageMtbfAttribute(): ?float
+    {
+        if ($this->total_failures > 0 && $this->total_operation_hours > 0) {
+            return round($this->total_operation_hours / $this->total_failures, 4);
+        }
+
+        return null;
+    }
 
     public function getTotalLineStopsAttribute(): int
     {

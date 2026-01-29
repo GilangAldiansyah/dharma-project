@@ -56,6 +56,8 @@ interface LineOperation {
     started_at: string;
     status: string;
     total_pause_minutes: number;
+    shift: number;
+    shift_label: string;
 }
 
 interface Line {
@@ -1059,6 +1061,9 @@ onUnmounted(() => {
                                         <span :class="['inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium', getStatusColor(line.status)]">
                                             <component :is="getStatusIcon(line.status)" class="w-3 h-3" />
                                             {{ getStatusText(line.status) }}
+                                        </span>
+                                        <span v-if="line.current_operation" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                                            {{ line.current_operation.shift_label }}
                                         </span>
                                     </td>
                                     <td class="px-4 py-3 text-center">
@@ -2194,14 +2199,17 @@ onUnmounted(() => {
                             <label class="block text-sm font-medium mb-2">
                                 Plant <span class="text-red-600">*</span>
                             </label>
-                            <select
+                            <input
                                 v-model="createForm.plant"
+                                list="plant-list"
+                                type="text"
                                 required
+                                placeholder="Ketik plant baru atau pilih dari daftar"
                                 class="w-full rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar"
-                            >
-                                <option value="">Pilih Plant</option>
+                            />
+                            <datalist id="plant-list">
                                 <option v-for="plant in plants" :key="plant" :value="plant">{{ plant }}</option>
-                            </select>
+                            </datalist>
                         </div>
 
                         <div>

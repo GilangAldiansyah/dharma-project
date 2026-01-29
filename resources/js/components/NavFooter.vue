@@ -8,15 +8,12 @@ import {
 } from '@/components/ui/sidebar';
 import { toUrl } from '@/lib/utils';
 import { type NavItem } from '@/types';
-
 interface Props {
     items: NavItem[];
     class?: string;
 }
-
 defineProps<Props>();
 </script>
-
 <template>
     <SidebarGroup
         :class="`group-data-[collapsible=icon]:p-0 ${$props.class || ''}`"
@@ -25,7 +22,7 @@ defineProps<Props>();
             <SidebarMenu>
                 <SidebarMenuItem v-for="item in items" :key="item.title">
                     <SidebarMenuButton
-                        class="text-neutral-600 hover:text-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
+                        class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/20 dark:hover:to-indigo-900/20 transition-all duration-300 rounded-xl font-medium"
                         as-child
                     >
                         <a

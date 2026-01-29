@@ -64,6 +64,8 @@ interface Report {
     completed_at: string | null;
     repair_duration_formatted: string | null;
     line_stop_duration_formatted: string | null;
+    shift: number;
+    shift_label: string;
     line: Line;
     machine: Machine;
     line_operation: LineOperation | null;
@@ -86,7 +88,9 @@ interface Props {
     };
     lines: Line[];
     plants: string[];
+    shifts: Array<{ value: number; label: string }>;
     filters: {
+        shift: any;
         search?: string;
         status?: string;
         plant?: string;
@@ -143,13 +147,25 @@ const filteredLines = computed(() => {
     return filtered;
 });
 
+const shiftFilter = ref(props.filters.shift?.toString() || '');
+
 const search = () => {
     router.get('/maintenance', {
         search: searchQuery.value,
         status: statusFilter.value,
         plant: plantFilter.value,
         line_id: lineFilter.value,
+        shift: shiftFilter.value
     }, { preserveState: true, preserveScroll: true });
+};
+
+const getShiftBadgeColor = (shift: number) => {
+    switch (shift) {
+        case 1: return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        case 2: return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+        case 3: return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+        default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
 };
 
 const refreshData = () => {
@@ -476,6 +492,16 @@ onUnmounted(() => {
                         {{ line.line_name }} ({{ line.plant }})
                     </option>
                 </select>
+                <select
+                    v-model="shiftFilter"
+                    @change="search"
+                    class="rounded-md border border-sidebar-border px-3 py-2 dark:bg-sidebar text-sm"
+                >
+                    <option value="">Semua Shift</option>
+                    <option v-for="shift in shifts" :key="shift.value" :value="shift.value">
+                        {{ shift.label }}
+                    </option>
+                </select>
             </div>
 
             <!-- Table -->
@@ -487,6 +513,7 @@ onUnmounted(() => {
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">No Laporan</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Line</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Mesin Bermasalah</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Shift</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Plant</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Masalah</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase">Status</th>
@@ -505,6 +532,11 @@ onUnmounted(() => {
                                 </td>
                                 <td class="px-4 py-3 text-sm">
                                     {{ report.machine.machine_name }}
+                                </td>
+                                <td class="px-4 py-3 text-center">
+                                    <span :class="['px-2 py-1 rounded-full text-xs font-medium', getShiftBadgeColor(report.shift)]">
+                                        {{ report.shift_label }}
+                                    </span>
                                 </td>
                                 <td class="px-4 py-3 text-sm">{{ report.line.plant }}</td>
                                 <td class="px-4 py-3">
@@ -528,7 +560,6 @@ onUnmounted(() => {
                                 </td>
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-1">
-                                        <!-- Hanya tombol Selesai untuk Sedang Diperbaiki -->
                                         <button
                                             v-if="report.status === 'Sedang Diperbaiki'"
                                             @click="completeRepair(report.id)"
@@ -547,13 +578,13 @@ onUnmounted(() => {
                                     </div>
                                 </td>
                             </tr>
-                            <tr v-if="reports.data.length === 0">
-                                <td colspan="9" class="px-4 py-8 text-center text-gray-500">
-                                    <Activity class="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                    <p>Tidak ada laporan maintenance</p>
-                                </td>
-                            </tr>
-                        </tbody>
+    <tr v-if="reports.data.length === 0">
+        <td colspan="10" class="px-4 py-8 text-center text-gray-500">
+            <Activity class="w-12 h-12 mx-auto mb-2 opacity-50" />
+            <p>Tidak ada laporan maintenance</p>
+        </td>
+    </tr>
+</tbody>
                     </table>
                 </div>
             </div>
@@ -762,6 +793,12 @@ onUnmounted(() => {
                                 <div>
                                     <div class="text-sm text-gray-600 dark:text-gray-400">Plant</div>
                                     <div class="font-semibold">{{ selectedReport.line.plant }}</div>
+                                </div>
+                                <div>
+                                    <div class="text-sm text-gray-600 dark:text-gray-400">Shift</div>
+                                    <span :class="['inline-flex px-2 py-1 rounded-full text-xs font-medium', getShiftBadgeColor(selectedReport.shift)]">
+                                        {{ selectedReport.shift_label }}
+                                    </span>
                                 </div>
                                 <div>
                                     <div class="text-sm text-gray-600 dark:text-gray-400">Mesin Bermasalah</div>

@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Carbon\Carbon;
+use App\Helpers\DateHelper;
 
 class MaintenanceController extends Controller
 {
@@ -21,15 +22,15 @@ class MaintenanceController extends Controller
         if ($request->search) {
             $query->where(function ($q) use ($request) {
                 $q->where('report_number', 'like', "%{$request->search}%")
-                  ->orWhere('problem', 'like', "%{$request->search}%")
-                  ->orWhere('reported_by', 'like', "%{$request->search}%")
-                  ->orWhereHas('machine', function ($mq) use ($request) {
-                      $mq->where('machine_name', 'like', "%{$request->search}%");
-                  })
-                  ->orWhereHas('line', function ($lq) use ($request) {
-                      $lq->where('line_name', 'like', "%{$request->search}%")
-                         ->orWhere('line_code', 'like', "%{$request->search}%");
-                  });
+                ->orWhere('problem', 'like', "%{$request->search}%")
+                ->orWhere('reported_by', 'like', "%{$request->search}%")
+                ->orWhereHas('machine', function ($mq) use ($request) {
+                    $mq->where('machine_name', 'like', "%{$request->search}%");
+                })
+                ->orWhereHas('line', function ($lq) use ($request) {
+                    $lq->where('line_name', 'like', "%{$request->search}%")
+                        ->orWhere('line_code', 'like', "%{$request->search}%");
+                });
             });
         }
 
@@ -48,14 +49,20 @@ class MaintenanceController extends Controller
             $query->byLineId($request->line_id);
         }
 
+        // ← TAMBAHAN: Filter by shift
+        if ($request->shift) {
+            $query->byShift($request->shift);
+        }
+
         $reports = $query->orderBy('reported_at', 'desc')
-                         ->paginate(20)
-                         ->withQueryString();
+                        ->paginate(20)
+                        ->withQueryString();
 
         // Add formatted duration to each report
         $reports->getCollection()->transform(function ($report) {
             $report->repair_duration_formatted = $report->repair_duration_formatted;
             $report->line_stop_duration_formatted = $report->line_stop_duration_formatted;
+            $report->shift_label = $report->shift_label; // ← TAMBAHAN
             return $report;
         });
 
@@ -107,7 +114,9 @@ class MaintenanceController extends Controller
                 'status' => $request->status,
                 'plant' => $request->plant,
                 'line_id' => $request->line_id,
+                'shift' => $request->shift, // ← TAMBAHAN
             ],
+            'shifts' => \App\Helpers\DateHelper::getAllShifts(), // ← TAMBAHAN: Data shift untuk dropdown
         ]);
     }
 
@@ -276,12 +285,16 @@ class MaintenanceController extends Controller
             : Carbon::now()->endOfDay();
 
         $plantFilter = $request->plant;
+        $shiftFilter = $request->shift;
 
         $lineStopByLine = MaintenanceReport::with('line', 'machine')
             ->whereBetween('line_stopped_at', [$startDate, $endDate])
             ->whereNotNull('line_stopped_at')
             ->when($plantFilter, function ($q) use ($plantFilter) {
                 $q->whereHas('line', fn($lq) => $lq->where('plant', $plantFilter));
+            })
+            ->when($shiftFilter, function ($q) use ($shiftFilter) { // ← TAMBAHAN
+            $q->byShift($shiftFilter);
             })
             ->get()
             ->groupBy('line_id')
@@ -584,10 +597,12 @@ class MaintenanceController extends Controller
             'overallStats' => $overallStats,
             'lineStatusDistribution' => $lineStatusDistribution,
             'plants' => $plants,
+            'shifts' => \App\Helpers\DateHelper::getAllShifts(),
             'filters' => [
                 'start_date' => $startDate->format('Y-m-d'),
                 'end_date' => $endDate->format('Y-m-d'),
                 'plant' => $plantFilter,
+                'shift' => $shiftFilter,
             ],
         ]);
     }

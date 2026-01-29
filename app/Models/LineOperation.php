@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Helpers\DateHelper;
 
 class LineOperation extends Model
 {
@@ -25,6 +26,7 @@ class LineOperation extends Model
         'mtbf_hours',
         'status',
         'notes',
+        'shift',
     ];
 
     protected $casts = [
@@ -37,6 +39,18 @@ class LineOperation extends Model
         'duration_minutes' => 'decimal:4',
     ];
 
+    protected $appends = ['shift_label']; // ← TAMBAHAN
+
+    // ← TAMBAHAN: Auto-detect shift saat create
+    protected static function booted()
+    {
+        static::creating(function ($operation) {
+            if ($operation->started_at) {
+                $operation->shift = DateHelper::getCurrentShift($operation->started_at);
+            }
+        });
+    }
+
     public function line(): BelongsTo
     {
         return $this->belongsTo(Line::class);
@@ -45,6 +59,12 @@ class LineOperation extends Model
     public function maintenanceReports(): HasMany
     {
         return $this->hasMany(MaintenanceReport::class);
+    }
+
+    // ← TAMBAHAN: Accessor untuk shift label
+    public function getShiftLabelAttribute(): string
+    {
+        return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
     }
 
     public function isRunning(): bool
@@ -204,5 +224,11 @@ class LineOperation extends Model
     public function scopeByLine($query, int $lineId)
     {
         return $query->where('line_id', $lineId);
+    }
+
+    // ← TAMBAHAN: Scope untuk filter by shift
+    public function scopeByShift($query, int $shift)
+    {
+        return $query->where('shift', $shift);
     }
 }

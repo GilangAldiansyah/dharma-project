@@ -21,6 +21,7 @@ use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\MachineController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\LineOperationController;
+use App\Http\Controllers\OeeController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -154,6 +155,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/{operationId}/stop', [LineOperationController::class, 'stopOperation'])->name('maintenance.operations.stop');
         Route::get('/lines/{lineId}/current', [LineOperationController::class, 'getCurrentOperation'])->name('maintenance.operations.current');
     });
+    Route::prefix('oee')->name('oee.')->group(function () {
+        Route::get('/', [OeeController::class, 'index'])->name('index');
+        Route::post('/calculate', [OeeController::class, 'calculate'])->name('calculate');
+        Route::get('/{oeeRecord}', [OeeController::class, 'show'])->name('show');
+        Route::delete('/{oeeRecord}', [OeeController::class, 'destroy'])->name('destroy');
+        Route::get('/export/data', [OeeController::class, 'export'])->name('export');
+        Route::post('/compare', [OeeController::class, 'compare'])->name('compare');
+        Route::get('/chart/data', [OeeController::class, 'chartData'])->name('chart-data');
+
+    });
 });
 
 require __DIR__.'/settings.php';
+
+

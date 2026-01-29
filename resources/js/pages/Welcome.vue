@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
-import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2, Bot, ClipboardList, Activity } from 'lucide-vue-next';
+import { Package, AlertTriangle, Wrench, ArrowRight, CheckCircle2, Bot, ClipboardList, Activity, TrendingUp } from 'lucide-vue-next';
 
 type ColorType = 'blue' | 'orange' | 'green' | 'red' | 'black' | 'violet';
 
@@ -34,10 +34,10 @@ const iconComponents: Record<string, any> = {
     Wrench,
     Bot,
     ClipboardList,
-    Activity
+    Activity,
+    TrendingUp
 };
 
-// UPDATED: Added red, black, violet color schemes
 const colorSchemes: Record<ColorType, {
     gradient: string;
     glow: string;

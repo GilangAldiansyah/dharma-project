@@ -130,7 +130,7 @@ const allNavGroups: NavGroup[] = [
         ],
     },
     {
-        title: 'ESP32 Monitoring',
+        title: 'Robot Monitor',
         icon: Bot,
         routes: ['/esp32/monitor','/settings'],
         dashboardRoute: '/esp32/monitor',
@@ -138,7 +138,7 @@ const allNavGroups: NavGroup[] = [
             {
                 title: 'Monitor',
                 href: '/esp32/monitor',
-                icon: Bot,
+                icon: Activity,
             },
         ],
     },
@@ -198,6 +198,19 @@ const allNavGroups: NavGroup[] = [
             },
         ],
     },
+    {
+      title: 'OEE',
+        icon: TrendingUp,
+        routes: ['/oee', '/settings'],
+        dashboardRoute: '/oee',
+        items: [
+            {
+                title: 'Dashboard',
+                href: '/oee',
+                icon: BarChart3,
+            },
+        ],
+    },
 ];
 
 const currentSystem = computed(() => {
@@ -244,7 +257,7 @@ const footerNavItems: NavItem[] = [
         <SidebarHeader>
             <SidebarMenu>
                 <SidebarMenuItem>
-                    <SidebarMenuButton size="lg" as-child>
+                    <SidebarMenuButton size="lg" as-child class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/20 dark:hover:to-indigo-900/20 transition-all duration-300">
                         <Link :href="logoHref">
                             <AppLogo />
                         </Link>
@@ -261,10 +274,11 @@ const footerNavItems: NavItem[] = [
                             <SidebarMenuButton
                                 as-child
                                 :tooltip="item.title"
+                                class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/20 dark:hover:to-indigo-900/20 data-[active=true]:bg-gradient-to-r data-[active=true]:from-blue-100 data-[active=true]:to-indigo-100 dark:data-[active=true]:from-blue-900/30 dark:data-[active=true]:to-indigo-900/30 data-[active=true]:text-blue-700 dark:data-[active=true]:text-blue-300 transition-all duration-300 rounded-xl"
                             >
                                 <Link :href="item.href">
                                     <component :is="item.icon" class="w-4 h-4" />
-                                    <span>{{ item.title }}</span>
+                                    <span class="font-medium">{{ item.title }}</span>
                                 </Link>
                             </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -273,10 +287,12 @@ const footerNavItems: NavItem[] = [
             </SidebarGroup>
 
             <div v-if="!currentSystem" class="px-4 py-8 text-center group-data-[collapsible=icon]:py-4">
-                <Home class="w-8 h-8 mx-auto mb-2 text-muted-foreground group-data-[collapsible=icon]:w-5 group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:mb-0" />
-                <p class="text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
-                    Pilih sistem untuk melihat menu
-                </p>
+                <div class="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 group-data-[collapsible=icon]:p-2">
+                    <Home class="w-8 h-8 mx-auto mb-2 text-blue-600 group-data-[collapsible=icon]:w-5 group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:mb-0" />
+                    <p class="text-sm text-gray-600 dark:text-gray-400 font-medium group-data-[collapsible=icon]:hidden">
+                        Pilih sistem untuk melihat menu
+                    </p>
+                </div>
             </div>
         </SidebarContent>
 

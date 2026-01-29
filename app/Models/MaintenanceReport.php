@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Helpers\DateHelper;
 
 class MaintenanceReport extends Model
 {
@@ -21,6 +22,7 @@ class MaintenanceReport extends Model
         'completed_at',
         'repair_duration_minutes',
         'line_stop_duration_minutes',
+        'shift', // ← TAMBAHAN
     ];
 
     protected $casts = [
@@ -31,6 +33,18 @@ class MaintenanceReport extends Model
         'repair_duration_minutes' => 'decimal:4',
         'line_stop_duration_minutes' => 'decimal:4',
     ];
+
+    protected $appends = ['shift_label']; // ← TAMBAHAN
+
+    // ← TAMBAHAN: Auto-detect shift saat create
+    protected static function booted()
+    {
+        static::creating(function ($report) {
+            if ($report->reported_at) {
+                $report->shift = DateHelper::getCurrentShift($report->reported_at);
+            }
+        });
+    }
 
     public function line(): BelongsTo
     {
@@ -45,6 +59,12 @@ class MaintenanceReport extends Model
     public function lineOperation(): BelongsTo
     {
         return $this->belongsTo(LineOperation::class);
+    }
+
+    // ← TAMBAHAN: Accessor untuk shift label
+    public function getShiftLabelAttribute(): string
+    {
+        return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
     }
 
     public function getRepairDurationAttribute(): ?int
@@ -154,6 +174,12 @@ class MaintenanceReport extends Model
         return $query->whereHas('machine', function ($q) use ($line) {
             $q->where('line', $line);
         });
+    }
+
+    // ← TAMBAHAN: Scope untuk filter by shift
+    public function scopeByShift($query, int $shift)
+    {
+        return $query->where('shift', $shift);
     }
 
     public static function generateReportNumber(): string
