@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Esp32Device;
 use App\Models\Esp32Log;
 use App\Models\Esp32ProductionHistory;
+use App\Models\Area;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -13,42 +14,51 @@ class ESP32Controller extends Controller
     public function monitor(Request $request)
     {
         $search = $request->input('search');
+        $areaId = $request->input('area');
 
         $devices = Esp32Device::query()
+            ->with('area')
             ->when($search, function ($query, $search) {
                 $query->where('device_id', 'like', "%{$search}%");
             })
+            ->when($areaId, function ($query, $areaId) {
+                $query->where('area_id', $areaId);
+            })
             ->orderBy('device_id', 'asc')
-            ->paginate(12);
+            ->get();
+
+        $areas = Area::orderBy('name', 'asc')->get();
 
         return Inertia::render('ESP32/Monitor', [
             'devices' => $devices,
+            'areas' => $areas,
             'filters' => [
                 'search' => $search,
+                'area' => $areaId,
             ],
         ]);
     }
 
     public function detail($deviceId)
-{
-    $device = Esp32Device::where('device_id', $deviceId)->firstOrFail();
+    {
+        $device = Esp32Device::where('device_id', $deviceId)->firstOrFail();
 
-    $logs = Esp32Log::where('device_id', $deviceId)
-        ->orderBy('logged_at', 'desc')
-        ->paginate(50);
+        $logs = Esp32Log::where('device_id', $deviceId)
+            ->orderBy('logged_at', 'desc')
+            ->paginate(50);
 
-    $productionHistories = Esp32ProductionHistory::where('device_id', $deviceId)
-        ->orderBy('production_finished_at', 'desc')
-        ->limit(10)
-        ->get();
+        $productionHistories = Esp32ProductionHistory::where('device_id', $deviceId)
+            ->orderBy('production_finished_at', 'desc')
+            ->limit(10)
+            ->get();
 
-    return Inertia::render('ESP32/Detail', [
-        'device' => $device,
-        'logs' => $logs,
-        'productionHistories' => $productionHistories,
-        'shifts' => \App\Helpers\DateHelper::getAllShifts(), // ← TAMBAHAN untuk filter
-    ]);
-}
+        return Inertia::render('ESP32/Detail', [
+            'device' => $device,
+            'logs' => $logs,
+            'productionHistories' => $productionHistories,
+            'shifts' => \App\Helpers\DateHelper::getAllShifts(),
+        ]);
+    }
 
     public function updateSettings(Request $request)
     {
@@ -58,12 +68,20 @@ class ESP32Controller extends Controller
             'max_stroke' => 'nullable|integer|min:0',
             'reject' => 'required|integer|min:0',
             'cycle_time' => 'required|integer|min:0',
+            'area_id' => 'nullable|integer|exists:areas,id',
+            'new_area_name' => 'nullable|string|max:255',
             'reset_counter' => 'nullable|boolean',
         ]);
 
-        $loadingTime = $validated['max_count'] * $validated['cycle_time'];
-
         $device = Esp32Device::where('device_id', $validated['device_id'])->first();
+
+        $areaId = null;
+        if (isset($validated['new_area_name']) && $validated['new_area_name']) {
+            $area = Area::firstOrCreate(['name' => $validated['new_area_name']]);
+            $areaId = $area->id;
+        } elseif (isset($validated['area_id'])) {
+            $areaId = $validated['area_id'];
+        }
 
         if ($validated['reset_counter'] ?? false) {
             if ($device->counter_a > 0) {
@@ -74,12 +92,14 @@ class ESP32Controller extends Controller
                 'counter_a' => 0,
                 'counter_b' => 0,
                 'reject' => 0,
+                'area_id' => $areaId,
                 'production_started_at' => now(),
             ]);
 
             return back()->with('success', 'Counter berhasil direset ke 0');
         }
 
+        $loadingTime = $validated['max_count'] * $validated['cycle_time'];
         $productionStartedAt = $device->production_started_at;
 
         if ($device->cycle_time != $validated['cycle_time'] && $device->counter_a > 0) {
@@ -91,6 +111,7 @@ class ESP32Controller extends Controller
             'reject' => $validated['reject'],
             'cycle_time' => $validated['cycle_time'],
             'loading_time' => $loadingTime,
+            'area_id' => $areaId,
             'production_started_at' => $productionStartedAt,
         ];
 

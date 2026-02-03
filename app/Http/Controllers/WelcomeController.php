@@ -100,7 +100,20 @@ class WelcomeController extends Controller
                         'Availability, Performance, Quality Metrics',
                         'Line Comparison & Export'
                     ]
-                ]
+                ],
+                // [
+                //     'id' => 'kanban-system',
+                //     'title' => 'Kanban Production System',
+                //     'description' => 'Sistem kanban produksi dengan RFID untuk tracking stock real-time',
+                //     'icon' => 'Package',
+                //     'color' => 'blue',
+                //     'route' => '/products',
+                //     'features' => [
+                //         'RFID Scan IN/OUT Management',
+                //         'Real-time Stock Tracking',
+                //         'Product & Line Integration'
+                //     ]
+                // ]
             ]
         ]);
     }

@@ -35,6 +35,7 @@ import {
     Bot,
     Activity,
     Cog,
+    Scan,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
@@ -53,7 +54,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Control Stock System',
         icon: Package,
-        routes: ['/dashboard', '/output', '/stock', '/forecast', '/settings'],
+        routes: ['/dashboard', '/output', '/stock', '/forecast'],
         dashboardRoute: '/dashboard',
         items: [
             {
@@ -81,7 +82,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'NG System',
         icon: AlertTriangle,
-        routes: ['/ng-reports', '/suppliers', '/parts', '/settings'],
+        routes: ['/ng-reports', '/suppliers', '/parts'],
         dashboardRoute: '/ng-reports/dashboard',
         items: [
             {
@@ -109,7 +110,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Die Shop System',
         icon: Wrench,
-        routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts', '/settings'],
+        routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts'],
         dashboardRoute: '/die-shop-dashboard',
         items: [
             {
@@ -132,7 +133,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Robot Monitor',
         icon: Bot,
-        routes: ['/esp32/monitor','/settings'],
+        routes: ['/esp32/monitor'],
         dashboardRoute: '/esp32/monitor',
         items: [
             {
@@ -145,7 +146,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Material Monitoring',
         icon: ClipboardList,
-        routes: ['/transaksi','transaksi/dashboard','/materials', '/part-materials', '/settings'],
+        routes: ['/transaksi', '/transaksi/dashboard', '/materials', '/part-materials'],
         dashboardRoute: '/transaksi',
         items: [
             {
@@ -171,9 +172,9 @@ const allNavGroups: NavGroup[] = [
         ],
     },
     {
-      title: 'Maintenance Monitoring',
+        title: 'Maintenance Monitoring',
         icon: Activity,
-        routes: ['/maintenance', '/settings'],
+        routes: ['/maintenance'],
         dashboardRoute: '/maintenance/lines',
         items: [
             {
@@ -186,7 +187,7 @@ const allNavGroups: NavGroup[] = [
                 href: '/maintenance',
                 icon: Activity,
             },
-               {
+            {
                 title: 'Line',
                 href: '/maintenance/lines',
                 icon: Layers,
@@ -199,15 +200,33 @@ const allNavGroups: NavGroup[] = [
         ],
     },
     {
-      title: 'OEE',
+        title: 'OEE',
         icon: TrendingUp,
-        routes: ['/oee', '/settings'],
+        routes: ['/oee'],
         dashboardRoute: '/oee',
         items: [
             {
                 title: 'Dashboard',
                 href: '/oee',
                 icon: BarChart3,
+            },
+        ],
+    },
+    {
+        title: 'Kanban Production',
+        icon: Package,
+        routes: ['/products', '/kanbans'],
+        dashboardRoute: '/products',
+        items: [
+            {
+                title: 'Products',
+                href: '/products',
+                icon: Package,
+            },
+            {
+                title: 'Scan History',
+                href: '/kanbans',
+                icon: Scan,
             },
         ],
     },
@@ -220,15 +239,27 @@ const currentSystem = computed(() => {
         return null;
     }
 
+    let foundSystem = null;
+
     for (const group of allNavGroups) {
         for (const route of group.routes) {
             if (currentUrl.startsWith(route)) {
-                return group;
+                foundSystem = group;
+                localStorage.setItem('lastSystem', group.title);
+                break;
             }
+        }
+        if (foundSystem) break;
+    }
+
+    if (!foundSystem && currentUrl.startsWith('/settings')) {
+        const lastSystemTitle = localStorage.getItem('lastSystem');
+        if (lastSystemTitle) {
+            foundSystem = allNavGroups.find(g => g.title === lastSystemTitle) || null;
         }
     }
 
-    return null;
+    return foundSystem;
 });
 
 const logoHref = computed(() => {

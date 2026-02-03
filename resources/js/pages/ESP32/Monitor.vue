@@ -24,22 +24,27 @@ interface Device {
     delay_seconds: number;
     is_delayed: boolean;
     is_completed: boolean;
+    area?: {
+        id: number;
+        name: string;
+    };
+}
+
+interface Area {
+    id: number;
+    name: string;
 }
 
 interface Props {
-    devices: {
-        data: Device[];
-        current_page: number;
-        last_page: number;
-        total: number;
-    };
-    filters: { search?: string; shift?: number };
-    shifts: Array<{ value: number; label: string }>;
+    devices: Device[];
+    areas: Area[];
+    filters: { search?: string; area?: number };
 }
 
 const props = defineProps<Props>();
 
 const searchQuery = ref(props.filters.search || '');
+const selectedAreaId = ref(props.filters.area || null);
 const autoRefresh = ref(true);
 let refreshInterval: number | null = null;
 const showSettingsModal = ref(false);
@@ -49,6 +54,9 @@ const editMaxCount = ref(0);
 const editMaxStroke = ref(0);
 const editReject = ref(0);
 const editCycleTime = ref(0);
+const editAreaId = ref<number | null>(null);
+const editNewAreaName = ref('');
+const showNewAreaInput = ref(false);
 const previousDevicesData = ref<string>('');
 const currentRefreshInterval = ref(5000);
 const noChangeCount = ref(0);
@@ -57,22 +65,67 @@ const isFullscreen = ref(false);
 const fullscreenDarkMode = ref(true);
 
 const stats = computed(() => ({
-    total: props.devices.total,
-    active: props.devices.data.filter(d => d.relay_status).length,
-    errors: props.devices.data.filter(d => d.error_b).length,
-    delayed: props.devices.data.filter(d => d.is_delayed && !d.is_completed).length,
+    total: props.devices.length,
+    active: props.devices.filter(d => isDeviceActive(d)).length,
+    errors: props.devices.filter(d => d.error_b).length,
+    delayed: props.devices.filter(d => d.is_delayed && !d.is_completed).length,
 }));
 
+const isDeviceActive = (device: Device): boolean => {
+    const lastUpdate = new Date(device.last_update);
+    const now = new Date();
+    const diffMinutes = Math.floor((now.getTime() - lastUpdate.getTime()) / 1000 / 60);
+    return diffMinutes < 5;
+};
+
+const getDeviceStatus = (device: Device): { label: string; class: string } => {
+    if (device.error_b) {
+        return {
+            label: 'Error',
+            class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+        };
+    }
+
+    if (isDeviceActive(device)) {
+        return {
+            label: 'Active',
+            class: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+        };
+    }
+
+    return {
+        label: 'Idle',
+        class: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400'
+    };
+};
+
 const search = () => {
-    router.get('/esp32/monitor', { search: searchQuery.value }, { preserveState: true, preserveScroll: true });
+    router.get('/esp32/monitor', {
+        search: searchQuery.value,
+        area: selectedAreaId.value
+    }, {
+        preserveState: true,
+        preserveScroll: true
+    });
+};
+
+const filterByArea = (areaId: number | null) => {
+    selectedAreaId.value = areaId;
+    router.get('/esp32/monitor', {
+        search: searchQuery.value,
+        area: areaId
+    }, {
+        preserveState: true,
+        preserveScroll: true
+    });
 };
 
 const refreshData = () => {
-    router.reload({ only: ['devices'], onSuccess: () => adaptRefreshInterval() });
+    router.reload({ only: ['devices', 'areas'], onSuccess: () => adaptRefreshInterval() });
 };
 
 const adaptRefreshInterval = () => {
-    const currentData = JSON.stringify(props.devices.data);
+    const currentData = JSON.stringify(props.devices);
     if (previousDevicesData.value === currentData) {
         noChangeCount.value++;
     } else {
@@ -170,8 +223,21 @@ const openSettingsModal = (device: Device) => {
     editMaxStroke.value = device.max_stroke;
     editReject.value = device.reject;
     editCycleTime.value = device.cycle_time;
+    editAreaId.value = device.area?.id || null;
+    editNewAreaName.value = '';
+    showNewAreaInput.value = false;
     showSettingsModal.value = true;
 };
+
+const toggleNewAreaInput = () => {
+    showNewAreaInput.value = !showNewAreaInput.value;
+    if (showNewAreaInput.value) {
+        editAreaId.value = null;
+    } else {
+        editNewAreaName.value = '';
+    }
+};
+
 const updateSettings = () => {
     if (!selectedDevice.value) return;
     const updateData: any = {
@@ -181,9 +247,19 @@ const updateSettings = () => {
         cycle_time: editCycleTime.value,
         reset_counter: false,
     };
+
+    if (showNewAreaInput.value && editNewAreaName.value.trim()) {
+        updateData.new_area_name = editNewAreaName.value.trim();
+    } else if (editAreaId.value) {
+        updateData.area_id = editAreaId.value;
+    } else {
+        updateData.area_id = null;
+    }
+
     if (selectedDevice.value.has_counter_b) {
         updateData.max_stroke = editMaxStroke.value;
     }
+
     router.post('/esp32/monitor/update-settings', updateData, {
         preserveState: false,
         preserveScroll: true,
@@ -202,6 +278,7 @@ const resetCounter = () => {
         reject: selectedDevice.value.reject,
         cycle_time: selectedDevice.value.cycle_time,
         max_stroke: selectedDevice.value.max_stroke || 0,
+        area_id: selectedDevice.value.area?.id || null,
         reset_counter: true,
     }, {
         preserveState: false,
@@ -214,7 +291,7 @@ const resetCounter = () => {
 };
 
 onMounted(() => {
-    previousDevicesData.value = JSON.stringify(props.devices.data);
+    previousDevicesData.value = JSON.stringify(props.devices);
     if (autoRefresh.value) {
         refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
     }
@@ -242,11 +319,10 @@ const toggleAutoRefresh = () => {
     }
 };
 </script>
-
 <template>
     <Head title="Robot Monitor" />
     <AppLayout v-if="!isFullscreen" :breadcrumbs="[{ title: 'Robot Monitor', href: '/esp32/monitor' }]">
-        <div class="p-6 space-y-6 bg-white dark:from-gray-900 dark:to-gray-800 min-h-screen">
+        <div class="p-6 space-y-6 bg-gray-50 dark:!bg-gray-900 min-h-screen">
             <div class="flex justify-between items-center">
                 <div>
                     <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
@@ -318,28 +394,40 @@ const toggleAutoRefresh = () => {
                 </div>
             </div>
 
-            <div class="flex gap-3">
-                <div class="relative flex-1 max-w-md">
-                    <input v-model="searchQuery" @keyup.enter="search" type="text" placeholder="Cari device..." class="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
-                    <Search class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5" />
+            <div class="flex flex-col gap-3">
+                <div class="flex gap-3">
+                    <div class="relative flex-1 max-w-md">
+                        <input v-model="searchQuery" @keyup.enter="search" type="text" placeholder="Cari device..." class="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                        <Search class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5" />
+                    </div>
+                    <button @click="search" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium">
+                        Search
+                    </button>
                 </div>
-                <button @click="search" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium">
-                    Search
-                </button>
+
+                <div class="flex gap-2 flex-wrap">
+                    <button @click="filterByArea(null)" :class="['px-5 py-2.5 rounded-xl font-semibold transition-all duration-300 border-2', selectedAreaId === null ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg border-transparent' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md']">
+                        All Areas
+                    </button>
+                    <button v-for="area in areas" :key="area.id" @click="filterByArea(area.id)" :class="['px-5 py-2.5 rounded-xl font-semibold transition-all duration-300 border-2', selectedAreaId === area.id ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg border-transparent' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md']">
+                        {{ area.name }}
+                    </button>
+                </div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div v-for="device in devices.data" :key="device.id" class="group bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 border border-gray-100 dark:border-gray-700 hover:-translate-y-1">
+                <div v-for="device in devices" :key="device.id" class="group bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 border border-gray-100 dark:border-gray-700 hover:-translate-y-1">
                     <div class="flex justify-between items-start mb-4">
                         <div>
                             <h3 class="text-xl font-bold text-gray-900 dark:text-white">{{ device.device_id }}</h3>
+                            <p v-if="device.area" class="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">{{ device.area.name }}</p>
                             <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                 <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
                                 {{ formatLastUpdate(device.last_update) }}
                             </p>
                         </div>
-                        <div :class="['px-3 py-1.5 rounded-lg text-xs font-semibold', device.error_b ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : device.relay_status ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400']">
-                            {{ device.error_b ? 'Error' : device.relay_status ? 'Active' : 'Idle' }}
+                        <div :class="['px-3 py-1.5 rounded-lg text-xs font-semibold', getDeviceStatus(device).class]">
+                            {{ getDeviceStatus(device).label }}
                         </div>
                     </div>
                     <div class="space-y-3 mb-4">
@@ -378,7 +466,7 @@ const toggleAutoRefresh = () => {
 
                     <div class="grid grid-cols-3 gap-3 mb-4">
                         <div class="text-center p-3 bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20 rounded-xl border border-red-100 dark:border-red-800">
-                            <div class="text-xs text-gray-600 dark:text-gray-400 font-medium">Reject</div>
+                            <div class="text-xs text-gray-600 dark:text-gray-400 font-medium">NG</div>
                             <div class="text-lg font-bold text-red-600 mt-1">{{ device.reject }}</div>
                         </div>
                         <div class="text-center p-3 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
@@ -426,15 +514,26 @@ const toggleAutoRefresh = () => {
                     </button>
                 </div>
             </div>
+
+            <div v-if="areas.length > 0" class="flex gap-2 flex-wrap mb-6">
+                <button @click="filterByArea(null)" :class="['px-5 py-3 rounded-xl font-semibold transition-all duration-300 border-2', selectedAreaId === null ? 'bg-blue-600 text-white shadow-xl border-transparent' : (fullscreenDarkMode ? 'bg-gray-800 text-gray-300 border-gray-700 hover:border-blue-500' : 'bg-white text-gray-700 border-gray-300 shadow-lg hover:border-blue-400')]">
+                    All Areas
+                </button>
+                <button v-for="area in areas" :key="area.id" @click="filterByArea(area.id)" :class="['px-5 py-3 rounded-xl font-semibold transition-all duration-300 border-2', selectedAreaId === area.id ? 'bg-blue-600 text-white shadow-xl border-transparent' : (fullscreenDarkMode ? 'bg-gray-800 text-gray-300 border-gray-700 hover:border-blue-500' : 'bg-white text-gray-700 border-gray-300 shadow-lg hover:border-blue-400')]">
+                    {{ area.name }}
+                </button>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                <div v-for="device in devices.data" :key="device.id" :class="['rounded-2xl p-6 shadow-2xl', fullscreenDarkMode ? 'bg-gray-800' : 'bg-white']">
+                <div v-for="device in devices" :key="device.id" :class="['rounded-2xl p-6 shadow-2xl', fullscreenDarkMode ? 'bg-gray-800' : 'bg-white']">
                     <div class="flex justify-between items-start mb-4">
                         <div>
                             <h3 :class="['text-2xl font-bold', fullscreenDarkMode ? 'text-white' : 'text-gray-900']">{{ device.device_id }}</h3>
+                            <p v-if="device.area" :class="['text-sm font-semibold mt-0.5', fullscreenDarkMode ? 'text-blue-400' : 'text-blue-600']">{{ device.area.name }}</p>
                             <p :class="['text-sm mt-1', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">{{ formatLastUpdate(device.last_update) }}</p>
                         </div>
-                        <div :class="['px-3 py-1.5 rounded-lg text-sm font-bold', device.error_b ? 'bg-red-500 text-white' : device.relay_status ? 'bg-green-500 text-white' : 'bg-gray-500 text-white']">
-                            {{ device.error_b ? 'Error' : device.relay_status ? 'Active' : 'Idle' }}
+                        <div :class="['px-3 py-1.5 rounded-lg text-sm font-bold', device.error_b ? 'bg-red-500 text-white' : isDeviceActive(device) ? 'bg-green-500 text-white' : 'bg-gray-500 text-white']">
+                            {{ device.error_b ? 'Error' : isDeviceActive(device) ? 'Active' : 'Idle' }}
                         </div>
                     </div>
                     <div class="space-y-3">
@@ -463,9 +562,22 @@ const toggleAutoRefresh = () => {
     </div>
 
     <div v-if="showSettingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showSettingsModal = false">
-        <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-96 shadow-2xl">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-96 shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Settings - {{ selectedDevice?.device_id }}</h3>
             <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Area</label>
+                    <div class="flex gap-2">
+                        <select v-if="!showNewAreaInput" v-model="editAreaId" class="flex-1 border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200">
+                            <option :value="null">Tidak Ada Area</option>
+                            <option v-for="area in areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+                        </select>
+                        <input v-else v-model="editNewAreaName" type="text" placeholder="Nama area baru..." class="flex-1 border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200" />
+                        <button @click="toggleNewAreaInput" :class="['px-4 py-2.5 rounded-xl font-semibold transition-all', showNewAreaInput ? 'bg-gray-600 text-white' : 'bg-green-600 text-white']">
+                            {{ showNewAreaInput ? 'Pilih' : 'Baru' }}
+                        </button>
+                    </div>
+                </div>
                 <div>
                     <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Max Count</label>
                     <input v-model.number="editMaxCount" type="number" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200" />
@@ -475,7 +587,7 @@ const toggleAutoRefresh = () => {
                     <input v-model.number="editMaxStroke" type="number" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200" />
                 </div>
                 <div>
-                    <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Reject</label>
+                    <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">NG</label>
                     <input v-model.number="editReject" type="number" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200" />
                 </div>
                 <div>

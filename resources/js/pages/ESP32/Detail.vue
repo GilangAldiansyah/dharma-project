@@ -337,7 +337,7 @@ const getHistoryStatusText = (history: ProductionHistory) => {
         { title: 'Robot Monitor', href: '/esp32/monitor' },
         { title: device.device_id, href: `/esp32/monitor/${device.device_id}` }
     ]">
-        <div class="p-6 space-y-6 bg-white dark:from-gray-900 dark:to-gray-800 min-h-screen">
+        <div class="p-6 space-y-6 bg-white dark:bg-gray-900 min-h-screen">
             <div class="flex justify-between items-center">
                 <div class="flex items-center gap-3">
                     <Link href="/esp32/monitor" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-all">
@@ -406,7 +406,7 @@ const getHistoryStatusText = (history: ProductionHistory) => {
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-red-500">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Reject</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">NG</div>
                         <div class="text-3xl font-bold text-red-600 mt-1">{{ device.reject }}</div>
                     </div>
                     <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-blue-500">
@@ -445,7 +445,7 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Shift</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Total Count</th>
                                 <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Total Stroke</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Reject</th>
+                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">NG</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Duration</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
                             </tr>
@@ -490,7 +490,7 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                                 <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Stroke</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Expected</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Delay Status</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Reject</th>
+                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">NG</th>
                                 <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Relay</th>
                             </tr>
                         </thead>
@@ -541,7 +541,7 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                         <input v-model.number="editMaxStroke" type="number" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Reject</label>
+                        <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">NG</label>
                         <input v-model.number="editReject" type="number" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                     </div>
                     <div>

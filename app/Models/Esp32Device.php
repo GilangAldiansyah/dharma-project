@@ -11,7 +11,8 @@ class Esp32Device extends Model
 {
     protected $fillable = [
         'device_id',
-        'line_id', // ✅ Added
+        'line_id',
+        'area_id',
         'counter_a',
         'counter_b',
         'reject',
@@ -41,10 +42,14 @@ class Esp32Device extends Model
         'has_counter_b'
     ];
 
-    // ✅ New relation
     public function line(): BelongsTo
     {
         return $this->belongsTo(Line::class);
+    }
+
+    public function area(): BelongsTo
+    {
+        return $this->belongsTo(Area::class);
     }
 
     public function logs(): HasMany
@@ -77,6 +82,7 @@ class Esp32Device extends Model
     public function getDelaySecondsAttribute(): int
     {
         if (!$this->production_started_at || $this->cycle_time == 0) return 0;
+
         $productionStarted = Carbon::parse($this->production_started_at);
         $actualCounter = $this->counter_a;
 
@@ -101,6 +107,7 @@ class Esp32Device extends Model
         $elapsedSeconds = $lastUpdate->timestamp - $productionStarted->timestamp;
         $expectedCounter = floor($elapsedSeconds / $this->cycle_time);
         $counterDiff = $expectedCounter - $actualCounter;
+
         return (int)($counterDiff * $this->cycle_time);
     }
 

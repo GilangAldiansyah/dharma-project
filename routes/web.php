@@ -22,6 +22,8 @@ use App\Http\Controllers\MachineController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\LineOperationController;
 use App\Http\Controllers\OeeController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\KanbanController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -111,6 +113,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/transaksi/dashboard', [DashboardTransaksiController::class, 'index'])->name('transaksi.dashboard');
     Route::get('transaksi/history/view', [TransaksiMaterialController::class, 'history'])->name('transaksi.history');
     Route::post('transaksi/delete-multiple', [TransaksiMaterialController::class, 'deleteMultiple'])->name('transaksi.delete-multiple');
+    Route::get('/transaksi/search-for-return', [TransaksiMaterialController::class, 'searchForReturn'])->name('transaksi.search-for-return');
     Route::resource('transaksi', TransaksiMaterialController::class)->except(['edit', 'update']);
 
     Route::post('/pengembalian', [PengembalianMaterialController::class, 'store'])->name('pengembalian.store');
@@ -155,6 +158,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/{operationId}/stop', [LineOperationController::class, 'stopOperation'])->name('maintenance.operations.stop');
         Route::get('/lines/{lineId}/current', [LineOperationController::class, 'getCurrentOperation'])->name('maintenance.operations.current');
     });
+
     Route::prefix('oee')->name('oee.')->group(function () {
         Route::get('/', [OeeController::class, 'index'])->name('index');
         Route::post('/calculate', [OeeController::class, 'calculate'])->name('calculate');
@@ -163,10 +167,28 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/export/data', [OeeController::class, 'export'])->name('export');
         Route::post('/compare', [OeeController::class, 'compare'])->name('compare');
         Route::get('/chart/data', [OeeController::class, 'chartData'])->name('chart-data');
-
     });
+
+    Route::get('/products', [ProductController::class, 'index'])->name('products.index');
+    Route::post('/products', [ProductController::class, 'store'])->name('products.store');
+    Route::get('/products/{product}', [ProductController::class, 'show'])->name('products.show');
+    Route::get('/products/{product}/edit', [ProductController::class, 'edit'])->name('products.edit');
+    Route::put('/products/{product}', [ProductController::class, 'update'])->name('products.update');
+    Route::delete('/products/{product}', [ProductController::class, 'destroy'])->name('products.destroy');
+
+    Route::get('/kanbans', [KanbanController::class, 'index'])->name('kanbans.index');
+    Route::post('/kanbans', [KanbanController::class, 'store'])->name('kanbans.store');
+    Route::get('/kanbans/{kanban}', [KanbanController::class, 'show'])->name('kanbans.show');
+    Route::delete('/kanbans/{kanban}', [KanbanController::class, 'destroy'])->name('kanbans.destroy');
+
+    Route::post('/kanbans/rfid-master', [KanbanController::class, 'getRfidMasterData']);
+    Route::post('/kanbans/master', [KanbanController::class, 'storeMaster'])->name('kanbans.master.store');
+    Route::put('/kanbans/master/{rfidMaster}', [KanbanController::class, 'updateMaster'])->name('kanbans.master.update');
+    Route::delete('/kanbans/master/{rfidMaster}', [KanbanController::class, 'destroyMaster'])->name('kanbans.master.destroy');
+
+    Route::post('/kanbans/scan', [KanbanController::class, 'scan'])->name('kanbans.scan');
+    Route::get('/kanbans/history/{rfidTag}', [KanbanController::class, 'history'])->name('kanbans.history');
+    Route::post('/kanbans/check-rfid', [KanbanController::class, 'checkRfid'])->name('kanbans.check');
 });
 
 require __DIR__.'/settings.php';
-
-

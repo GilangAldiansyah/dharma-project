@@ -468,15 +468,15 @@ const downloadTemplate = () => {
 };
 </script>
 <template>
-    <Head title="Master Part Material" />
+    <Head title="Master Part" />
     <AppLayout :breadcrumbs="[
-        { title: 'Master Part Material', href: '/part-materials' }
+        { title: 'Master Part', href: '/part-materials' }
     ]">
         <div class="p-4 space-y-4">
             <div class="flex justify-between items-center">
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Layers class="w-6 h-6 text-blue-600" />
-                    Master Part Material
+                    Master Part
                 </h1>
                 <div class="flex gap-2">
                     <button
@@ -517,7 +517,6 @@ const downloadTemplate = () => {
                 </div>
             </div>
 
-            <!-- FITUR BARU: Action bar untuk multiple delete -->
             <div v-if="hasSelection" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                 <div class="flex items-center justify-between">
                     <span class="text-sm font-medium text-red-900 dark:text-red-100">

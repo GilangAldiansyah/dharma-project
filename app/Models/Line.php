@@ -30,7 +30,8 @@ class Line extends Model
         'period_start',
         'period_end',
         'parent_line_id',
-        'current_period_start'
+        'current_period_start',
+        'area_id',
     ];
 
     protected $casts = [
@@ -80,8 +81,6 @@ class Line extends Model
     {
         return $this->belongsTo(Line::class, 'parent_line_id');
     }
-
-    // ✅ New relations for ESP32 and OEE
     public function esp32Device(): HasOne
     {
         return $this->hasOne(Esp32Device::class);
@@ -90,6 +89,11 @@ class Line extends Model
     public function oeeRecords(): HasMany
     {
         return $this->hasMany(LineOeeRecord::class);
+    }
+
+    public function area()
+    {
+        return $this->belongsTo(Area::class);
     }
 
     public function latestOeeRecord(): HasOne

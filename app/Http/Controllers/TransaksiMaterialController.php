@@ -195,6 +195,43 @@ class TransaksiMaterialController extends Controller
         return response()->json($transaksi);
     }
 
+    public function searchForReturn(Request $request)
+    {
+        $query = $request->get('query', '');
+
+        if (strlen($query) < 2) {
+            return response()->json([]);
+        }
+
+        $transaksi = TransaksiMaterial::with(['material', 'partMaterial', 'user', 'pengembalian'])
+            ->where(function ($q) use ($query) {
+                $q->where('transaksi_id', 'like', "%{$query}%")
+                  ->orWhere('pic', 'like', "%{$query}%")
+                  ->orWhereHas('material', function ($m) use ($query) {
+                      $m->where('nama_material', 'like', "%{$query}%")
+                        ->orWhere('material_id', 'like', "%{$query}%");
+                  });
+            })
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        $transaksi = $transaksi->filter(function ($item) {
+            $totalPengembalian = $item->pengembalian->sum('qty_pengembalian');
+            $sisa = $item->qty - $totalPengembalian;
+            return $sisa > 0;
+        });
+
+        $transaksi = $transaksi->map(function ($item) {
+            $totalPengembalian = $item->pengembalian->sum('qty_pengembalian');
+            $item->total_pengembalian = $totalPengembalian;
+            $item->sisa_pengembalian = $item->qty - $totalPengembalian;
+            return $item;
+        });
+
+        return response()->json($transaksi->values());
+    }
+
     public function destroy($id)
     {
         try {

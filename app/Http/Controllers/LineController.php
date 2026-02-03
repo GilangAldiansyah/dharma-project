@@ -43,6 +43,10 @@ class LineController extends Controller
             $query->where('status', $request->status);
         }
 
+        if ($request->area) {
+            $query->where('area_id', $request->area);
+        }
+
         $lines = $query->orderBy('plant')
                     ->orderBy('line_code')
                     ->paginate(20)
@@ -56,6 +60,10 @@ class LineController extends Controller
                 'plant' => $line->plant,
                 'qr_code' => $line->qr_code,
                 'status' => $line->status,
+                'area' => $line->area ? [
+                    'id' => $line->area->id,
+                    'name' => $line->area->name,
+                ] : null,
                 'last_operation_start' => $line->last_operation_start,
                 'last_line_stop' => $line->last_line_stop,
                 'description' => $line->description,
@@ -104,15 +112,18 @@ class LineController extends Controller
         ];
 
         $plants = Line::where('is_archived', false)->distinct()->pluck('plant');
+        $areas = \App\Models\Area::orderBy('name')->get();
 
         return Inertia::render('Maintenance/Lines', [
             'lines' => $lines,
             'stats' => $stats,
             'plants' => $plants,
+            'areas' => $areas,
             'filters' => [
                 'search' => $request->search,
                 'plant' => $request->plant,
                 'status' => $request->status,
+                'area' => $request->area,
             ],
         ]);
     }
@@ -123,7 +134,14 @@ class LineController extends Controller
             'line_name' => 'required|string|max:255',
             'plant' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'area_id' => 'nullable | integer | exists:areas,id',
+            'new_area_name' => 'nullable|string|max:255'
         ]);
+        if (isset($validated['new_area_name']) && $validated['new_area_name']) {
+            $area = \App\Models\Area::firstOrCreate(['name' => $validated['new_area_name']]);
+            $validated['area_id'] = $area->id;
+        }
+        unset($validated['new_area_name']);
 
         $validated['line_code'] = Line::generateLineCode($validated['plant']);
         $validated['qr_code']   = $validated['line_code'];
@@ -143,7 +161,15 @@ class LineController extends Controller
             'line_name' => 'required|string|max:255',
             'plant' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'area_id' => 'nullable|integer|exists:areas,id',
+            'new_area_name' => 'nullable|string|max:255',
         ]);
+
+        if (isset($validated['new_area_name']) && $validated['new_area_name']) {
+            $area = \App\Models\Area::firstOrCreate(['name' => $validated['new_area_name']]);
+            $validated['area_id'] = $area->id;
+        }
+        unset($validated['new_area_name']);
 
         $line->update($validated);
 
