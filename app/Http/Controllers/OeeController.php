@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Line;
-use App\Models\LineOeeRecord;
+use App\Models\Esp32Device;
+use App\Models\Esp32ProductionHistory;
+use App\Models\LineOperation;
+use App\Models\MaintenanceReport;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
 
 class OeeController extends Controller
 {
@@ -19,10 +21,9 @@ class OeeController extends Controller
             ->get();
 
         $selectedLineId = $request->get('line_id');
-        $periodType = $request->get('period_type', 'daily');
         $startDate = $request->get('start_date', now()->subDays(7)->format('Y-m-d'));
         $endDate = $request->get('end_date', now()->format('Y-m-d'));
-        $shiftFilter = $request->get('shift'); // ← TAMBAHAN
+        $shiftFilter = $request->get('shift');
 
         $selectedLine = null;
         $oeeRecords = collect();
@@ -31,24 +32,32 @@ class OeeController extends Controller
         if ($selectedLineId) {
             $selectedLine = Line::with('esp32Device')->findOrFail($selectedLineId);
 
-            $this->autoCalculateOEE($selectedLine, $periodType, Carbon::parse($startDate), Carbon::parse($endDate));
-
-            $oeeQuery = LineOeeRecord::byLine($selectedLineId)
-                ->byPeriodType($periodType)
-                ->dateRange(Carbon::parse($startDate), Carbon::parse($endDate));
-
-            // ← TAMBAHAN: Filter by shift
-            if ($shiftFilter) {
-                $oeeQuery->byShift($shiftFilter);
-            }
-
-            $oeeRecords = $oeeQuery->orderBy('period_date', 'desc')->get();
+            $oeeRecords = $this->calculateOeeRecords(
+                $selectedLine,
+                Carbon::parse($startDate),
+                Carbon::parse($endDate),
+                $shiftFilter
+            );
 
             $lineStopData = $this->getLineStopOverviewData(
                 $selectedLineId,
                 Carbon::parse($startDate),
                 Carbon::parse($endDate),
-                $shiftFilter // ← TAMBAHAN: Pass shift filter
+                $shiftFilter
+            );
+        } else {
+            $oeeRecords = $this->calculateOeeRecordsAllLines(
+                $lines,
+                Carbon::parse($startDate),
+                Carbon::parse($endDate),
+                $shiftFilter
+            );
+
+            $lineStopData = $this->getLineStopOverviewDataAllLines(
+                $lines,
+                Carbon::parse($startDate),
+                Carbon::parse($endDate),
+                $shiftFilter
             );
         }
 
@@ -57,90 +66,249 @@ class OeeController extends Controller
             'selectedLine' => $selectedLine,
             'oeeRecords' => $oeeRecords,
             'lineStopData' => $lineStopData,
-            'shifts' => \App\Helpers\DateHelper::getAllShifts(), // ← TAMBAHAN
+            'shifts' => \App\Helpers\DateHelper::getAllShifts(),
             'filters' => [
                 'line_id' => $selectedLineId,
-                'period_type' => $periodType,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
-                'shift' => $shiftFilter, // ← TAMBAHAN
+                'shift' => $shiftFilter,
             ]
         ]);
     }
 
+    private function calculateOeeRecordsAllLines(
+        $lines,
+        Carbon $startDate,
+        Carbon $endDate,
+        ?int $shiftFilter = null
+    ) {
+        $allOeeRecords = collect();
 
-    private function autoCalculateOEE(Line $line, string $periodType, Carbon $startDate, Carbon $endDate)
-    {
-        $calculatedBy = Auth::check() ? Auth::user()->name : 'system';
-
-        if ($periodType === 'daily') {
-            $currentDate = $startDate->copy();
-
-            while ($currentDate <= $endDate) {
-                $periodStart = $currentDate->copy()->startOfDay();
-                $periodEnd = $currentDate->copy()->endOfDay();
-
-                LineOeeRecord::calculateOEE(
-                    $line,
-                    $periodStart,
-                    $periodEnd,
-                    'daily',
-                    $calculatedBy
-                );
-
-                $currentDate->addDay();
-            }
-        } elseif ($periodType === 'weekly') {
-            $currentDate = $startDate->copy()->startOfWeek();
-
-            while ($currentDate <= $endDate) {
-                $periodStart = $currentDate->copy()->startOfWeek();
-                $periodEnd = $currentDate->copy()->endOfWeek();
-
-                if ($periodEnd > $endDate) {
-                    $periodEnd = $endDate->copy()->endOfDay();
-                }
-
-                LineOeeRecord::calculateOEE(
-                    $line,
-                    $periodStart,
-                    $periodEnd,
-                    'weekly',
-                    $calculatedBy
-                );
-
-                $currentDate->addWeek();
-            }
-        } elseif ($periodType === 'monthly') {
-            $currentDate = $startDate->copy()->startOfMonth();
-
-            while ($currentDate <= $endDate) {
-                $periodStart = $currentDate->copy()->startOfMonth();
-                $periodEnd = $currentDate->copy()->endOfMonth();
-
-                if ($periodEnd > $endDate) {
-                    $periodEnd = $endDate->copy()->endOfDay();
-                }
-
-                LineOeeRecord::calculateOEE(
-                    $line,
-                    $periodStart,
-                    $periodEnd,
-                    'monthly',
-                    $calculatedBy
-                );
-
-                $currentDate->addMonth();
-            }
-        } else {
-            LineOeeRecord::calculateOEE(
+        foreach ($lines as $line) {
+            $lineRecords = $this->calculateOeeRecords(
                 $line,
-                $startDate->startOfDay(),
-                $endDate->endOfDay(),
-                'custom',
-                $calculatedBy
+                $startDate,
+                $endDate,
+                $shiftFilter
             );
+
+            foreach ($lineRecords as $record) {
+                $record->line_name = $line->line_name;
+                $record->line_code = $line->line_code;
+            }
+
+            $allOeeRecords = $allOeeRecords->merge($lineRecords);
         }
+
+        return $allOeeRecords->sortByDesc('period_date')->values();
+    }
+
+    private function getLineStopOverviewDataAllLines($lines, Carbon $startDate, Carbon $endDate, $shiftFilter = null)
+    {
+        $lineIds = $lines->pluck('id')->toArray();
+
+        $query = DB::table('maintenance_reports')
+            ->join('machines', 'maintenance_reports.machine_id', '=', 'machines.id')
+            ->whereIn('machines.line_id', $lineIds)
+            ->where('machines.is_archived', false)
+            ->where('maintenance_reports.status', 'Selesai')
+            ->whereBetween('maintenance_reports.completed_at', [$startDate, $endDate]);
+
+        if ($shiftFilter) {
+            $query->where('maintenance_reports.shift', $shiftFilter);
+        }
+
+        $maintenanceReports = $query
+            ->select(
+                DB::raw('DATE(maintenance_reports.completed_at) as date'),
+                DB::raw('HOUR(maintenance_reports.completed_at) as hour'),
+                DB::raw('COUNT(*) as stop_count')
+            )
+            ->groupBy('date', 'hour')
+            ->orderBy('date')
+            ->orderBy('hour')
+            ->get();
+
+        $labels = [];
+        $data = [];
+
+        foreach ($maintenanceReports as $report) {
+            $labels[] = $report->hour . ':00';
+            $data[] = $report->stop_count;
+        }
+
+        return [
+            'labels' => $labels,
+            'data' => $data
+        ];
+    }
+
+    private function calculateOeeRecords(
+        Line $line,
+        Carbon $startDate,
+        Carbon $endDate,
+        ?int $shiftFilter = null
+    ) {
+        $esp32Device = Esp32Device::where('line_id', $line->id)->first();
+
+        if (!$esp32Device) {
+            return collect();
+        }
+
+        $periods = $this->generateDailyPeriods($startDate, $endDate);
+        $oeeRecords = collect();
+
+        foreach ($periods as $period) {
+            $productionQuery = Esp32ProductionHistory::where('device_id', $esp32Device->device_id)
+                ->where(function($q) use ($period) {
+                    $q->whereBetween('production_started_at', [$period['start'], $period['end']])
+                      ->orWhereBetween('production_finished_at', [$period['start'], $period['end']])
+                      ->orWhere(function($q2) use ($period) {
+                          $q2->where('production_started_at', '<=', $period['start'])
+                             ->where('production_finished_at', '>=', $period['end']);
+                      });
+                });
+
+            if ($shiftFilter) {
+                $productionQuery->where('shift', $shiftFilter);
+            }
+
+            $productionHistories = $productionQuery->get();
+
+            if ($productionHistories->isEmpty()) {
+                continue;
+            }
+
+            $totalCounterA = $productionHistories->sum('total_counter_a');
+            $totalReject = $productionHistories->sum('total_reject');
+            $targetProduction = $productionHistories->sum('max_count');
+            $avgCycleTime = $productionHistories->avg('cycle_time') ?? 0;
+
+            if ($totalCounterA == 0) {
+                continue;
+            }
+
+            $goodCount = $totalCounterA - $totalReject;
+
+            $operationsQuery = LineOperation::where('line_id', $line->id)
+                ->where('status', 'stopped')
+                ->where(function($q) use ($period) {
+                    $q->whereBetween('started_at', [$period['start'], $period['end']])
+                      ->orWhereBetween('stopped_at', [$period['start'], $period['end']])
+                      ->orWhere(function($q2) use ($period) {
+                          $q2->where('started_at', '<=', $period['start'])
+                             ->where('stopped_at', '>=', $period['end']);
+                      });
+                });
+
+            if ($shiftFilter) {
+                $operationsQuery->where('shift', $shiftFilter);
+            }
+
+            $operations = $operationsQuery->get();
+
+            $operationTimeMinutes = $operations->sum(function($op) use ($period) {
+                $actualStart = max($op->started_at, $period['start']);
+                $actualEnd = min($op->stopped_at, $period['end']);
+                return $actualStart->diffInMinutes($actualEnd);
+            });
+
+            $operationTimeHours = $operationTimeMinutes / 60;
+
+            $totalPauseMinutes = $operations->sum('total_pause_minutes');
+
+            if ($operationTimeHours == 0) {
+                continue;
+            }
+
+            $maintenanceQuery = MaintenanceReport::query()
+                ->whereHas('machine', function ($query) use ($line) {
+                    $query->where('line_id', $line->id)
+                        ->where('is_archived', false);
+                })
+                ->where('status', 'Selesai')
+                ->whereNotNull('completed_at')
+                ->whereBetween('completed_at', [$period['start'], $period['end']]);
+
+            if ($shiftFilter) {
+                $maintenanceQuery->where('shift', $shiftFilter);
+            }
+
+            $maintenanceReports = $maintenanceQuery->get();
+
+            $downtimeHours = $maintenanceReports->sum(function($report) {
+                return round($report->repair_duration_minutes * 60) / 3600;
+            });
+
+            $pauseHours = $totalPauseMinutes / 60;
+            $uptimeHours = max(0, $operationTimeHours - $downtimeHours - $pauseHours);
+
+            $availability = $operationTimeHours > 0
+                ? ($uptimeHours / $operationTimeHours) * 100
+                : 0;
+
+            $uptimeSeconds = $uptimeHours * 3600;
+            $performance = $uptimeSeconds > 0 && $avgCycleTime > 0
+                ? (($avgCycleTime * $totalCounterA) / $uptimeSeconds) * 100
+                : 0;
+
+            $quality = $totalCounterA > 0
+                ? ($goodCount / $totalCounterA) * 100
+                : 0;
+
+            $achievementRate = $targetProduction > 0
+                ? ($totalCounterA / $targetProduction) * 100
+                : 0;
+
+            $oee = ($availability * $performance * $quality) / 10000;
+
+            $totalFailures = $maintenanceReports->count();
+
+            $firstProduction = $productionHistories->sortBy('production_started_at')->first();
+            $shift = $shiftFilter ?? ($firstProduction->shift ?? \App\Helpers\DateHelper::getCurrentShift($firstProduction->production_started_at));
+
+            $oeeRecords->push((object)[
+                'id' => null,
+                'line_id' => $line->id,
+                'period_date' => $period['start']->toDateString(),
+                'period_start' => $period['start'],
+                'period_end' => $period['end'],
+                'shift' => $shift,
+                'shift_label' => \App\Helpers\DateHelper::getShiftLabel($shift),
+                'operation_time_hours' => round($operationTimeHours, 4),
+                'uptime_hours' => round($uptimeHours, 4),
+                'downtime_hours' => round($downtimeHours + $pauseHours, 4),
+                'total_counter_a' => $totalCounterA,
+                'target_production' => $targetProduction,
+                'total_reject' => $totalReject,
+                'good_count' => $goodCount,
+                'avg_cycle_time' => round($avgCycleTime, 4),
+                'availability' => round($availability, 2),
+                'performance' => round($performance, 2),
+                'quality' => round($quality, 2),
+                'achievement_rate' => round($achievementRate, 2),
+                'oee' => round($oee, 2),
+                'total_failures' => $totalFailures,
+            ]);
+        }
+
+        return $oeeRecords->sortByDesc('period_date')->values();
+    }
+
+    private function generateDailyPeriods(Carbon $startDate, Carbon $endDate): array
+    {
+        $periods = [];
+        $currentDate = $startDate->copy();
+
+        while ($currentDate <= $endDate) {
+            $periods[] = [
+                'start' => $currentDate->copy()->startOfDay(),
+                'end' => $currentDate->copy()->endOfDay(),
+            ];
+            $currentDate->addDay();
+        }
+
+        return $periods;
     }
 
     private function getLineStopOverviewData($lineId, Carbon $startDate, Carbon $endDate, $shiftFilter = null)
@@ -181,172 +349,27 @@ class OeeController extends Controller
         ];
     }
 
-    public function calculate(Request $request)
-    {
-        $validated = $request->validate([
-            'line_id' => 'required|exists:lines,id',
-            'period_type' => 'required|in:daily,weekly,monthly,custom',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
-        ]);
-
-        $line = Line::findOrFail($validated['line_id']);
-        $periodType = $validated['period_type'];
-        $startDate = Carbon::parse($validated['start_date']);
-        $endDate = Carbon::parse($validated['end_date']);
-
-        $calculatedBy = Auth::check() ? Auth::user()->name : 'system';
-
-        DB::beginTransaction();
-        try {
-            $oeeRecords = [];
-            $skippedPeriods = 0;
-
-            if ($periodType === 'daily') {
-                $currentDate = $startDate->copy();
-
-                while ($currentDate <= $endDate) {
-                    $periodStart = $currentDate->copy()->startOfDay();
-                    $periodEnd = $currentDate->copy()->endOfDay();
-
-                    $oeeRecord = LineOeeRecord::calculateOEE(
-                        $line,
-                        $periodStart,
-                        $periodEnd,
-                        'daily',
-                        $calculatedBy
-                    );
-
-                    if ($oeeRecord) {
-                        $oeeRecords[] = $oeeRecord;
-                    } else {
-                        $skippedPeriods++;
-                    }
-
-                    $currentDate->addDay();
-                }
-            } elseif ($periodType === 'weekly') {
-                $currentDate = $startDate->copy()->startOfWeek();
-
-                while ($currentDate <= $endDate) {
-                    $periodStart = $currentDate->copy()->startOfWeek();
-                    $periodEnd = $currentDate->copy()->endOfWeek();
-
-                    if ($periodEnd > $endDate) {
-                        $periodEnd = $endDate->copy()->endOfDay();
-                    }
-
-                    $oeeRecord = LineOeeRecord::calculateOEE(
-                        $line,
-                        $periodStart,
-                        $periodEnd,
-                        'weekly',
-                        $calculatedBy
-                    );
-
-                    if ($oeeRecord) {
-                        $oeeRecords[] = $oeeRecord;
-                    } else {
-                        $skippedPeriods++;
-                    }
-
-                    $currentDate->addWeek();
-                }
-            } elseif ($periodType === 'monthly') {
-                $currentDate = $startDate->copy()->startOfMonth();
-
-                while ($currentDate <= $endDate) {
-                    $periodStart = $currentDate->copy()->startOfMonth();
-                    $periodEnd = $currentDate->copy()->endOfMonth();
-
-                    if ($periodEnd > $endDate) {
-                        $periodEnd = $endDate->copy()->endOfDay();
-                    }
-
-                    $oeeRecord = LineOeeRecord::calculateOEE(
-                        $line,
-                        $periodStart,
-                        $periodEnd,
-                        'monthly',
-                        $calculatedBy
-                    );
-
-                    if ($oeeRecord) {
-                        $oeeRecords[] = $oeeRecord;
-                    } else {
-                        $skippedPeriods++;
-                    }
-
-                    $currentDate->addMonth();
-                }
-            } else {
-                $oeeRecord = LineOeeRecord::calculateOEE(
-                    $line,
-                    $startDate->startOfDay(),
-                    $endDate->endOfDay(),
-                    'custom',
-                    $calculatedBy
-                );
-
-                if ($oeeRecord) {
-                    $oeeRecords[] = $oeeRecord;
-                } else {
-                    $skippedPeriods++;
-                }
-            }
-
-            DB::commit();
-
-            $message = count($oeeRecords) . ' record(s) created/updated.';
-            if ($skippedPeriods > 0) {
-                $message .= ' ' . $skippedPeriods . ' period(s) skipped (no production data).';
-            }
-
-            return redirect()
-                ->route('oee.index', [
-                    'line_id' => $line->id,
-                    'period_type' => $periodType,
-                    'start_date' => $startDate->format('Y-m-d'),
-                    'end_date' => $endDate->format('Y-m-d'),
-                ])
-                ->with('success', 'OEE calculation completed. ' . $message);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return back()->with('error', 'Failed to calculate OEE: ' . $e->getMessage());
-        }
-    }
-
-    public function show(LineOeeRecord $oeeRecord)
-    {
-        $oeeRecord->load(['line.esp32Device']);
-
-        return inertia('OEE/Show', [
-            'oeeRecord' => $oeeRecord
-        ]);
-    }
-
     public function export(Request $request)
     {
         $validated = $request->validate([
-            'line_id' => 'required|exists:lines,id',
-            'period_type' => 'required|in:daily,weekly,monthly,custom',
+            'line_id' => 'nullable|exists:lines,id',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
-        $line = Line::findOrFail($validated['line_id']);
-        $periodType = $validated['period_type'];
         $startDate = Carbon::parse($validated['start_date']);
         $endDate = Carbon::parse($validated['end_date']);
+        $shiftFilter = $request->get('shift');
 
-        $oeeRecords = LineOeeRecord::byLine($line->id)
-            ->byPeriodType($periodType)
-            ->dateRange($startDate, $endDate)
-            ->orderBy('period_date', 'asc')
-            ->get();
-
-        $filename = "OEE_{$line->line_code}_{$periodType}_{$startDate->format('Ymd')}-{$endDate->format('Ymd')}.csv";
+        if (isset($validated['line_id'])) {
+            $line = Line::findOrFail($validated['line_id']);
+            $oeeRecords = $this->calculateOeeRecords($line, $startDate, $endDate, $shiftFilter);
+            $filename = "OEE_{$line->line_code}_{$startDate->format('Ymd')}-{$endDate->format('Ymd')}.csv";
+        } else {
+            $lines = Line::active()->with('esp32Device')->orderBy('line_name')->get();
+            $oeeRecords = $this->calculateOeeRecordsAllLines($lines, $startDate, $endDate, $shiftFilter);
+            $filename = "OEE_AllLines_{$startDate->format('Ymd')}-{$endDate->format('Ymd')}.csv";
+        }
 
         $headers = [
             'Content-Type' => 'text/csv',
@@ -357,9 +380,10 @@ class OeeController extends Controller
             $file = fopen('php://output', 'w');
 
             fputcsv($file, [
+                'Line Code',
+                'Line Name',
                 'Period Date',
-                'Period Start',
-                'Period End',
+                'Shift',
                 'Operation Time (hrs)',
                 'Uptime (hrs)',
                 'Downtime (hrs)',
@@ -378,9 +402,10 @@ class OeeController extends Controller
 
             foreach ($oeeRecords as $record) {
                 fputcsv($file, [
-                    $record->period_date->format('Y-m-d'),
-                    $record->period_start->format('Y-m-d H:i:s'),
-                    $record->period_end->format('Y-m-d H:i:s'),
+                    $record->line_code ?? '',
+                    $record->line_name ?? '',
+                    $record->period_date,
+                    $record->shift_label,
                     $record->operation_time_hours,
                     $record->uptime_hours,
                     $record->downtime_hours,
@@ -402,43 +427,5 @@ class OeeController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
-    }
-
-    public function destroy(LineOeeRecord $oeeRecord)
-    {
-        $lineId = $oeeRecord->line_id;
-        $oeeRecord->delete();
-
-        return redirect()
-            ->route('oee.index', ['line_id' => $lineId])
-            ->with('success', 'OEE record deleted successfully.');
-    }
-
-    public function chartData(Request $request)
-    {
-        $validated = $request->validate([
-            'line_id' => 'required|exists:lines,id',
-            'period_type' => 'required|in:daily,weekly,monthly',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
-        ]);
-
-        $oeeRecords = LineOeeRecord::byLine($validated['line_id'])
-            ->byPeriodType($validated['period_type'])
-            ->dateRange(
-                Carbon::parse($validated['start_date']),
-                Carbon::parse($validated['end_date'])
-            )
-            ->orderBy('period_date', 'asc')
-            ->get();
-
-        return response()->json([
-            'labels' => $oeeRecords->pluck('period_date')->map(fn($d) => $d->format('Y-m-d')),
-            'oee' => $oeeRecords->pluck('oee'),
-            'availability' => $oeeRecords->pluck('availability'),
-            'performance' => $oeeRecords->pluck('performance'),
-            'quality' => $oeeRecords->pluck('quality'),
-            'achievement_rate' => $oeeRecords->pluck('achievement_rate'),
-        ]);
     }
 }

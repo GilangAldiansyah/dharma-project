@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, Link } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted } from 'vue';
-import { ArrowLeft, Activity, CheckCircle, Clock, RefreshCw, Settings, History } from 'lucide-vue-next';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ArrowLeft, Activity, CheckCircle, Clock, RefreshCw, Settings, History, PauseCircle, Plus, Trash2, ChevronLeft, ChevronRight, Database } from 'lucide-vue-next';
 import { router } from '@inertiajs/vue3';
 
 interface Device {
@@ -25,6 +25,9 @@ interface Device {
     delay_seconds: number;
     is_delayed: boolean;
     is_completed: boolean;
+    is_paused: boolean;
+    paused_at: string | null;
+    total_pause_seconds: number;
 }
 
 interface Log {
@@ -41,6 +44,9 @@ interface Log {
     relay_status: boolean;
     error_b: boolean;
     has_counter_b: boolean;
+    is_paused: boolean;
+    paused_at: string | null;
+    total_pause_seconds: number;
     logged_at: string;
     shift: number;
     shift_label: string;
@@ -73,9 +79,24 @@ interface Props {
         current_page: number;
         last_page: number;
         total: number;
+        per_page: number;
+        from: number;
+        to: number;
     };
-    productionHistories: ProductionHistory[];
+    productionHistories: {
+        data: ProductionHistory[];
+        current_page: number;
+        last_page: number;
+        total: number;
+        per_page: number;
+        from: number;
+        to: number;
+    };
     shifts: Array<{ value:number; label:string }>;
+    filters: {
+        history_date?: string;
+        history_shift?: string;
+    };
 }
 
 const props = defineProps<Props>();
@@ -83,6 +104,7 @@ const props = defineProps<Props>();
 const autoRefresh = ref(true);
 let refreshInterval: number | null = null;
 const showSettingsModal = ref(false);
+const showScheduleModal = ref(false);
 const editMaxCount = ref(props.device.max_count);
 const editMaxStroke = ref(props.device.max_stroke);
 const editReject = ref(props.device.reject);
@@ -91,6 +113,132 @@ const previousDeviceData = ref<string>('');
 const currentRefreshInterval = ref(5000);
 const noChangeCount = ref(0);
 const lastActivityTime = ref(Date.now());
+
+const scheduleStartTime = ref('07:00');
+const scheduleEndTime = ref('14:00');
+const breaks = ref<Array<{ start: string; end: string }>>([]);
+const newBreakStart = ref('');
+const newBreakEnd = ref('');
+
+const activeHistoryTab = ref<'history' | 'logs'>('history');
+const historyDate = ref(props.filters?.history_date || '');
+const historyShift = ref(props.filters?.history_shift || '');
+
+const getCurrentTotalPauseSeconds = computed(() => {
+    let totalPause = props.device.total_pause_seconds;
+
+    if (props.device.is_paused && props.device.paused_at) {
+        const pausedAt = new Date(props.device.paused_at);
+        const now = new Date();
+        const currentPauseSeconds = Math.floor((now.getTime() - pausedAt.getTime()) / 1000);
+        totalPause += currentPauseSeconds;
+    }
+
+    return totalPause;
+});
+
+const isDeviceActive = computed(() => {
+    const lastUpdate = new Date(props.device.last_update);
+    const now = new Date();
+    const diffMinutes = Math.floor((now.getTime() - lastUpdate.getTime()) / 1000 / 60);
+    return diffMinutes < 5;
+});
+
+const parseTimeToDate = (timeStr: string, baseDate: Date = new Date()) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const date = new Date(baseDate);
+    date.setHours(hours, minutes, 0, 0);
+    return date;
+};
+const getTimelineData = computed(() => {
+    if (!props.device.production_started_at) {
+        return null;
+    }
+
+    const actualStartTime = new Date(props.device.production_started_at);
+    const baseDate = new Date(actualStartTime);
+    baseDate.setHours(0, 0, 0, 0);
+
+    const scheduleStart = parseTimeToDate(scheduleStartTime.value, baseDate);
+    const scheduleEnd = parseTimeToDate(scheduleEndTime.value, baseDate);
+    const currentTime = new Date();
+    const lastUpdateTime = new Date(props.device.last_update);
+
+    const isActive = isDeviceActive.value;
+
+    const effectiveCurrentTime = isActive ? lastUpdateTime : lastUpdateTime;
+
+    const totalScheduleDuration = Math.floor((scheduleEnd.getTime() - scheduleStart.getTime()) / 1000);
+    const actualElapsed = Math.floor((currentTime.getTime() - actualStartTime.getTime()) / 1000);
+    const netElapsed = actualElapsed - getCurrentTotalPauseSeconds.value;
+
+    const expectedDuration = props.device.loading_time;
+    const expectedFinishTime = new Date(actualStartTime.getTime() + (expectedDuration + getCurrentTotalPauseSeconds.value) * 1000);
+
+    const productionStartPercentage = Math.max(0, Math.min(
+        ((actualStartTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100,
+        100
+    ));
+
+    const currentPercentage = Math.max(0, Math.min(
+        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100,
+        100
+    ));
+
+    const lastActivityPercentage = Math.max(0, Math.min(
+        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100,
+        100
+    ));
+
+    const barWidth = currentPercentage - productionStartPercentage;
+
+    const processedBreaks = breaks.value.map(brk => {
+        const breakStart = parseTimeToDate(brk.start, baseDate);
+        const breakEnd = parseTimeToDate(brk.end, baseDate);
+
+        const breakStartPercentage = Math.max(0, Math.min(
+            ((breakStart.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100,
+            100
+        ));
+
+        const breakEndPercentage = Math.max(0, Math.min(
+            ((breakEnd.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100,
+            100
+        ));
+
+        return {
+            startPercentage: breakStartPercentage,
+            endPercentage: breakEndPercentage,
+            width: breakEndPercentage - breakStartPercentage,
+            startTime: breakStart,
+            endTime: breakEnd
+        };
+    });
+
+    return {
+        scheduleStart,
+        scheduleEnd,
+        actualStartTime,
+        currentTime,
+        lastUpdateTime,
+        isActive,
+        expectedFinishTime,
+        actualElapsed,
+        netElapsed,
+        totalScheduleDuration,
+        productionStartPercentage,
+        currentPercentage,
+        lastActivityPercentage,
+        barWidth,
+        expectedDuration,
+        breaks: processedBreaks,
+        isOvertime: netElapsed > expectedDuration
+    };
+});
+
+const formatTimeOnly = (date: Date) => {
+    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+};
 
 const getShiftBadgeColor = (shift: number) => {
     switch (shift) {
@@ -108,6 +256,47 @@ const refreshData = () => {
     });
 };
 
+const goToPage = (page: number) => {
+    router.get(`/esp32/monitor/${props.device.device_id}`, { page }, {
+        preserveState: true,
+        preserveScroll: false,
+        only: ['logs']
+    });
+};
+
+const goToHistoryPage = (page: number) => {
+    router.get(`/esp32/monitor/${props.device.device_id}`, {
+        history_page: page,
+        history_date: historyDate.value,
+        history_shift: historyShift.value
+    }, {
+        preserveState: true,
+        preserveScroll: false,
+        only: ['productionHistories']
+    });
+};
+
+const filterHistory = () => {
+    router.get(`/esp32/monitor/${props.device.device_id}`, {
+        history_date: historyDate.value,
+        history_shift: historyShift.value
+    }, {
+        preserveState: true,
+        preserveScroll: true,
+        only: ['productionHistories']
+    });
+};
+
+const clearHistoryFilters = () => {
+    historyDate.value = '';
+    historyShift.value = '';
+    router.get(`/esp32/monitor/${props.device.device_id}`, {}, {
+        preserveState: true,
+        preserveScroll: true,
+        only: ['productionHistories']
+    });
+};
+
 const adaptRefreshInterval = () => {
     const currentData = JSON.stringify({
         counter_a: props.device.counter_a,
@@ -116,6 +305,8 @@ const adaptRefreshInterval = () => {
         relay_status: props.device.relay_status,
         error_b: props.device.error_b,
         last_update: props.device.last_update,
+        is_paused: props.device.is_paused,
+        total_pause_seconds: props.device.total_pause_seconds,
     });
 
     if (previousDeviceData.value === currentData) {
@@ -157,6 +348,20 @@ const getProgressPercentage = (counter: number, max: number) => {
     return Math.min((counter / max) * 100, 100);
 };
 
+const formatDateTimeStacked = (dateString: string) => {
+    const date = new Date(dateString);
+    const dateStr = date.toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+    });
+    const timeStr = date.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    return { date: dateStr, time: timeStr };
+};
+
 const formatDateTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString('id-ID', {
@@ -187,23 +392,54 @@ const formatDelayTime = (seconds: number, isCompleted: boolean, cycleTime: numbe
     }
     return seconds > 0 ? `Delay ${formatted}` : `Cepat ${formatted}`;
 };
-
-const getDelayPercentage = (device: Device) => {
-    if (!device.production_started_at || device.loading_time === 0) return 0;
-    if (device.is_completed) {
-        if (device.delay_seconds <= device.cycle_time) return 100;
-        return Math.max(100 - (device.delay_seconds / device.loading_time * 100), 0);
-    }
-    if (device.delay_seconds <= 0) return 100;
-    return Math.max(100 - (device.delay_seconds / device.loading_time * 100), 0);
-};
-
 const openSettingsModal = () => {
     editMaxCount.value = props.device.max_count;
     editMaxStroke.value = props.device.max_stroke;
     editReject.value = props.device.reject;
     editCycleTime.value = props.device.cycle_time;
     showSettingsModal.value = true;
+};
+
+const openScheduleModal = () => {
+    loadSchedule();
+    showScheduleModal.value = true;
+};
+
+const loadSchedule = () => {
+    const saved = localStorage.getItem(`schedule_${props.device.device_id}`);
+    if (saved) {
+        const data = JSON.parse(saved);
+        scheduleStartTime.value = data.startTime || '07:00';
+        scheduleEndTime.value = data.endTime || '14:00';
+        breaks.value = data.breaks || [];
+    }
+};
+
+const saveSchedule = () => {
+    const data = {
+        startTime: scheduleStartTime.value,
+        endTime: scheduleEndTime.value,
+        breaks: breaks.value
+    };
+    localStorage.setItem(`schedule_${props.device.device_id}`, JSON.stringify(data));
+};
+
+const addBreak = () => {
+    if (newBreakStart.value && newBreakEnd.value) {
+        breaks.value.push({
+            start: newBreakStart.value,
+            end: newBreakEnd.value
+        });
+        breaks.value.sort((a, b) => a.start.localeCompare(b.start));
+        saveSchedule();
+        newBreakStart.value = '';
+        newBreakEnd.value = '';
+    }
+};
+
+const removeBreak = (index: number) => {
+    breaks.value.splice(index, 1);
+    saveSchedule();
 };
 
 const updateSettings = () => {
@@ -227,49 +463,24 @@ const updateSettings = () => {
     });
 };
 
-onMounted(() => {
-    previousDeviceData.value = JSON.stringify({
-        counter_a: props.device.counter_a,
-        counter_b: props.device.counter_b,
-        reject: props.device.reject,
-        relay_status: props.device.relay_status,
-        error_b: props.device.error_b,
-        last_update: props.device.last_update,
-    });
-    if (autoRefresh.value) {
-        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
-    }
-    window.addEventListener('mousemove', resetActivity);
-    window.addEventListener('keydown', resetActivity);
-    window.addEventListener('click', resetActivity);
-});
-
-onUnmounted(() => {
-    if (refreshInterval) clearInterval(refreshInterval);
-    window.removeEventListener('mousemove', resetActivity);
-    window.removeEventListener('keydown', resetActivity);
-    window.removeEventListener('click', resetActivity);
-});
-
-const toggleAutoRefresh = () => {
-    autoRefresh.value = !autoRefresh.value;
-    if (autoRefresh.value) {
-        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
-    } else if (refreshInterval) {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
-    }
-};
-
 const calculateExpectedCounter = (log: Log) => {
     const cycleTime = log.cycle_time || props.device.cycle_time;
-    const productionStartedAt = log.production_started_at || props.device.production_started_at;
-    if (!productionStartedAt || cycleTime === 0) return '-';
+    const productionStartedAt = log.production_started_at;
+
+    if (!productionStartedAt || cycleTime === 0 || log.counter_a === 0) return 0;
+
     const productionStarted = new Date(productionStartedAt);
     const logTime = new Date(log.logged_at);
     const elapsedSeconds = Math.floor((logTime.getTime() - productionStarted.getTime()) / 1000);
+
     if (elapsedSeconds < 0) return 0;
-    return Math.floor(elapsedSeconds / cycleTime);
+
+    const totalPauseAtLogTime = log.total_pause_seconds || 0;
+    const netElapsedSeconds = elapsedSeconds - totalPauseAtLogTime;
+
+    if (netElapsedSeconds < 0) return 0;
+
+    return Math.max(0, Math.floor(netElapsedSeconds / cycleTime));
 };
 
 const getDelayStatus = (log: Log) => {
@@ -289,11 +500,13 @@ const getDelayStatus = (log: Log) => {
         return { text: 'Future Log', class: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
     }
 
+    const totalPauseAtLogTime = log.total_pause_seconds || 0;
+    const netElapsedSeconds = elapsedSeconds - totalPauseAtLogTime;
     const actualCounter = log.counter_a;
     const isCompleted = actualCounter >= maxCount;
 
     if (isCompleted) {
-        const actualTime = elapsedSeconds;
+        const actualTime = netElapsedSeconds;
         const expectedTime = maxCount * cycleTime;
         const delaySeconds = actualTime - expectedTime;
 
@@ -306,7 +519,7 @@ const getDelayStatus = (log: Log) => {
         }
     }
 
-    const expectedCounter = Math.floor(elapsedSeconds / cycleTime);
+    const expectedCounter = Math.floor(netElapsedSeconds / cycleTime);
     const counterDiff = expectedCounter - actualCounter;
     const delaySeconds = counterDiff * cycleTime;
 
@@ -330,6 +543,43 @@ const getHistoryStatusText = (history: ProductionHistory) => {
     if (history.completion_status === 'delayed') return `Delay ${formatTime(history.delay_seconds)}`;
     return `Cepat ${formatTime(Math.abs(history.delay_seconds))}`;
 };
+
+onMounted(() => {
+    previousDeviceData.value = JSON.stringify({
+        counter_a: props.device.counter_a,
+        counter_b: props.device.counter_b,
+        reject: props.device.reject,
+        relay_status: props.device.relay_status,
+        error_b: props.device.error_b,
+        last_update: props.device.last_update,
+        is_paused: props.device.is_paused,
+        total_pause_seconds: props.device.total_pause_seconds,
+    });
+    if (autoRefresh.value) {
+        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
+    }
+    window.addEventListener('mousemove', resetActivity);
+    window.addEventListener('keydown', resetActivity);
+    window.addEventListener('click', resetActivity);
+    loadSchedule();
+});
+
+onUnmounted(() => {
+    if (refreshInterval) clearInterval(refreshInterval);
+    window.removeEventListener('mousemove', resetActivity);
+    window.removeEventListener('keydown', resetActivity);
+    window.removeEventListener('click', resetActivity);
+});
+
+const toggleAutoRefresh = () => {
+    autoRefresh.value = !autoRefresh.value;
+    if (autoRefresh.value) {
+        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
+    } else if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+};
 </script>
 <template>
     <Head :title="`Detail - ${device.device_id}`" />
@@ -352,6 +602,10 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                     </div>
                 </div>
                 <div class="flex gap-3">
+                    <button @click="openScheduleModal" class="px-4 py-2.5 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium flex items-center gap-2">
+                        <Clock class="w-4 h-4" />
+                        Schedule
+                    </button>
                     <button @click="openSettingsModal" class="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium flex items-center gap-2">
                         <Settings class="w-4 h-4" />
                         Settings
@@ -367,9 +621,21 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div v-if="device.is_paused" class="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-2xl p-5 shadow-lg">
+                <div class="flex items-center gap-3">
+                    <PauseCircle class="w-8 h-8 text-blue-600" />
+                    <div>
+                        <h3 class="font-bold text-blue-800 dark:text-blue-300 text-lg">Production Paused</h3>
+                        <p class="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                            Total pause time: <span class="font-mono font-bold">{{ formatTime(getCurrentTotalPauseSeconds) }}</span>
+                            <span v-if="device.paused_at" class="ml-2">| Paused at: {{ formatDateTime(device.paused_at) }}</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 gap-6">
                 <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-100 dark:border-gray-700">
-                    <div class="space-y-4">
+                    <div class="space-y-6">
                         <div>
                             <div class="flex justify-between text-sm mb-2">
                                 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ device.has_counter_b ? 'Counter A' : 'Counter' }}</span>
@@ -390,144 +656,347 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                             </div>
                         </div>
 
-                        <div v-if="device.production_started_at">
+                        <div v-if="getTimelineData">
                             <div class="flex justify-between text-sm mb-2">
-                                <span class="font-semibold text-gray-700 dark:text-gray-300">Target</span>
+                                <span class="font-semibold text-gray-700 dark:text-gray-300">Production Timeline</span>
                                 <span :class="['font-bold text-sm', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-600' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-600' : 'text-blue-600') : (device.delay_seconds > 0 ? 'text-orange-600' : 'text-blue-600')]">
                                     {{ formatDelayTime(device.delay_seconds, device.is_completed, device.cycle_time) }}
                                 </span>
                             </div>
-                            <div class="relative w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                <div :class="['absolute inset-0 rounded-full transition-all duration-500 shadow-lg', Math.abs(device.delay_seconds) <= device.cycle_time ? 'bg-gradient-to-r from-green-400 to-emerald-500' : device.is_completed ? (device.delay_seconds > 0 ? 'bg-gradient-to-r from-red-400 to-rose-500' : 'bg-gradient-to-r from-blue-400 to-cyan-500') : (device.delay_seconds > 0 ? 'bg-gradient-to-r from-orange-400 to-amber-500' : 'bg-gradient-to-r from-blue-400 to-cyan-500')]" :style="{ width: `${getDelayPercentage(device)}%` }"></div>
+
+                            <div class="space-y-1">
+                                <div class="relative w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-visible">
+                                    <div v-for="(brk, idx) in getTimelineData.breaks" :key="`break-${idx}`"
+                                        class="absolute h-full bg-orange-200 dark:bg-orange-800 rounded-full"
+                                        :style="{
+                                            left: `${brk.startPercentage}%`,
+                                            width: `${brk.width}%`
+                                        }"
+                                    ></div>
+
+                                    <div
+                                        :class="['absolute h-full rounded-full transition-all duration-500 shadow-lg', getTimelineData.isOvertime ? 'bg-gradient-to-r from-orange-400 to-red-500' : 'bg-gradient-to-r from-green-400 to-emerald-500']"
+                                        :style="{
+                                            left: `${getTimelineData.productionStartPercentage}%`,
+                                            width: `${getTimelineData.barWidth}%`
+                                        }"
+                                    ></div>
+
+                                    <div class="absolute top-0 left-0 h-full w-1 bg-gray-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10">
+                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                            <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                <div class="font-medium">Schedule Start</div>
+                                                <div class="text-[10px] text-gray-300">{{ formatTimeOnly(getTimelineData.scheduleStart) }}</div>
+                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                    <div class="border-4 border-transparent border-t-gray-900"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="absolute top-0 right-0 h-full w-1 bg-gray-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10">
+                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                            <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                <div class="font-medium">Schedule End</div>
+                                                <div class="text-[10px] text-gray-300">{{ formatTimeOnly(getTimelineData.scheduleEnd) }}</div>
+                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                    <div class="border-4 border-transparent border-t-gray-900"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="absolute top-0 h-full w-1 bg-green-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
+                                        :style="{ left: `${getTimelineData.productionStartPercentage}%` }">
+                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                            <div class="bg-green-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                <div class="font-medium">Actual Start</div>
+                                                <div class="text-[10px] text-green-300">{{ formatTimeOnly(getTimelineData.actualStartTime) }}</div>
+                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                    <div class="border-4 border-transparent border-t-green-900"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div v-if="!getTimelineData.isActive" class="absolute top-0 h-full w-1 bg-red-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
+                                        :style="{ left: `${getTimelineData.lastActivityPercentage}%` }">
+                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                            <div class="bg-red-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                <div class="font-medium">Last Activity</div>
+                                                <div class="text-[10px] text-red-300">{{ formatTimeOnly(getTimelineData.lastUpdateTime) }}</div>
+                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                    <div class="border-4 border-transparent border-t-red-900"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div v-for="(brk, idx) in getTimelineData.breaks" :key="`break-marker-${idx}`">
+                                        <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
+                                            :style="{ left: `${brk.startPercentage}%` }">
+                                            <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                                <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                    <div class="font-medium">Break {{ idx + 1 }} Start</div>
+                                                    <div class="text-[10px] text-orange-300">{{ formatTimeOnly(brk.startTime) }}</div>
+                                                    <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                        <div class="border-4 border-transparent border-t-orange-900"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
+                                            :style="{ left: `${brk.endPercentage}%` }">
+                                            <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
+                                                <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
+                                                    <div class="font-medium">Break {{ idx + 1 }} End</div>
+                                                    <div class="text-[10px] text-orange-300">{{ formatTimeOnly(brk.endTime) }}</div>
+                                                    <div class="absolute top-full left-1/2 transform -translate-x-1/2">
+                                                        <div class="border-4 border-transparent border-t-orange-900"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-600 dark:text-gray-400 font-medium px-1">
+                                    <span>{{ formatTimeOnly(getTimelineData.scheduleStart) }}</span>
+                                    <span v-if="!device.is_completed && getTimelineData.isActive" class="text-blue-600 dark:text-blue-400 font-bold">Now: {{ formatTimeOnly(getTimelineData.lastUpdateTime) }}</span>
+                                    <span v-if="!device.is_completed && !getTimelineData.isActive" class="text-red-600 dark:text-red-400 font-bold">Idle</span>
+                                    <span>{{ formatTimeOnly(getTimelineData.scheduleEnd) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
+                            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-red-500">
+                                <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">NG</div>
+                                <div class="text-3xl font-bold text-red-600 mt-1">{{ device.reject }}</div>
+                            </div>
+                            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-blue-500">
+                                <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Cycle Time</div>
+                                <div class="text-3xl font-bold text-blue-600 mt-1">{{ device.cycle_time }}s</div>
+                            </div>
+                            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-purple-500">
+                                <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading Time</div>
+                                <div class="text-2xl font-bold text-purple-600 mt-1">{{ formatTime(device.loading_time) }}</div>
+                            </div>
+                            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4" :class="device.relay_status ? 'border-green-500' : 'border-gray-500'">
+                                <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Status</div>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <CheckCircle :class="['w-6 h-6', device.relay_status ? 'text-green-600' : 'text-gray-400']" />
+                                    <span :class="['text-2xl font-bold', device.relay_status ? 'text-green-600' : 'text-gray-400']">
+                                        {{ device.relay_status ? 'ON' : 'OFF' }}
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-red-500">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">NG</div>
-                        <div class="text-3xl font-bold text-red-600 mt-1">{{ device.reject }}</div>
+            <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div class="flex border-b border-gray-200 dark:border-gray-700">
+                    <button
+                        @click="activeHistoryTab = 'history'"
+                        :class="[
+                            'flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2',
+                            activeHistoryTab === 'history'
+                                ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 border-b-2 border-purple-600'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                        ]"
+                    >
+                        <History class="w-5 h-5" />
+                        Production History
+                    </button>
+                    <button
+                        @click="activeHistoryTab = 'logs'"
+                        :class="[
+                            'flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2',
+                            activeHistoryTab === 'logs'
+                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-b-2 border-blue-600'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                        ]"
+                    >
+                        <Database class="w-5 h-5" />
+                        History Logs
+                    </button>
+                </div>
+
+                <div v-show="activeHistoryTab === 'history'" class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <input
+                            v-model="historyDate"
+                            type="date"
+                            @change="filterHistory"
+                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
+                        />
+                        <select
+                            v-model="historyShift"
+                            @change="filterHistory"
+                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
+                        >
+                            <option value="">Semua Shift</option>
+                            <option v-for="shift in shifts" :key="shift.value" :value="shift.value">{{ shift.label }}</option>
+                        </select>
+                        <button @click="clearHistoryFilters" class="px-4 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 transition-all font-medium">
+                            Reset
+                        </button>
                     </div>
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-blue-500">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Cycle Time</div>
-                        <div class="text-3xl font-bold text-blue-600 mt-1">{{ device.cycle_time }}s</div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 dark:bg-gray-700/50 border-b-2 border-gray-200 dark:border-gray-600">
+                                <tr>
+                                    <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Started</th>
+                                    <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Finished</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Shift</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Total Count</th>
+                                    <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Total Stroke</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">NG</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                <tr v-for="history in productionHistories.data" :key="history.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                    <td class="px-6 py-4">
+                                        <div class="text-sm font-medium text-gray-900 dark:text-white">{{ formatDateTimeStacked(history.production_started_at).date }}</div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeStacked(history.production_started_at).time }}</div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="text-sm font-medium text-gray-900 dark:text-white">{{ formatDateTimeStacked(history.production_finished_at).date }}</div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeStacked(history.production_finished_at).time }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span :class="['px-3 py-1.5 rounded-full text-xs font-semibold', getShiftBadgeColor(history.shift)]">
+                                            {{ history.shift_label }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-blue-600">{{ history.total_counter_a }}</div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">/ {{ history.max_count }}</div>
+                                    </td>
+                                    <td v-if="device.has_counter_b" class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-purple-600">{{ history.total_counter_b }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-red-600">{{ history.total_reject }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {{ formatTime(history.actual_time_seconds) }}
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span :class="['px-4 py-2 rounded-lg text-xs font-bold', getHistoryStatusClass(history.completion_status)]">
+                                            {{ getHistoryStatusText(history) }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr v-if="productionHistories.data.length === 0">
+                                    <td :colspan="device.has_counter_b ? 8 : 7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                                        Tidak ada data production history
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-purple-500">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading Time</div>
-                        <div class="text-2xl font-bold text-purple-600 mt-1">{{ formatTime(device.loading_time) }}</div>
+
+                    <div v-if="productionHistories.last_page > 1" class="mt-6 flex justify-center gap-2">
+                        <button
+                            v-for="page in productionHistories.last_page"
+                            :key="page"
+                            @click="goToHistoryPage(page)"
+                            :class="[
+                                'px-4 py-2 rounded-lg font-medium transition-all',
+                                page === productionHistories.current_page
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            ]"
+                        >
+                            {{ page }}
+                        </button>
                     </div>
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4" :class="device.relay_status ? 'border-green-500' : 'border-gray-500'">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">Status</div>
-                        <div class="flex items-center gap-2 mt-1">
-                            <CheckCircle :class="['w-6 h-6', device.relay_status ? 'text-green-600' : 'text-gray-400']" />
-                            <span :class="['text-2xl font-bold', device.relay_status ? 'text-green-600' : 'text-gray-400']">
-                                {{ device.relay_status ? 'ON' : 'OFF' }}
-                            </span>
+                </div>
+                <div v-show="activeHistoryTab === 'logs'" class="p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 dark:bg-gray-700/50 border-b-2 border-gray-200 dark:border-gray-600">
+                                <tr>
+                                    <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Shift</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">{{ device.has_counter_b ? 'Counter A' : 'Counter' }}</th>
+                                    <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stroke</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Expected</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Delay Status</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">NG</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Relay</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                <tr v-for="log in logs.data" :key="log.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                    <td class="px-6 py-4">
+                                        <div class="text-sm font-medium text-gray-900 dark:text-white">{{ formatDateTimeStacked(log.logged_at).date }}</div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeStacked(log.logged_at).time }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span :class="['px-3 py-1.5 rounded-full text-xs font-semibold', getShiftBadgeColor(log.shift)]">
+                                            {{ log.shift_label }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-blue-600">{{ log.counter_a }}</div>
+                                    </td>
+                                    <td v-if="device.has_counter_b" class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-purple-600">{{ log.counter_b }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <div class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ calculateExpectedCounter(log) }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span :class="['px-4 py-2 rounded-lg text-xs font-bold', getDelayStatus(log).class]">
+                                            {{ getDelayStatus(log).text }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <div class="text-lg font-bold text-red-600">{{ log.reject }}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span :class="['px-4 py-2 rounded-lg text-xs font-bold', log.relay_status ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400']">
+                                            {{ log.relay_status ? 'ON' : 'OFF' }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr v-if="logs.data.length === 0">
+                                    <td :colspan="device.has_counter_b ? 8 : 7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                                        Belum ada history log
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div v-if="logs.last_page > 1" class="mt-6 flex items-center justify-between">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">
+                            Showing {{ logs.from }} to {{ logs.to }} of {{ logs.total }} entries
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="goToPage(logs.current_page - 1)" :disabled="logs.current_page === 1" :class="['px-3 py-2 rounded-lg font-medium flex items-center gap-1', logs.current_page === 1 ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700']">
+                                <ChevronLeft class="w-4 h-4" />
+                                Previous
+                            </button>
+                            <div class="flex gap-1">
+                                <button v-for="page in logs.last_page" :key="page" @click="goToPage(page)" :class="['px-4 py-2 rounded-lg font-medium', page === logs.current_page ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600']">
+                                    {{ page }}
+                                </button>
+                            </div>
+                            <button @click="goToPage(logs.current_page + 1)" :disabled="logs.current_page === logs.last_page" :class="['px-3 py-2 rounded-lg font-medium flex items-center gap-1', logs.current_page === logs.last_page ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700']">
+                                Next
+                                <ChevronRight class="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <div v-if="productionHistories.length > 0" class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-                <div class="p-5 border-b border-gray-100 dark:border-gray-700">
-                    <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <History class="w-6 h-6 text-purple-600" />
-                        Production History ({{ productionHistories.length }} sessions)
-                    </h2>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
-                            <tr>
-                                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Started</th>
-                                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Finished</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Shift</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Total Count</th>
-                                <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Total Stroke</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">NG</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Duration</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="history in productionHistories" :key="history.id" class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                                <td class="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(history.production_started_at) }}</td>
-                                <td class="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(history.production_finished_at) }}</td>
-                                <td class="px-6 py-4 text-center">
-                                    <span :class="['px-3 py-1 rounded-full text-xs font-medium', getShiftBadgeColor(history.shift)]">
-                                        {{ history.shift_label }}
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 text-center text-sm font-medium text-blue-600">{{ history.total_counter_a }} / {{ history.max_count }}</td>
-                                <td v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-medium text-purple-600">{{ history.total_counter_b }}</td>
-                                <td class="px-6 py-4 text-center text-sm font-medium text-red-600">{{ history.total_reject }}</td>
-                                <td class="px-6 py-4 text-center text-sm text-gray-700 dark:text-gray-300">{{ formatTime(history.actual_time_seconds) }}</td>
-                                <td class="px-6 py-4 text-center">
-                                    <span :class="['px-3 py-1 rounded-lg text-xs font-semibold', getHistoryStatusClass(history.completion_status)]">
-                                        {{ getHistoryStatusText(history) }}
-                                    </span>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-                <div class="p-5 border-b border-gray-100 dark:border-gray-700">
-                    <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Clock class="w-6 h-6 text-blue-600" />
-                        History Logs ({{ logs.total }} records)
-                    </h2>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
-                            <tr>
-                                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Timestamp</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Shift</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">{{ device.has_counter_b ? 'Counter A' : 'Counter' }}</th>
-                                <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Stroke</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Expected</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Delay Status</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">NG</th>
-                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">Relay</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="log in logs.data" :key="log.id" class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                                <td class="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(log.logged_at) }}</td>
-                                <td class="px-6 py-4 text-center">
-                                    <span :class="['px-3 py-1 rounded-full text-xs font-medium', getShiftBadgeColor(log.shift)]">
-                                        {{ log.shift_label }}
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 text-center text-sm font-medium text-blue-600">{{ log.counter_a }}</td>
-                                <td v-if="device.has_counter_b" class="px-6 py-4 text-center text-sm font-medium text-purple-600">{{ log.counter_b }}</td>
-                                <td class="px-6 py-4 text-center text-sm text-gray-600 dark:text-gray-400">{{ calculateExpectedCounter(log) }}</td>
-                                <td class="px-6 py-4 text-center">
-                                    <span :class="['px-3 py-1 rounded-lg text-xs font-semibold', getDelayStatus(log).class]">
-                                        {{ getDelayStatus(log).text }}
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 text-center text-sm font-medium text-red-600">{{ log.reject }}</td>
-                                <td class="px-6 py-4 text-center">
-                                    <span :class="['px-3 py-1 rounded-lg text-xs font-semibold', log.relay_status ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400']">
-                                        {{ log.relay_status ? 'ON' : 'OFF' }}
-                                    </span>
-                                </td>
-                            </tr>
-                            <tr v-if="logs.data.length === 0">
-                                <td :colspan="device.has_counter_b ? 8 : 7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-                                    Belum ada history log
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </div>
-
         <div v-if="showSettingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showSettingsModal = false">
             <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-96 shadow-2xl">
                 <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Settings - {{ device.device_id }}</h3>
@@ -561,6 +1030,76 @@ const getHistoryStatusText = (history: ProductionHistory) => {
                         Cancel
                     </button>
                 </div>
+            </div>
+        </div>
+        <div v-if="showScheduleModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showScheduleModal = false">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-[600px] shadow-2xl max-h-[90vh] overflow-y-auto">
+                <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Production Schedule - {{ device.device_id }}</h3>
+
+                <div class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                    <p class="text-sm text-green-800 dark:text-green-300">
+                        Set jadwal produksi dan waktu break. Timeline akan menampilkan garis di setiap waktu yang Anda tentukan.
+                    </p>
+                </div>
+
+                <div class="space-y-4 mb-6">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Start Time</label>
+                            <input v-model="scheduleStartTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" @change="saveSchedule" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">End Time</label>
+                            <input v-model="scheduleEndTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" @change="saveSchedule" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <h4 class="font-bold text-gray-900 dark:text-white mb-3">Break Times</h4>
+
+                    <div class="space-y-3 mb-4">
+                        <div class="flex gap-2">
+                            <div class="flex-1">
+                                <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Break Start</label>
+                                <input v-model="newBreakStart" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Break End</label>
+                                <input v-model="newBreakEnd" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                            </div>
+                            <div class="flex items-end">
+                                <button @click="addBreak" class="px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold flex items-center gap-2">
+                                    <Plus class="w-4 h-4" />
+                                    Add
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <div v-for="(brk, index) in breaks" :key="index" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl">
+                            <div class="flex items-center gap-3 flex-1">
+                                <div class="flex items-center justify-center w-8 h-8 bg-orange-600 text-white rounded-full font-bold text-sm">
+                                    {{ index + 1 }}
+                                </div>
+                                <div class="font-semibold text-gray-900 dark:text-white">
+                                    {{ brk.start }} - {{ brk.end }}
+                                </div>
+                            </div>
+                            <button @click="removeBreak(index)" class="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
+                                <Trash2 class="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div v-if="breaks.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400">
+                            Belum ada break time. Tambahkan waktu istirahat untuk menandai di timeline.
+                        </div>
+                    </div>
+                </div>
+
+                <button @click="showScheduleModal = false" class="w-full bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
+                    Close
+                </button>
             </div>
         </div>
     </AppLayout>

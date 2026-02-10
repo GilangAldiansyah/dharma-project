@@ -85,8 +85,8 @@ class LineController extends Controller
                     'status' => $line->currentOperation->status,
                     'total_pause_minutes' => $line->currentOperation->total_pause_minutes ?? 0,
                     'formatted_pause_duration' => $line->currentOperation->formatted_pause_duration,
-                    'shift' => $line->currentOperation->shift, // ← TAMBAHAN
-                    'shift_label' => $line->currentOperation->shift_label, // ← TAMBAHAN
+                    'shift' => $line->currentOperation->shift,
+                    'shift_label' => $line->currentOperation->shift_label,
                 ] : null,
                 'machines' => $line->machines->map(function ($machine) {
                     return [
@@ -354,19 +354,16 @@ class LineController extends Controller
         try {
             $line = Line::where('is_archived', false)->findOrFail($id);
 
-            // ← TAMBAHAN: Validasi filter
-            $filterType = $request->input('filter_type', 'all'); // all, week, month, custom
+            $filterType = $request->input('filter_type', 'all');
             $startDate = $request->input('start_date');
             $endDate = $request->input('end_date');
 
-            // ← TAMBAHAN: Query archived lines dengan filter
             $archivedLinesQuery = Line::where('parent_line_id', $line->id)
                 ->where('is_archived', true)
                 ->with(['machines' => function($q) {
                     $q->where('is_archived', true);
                 }]);
 
-            // ← TAMBAHAN: Apply filter berdasarkan tipe
             if ($filterType === 'week') {
                 $startDate = Carbon::now()->startOfWeek();
                 $endDate = Carbon::now()->endOfWeek();
@@ -383,14 +380,12 @@ class LineController extends Controller
 
             $archivedLines = $archivedLinesQuery->orderBy('period_end', 'desc')->get();
 
-            // ← TAMBAHAN: Hitung total dengan filter
             $filteredOperation = $archivedLines->sum('total_operation_hours');
             $filteredRepair = $archivedLines->sum('total_repair_hours');
             $filteredUptime = $archivedLines->sum('uptime_hours');
             $filteredFailures = $archivedLines->sum('total_failures');
             $filteredLineStops = $archivedLines->sum('total_line_stops');
 
-            // ← TAMBAHAN: Cek apakah periode saat ini termasuk dalam filter
             $includeCurrentPeriod = false;
             $currentPeriodStart = $line->current_period_start ?? $line->created_at;
 
@@ -404,7 +399,6 @@ class LineController extends Controller
                 $includeCurrentPeriod = $currentPeriodStart->between($startDate, $endDate);
             }
 
-            // ← PERBAIKAN: Total dengan kondisi
             if ($includeCurrentPeriod) {
                 $filteredOperation += $line->total_operation_hours;
                 $filteredRepair += $line->total_repair_hours;
@@ -450,11 +444,11 @@ class LineController extends Controller
                     'failures' => (int) $line->total_failures,
                     'mtbf' => $currentMtbf,
                     'mttr' => $currentMttr,
-                    'included_in_filter' => $includeCurrentPeriod, // ← TAMBAHAN
+                    'included_in_filter' => $includeCurrentPeriod,
                 ],
                 'total_all_time' => $totalAllTime,
-                'periods_count' => ($includeCurrentPeriod ? 1 : 0) + $archivedLines->count(), // ← PERBAIKAN
-                'filter_info' => [ // ← TAMBAHAN
+                'periods_count' => ($includeCurrentPeriod ? 1 : 0) + $archivedLines->count(),
+                'filter_info' => [
                     'type' => $filterType,
                     'start_date' => $startDate ? $startDate->format('Y-m-d') : null,
                     'end_date' => $endDate ? $endDate->format('Y-m-d') : null,
@@ -694,4 +688,46 @@ class LineController extends Controller
             ],
         ]);
     }
+    public function show(int $id): Response
+    {
+        $line = Line::where('is_archived', false)
+            ->with(['machines' => function($q) {
+                $q->where('is_archived', false);
+            }, 'area'])
+            ->findOrFail($id);
+
+        return Inertia::render('Maintenance/Detail', [
+            'line' => [
+                'id' => $line->id,
+                'line_code' => $line->line_code,
+                'line_name' => $line->line_name,
+                'plant' => $line->plant,
+                'description' => $line->description,
+                'total_operation_hours' => (float) ($line->total_operation_hours ?? 0),
+                'total_repair_hours' => (float) ($line->total_repair_hours ?? 0),
+                'uptime_hours' => (float) ($line->uptime_hours ?? 0),
+                'total_failures' => (int) ($line->total_failures ?? 0),
+                'total_line_stops' => (int) ($line->total_line_stops ?? 0),
+                'average_mtbf' => $line->average_mtbf,
+                'average_mttr' => $line->average_mttr,
+                'area' => $line->area ? [
+                    'id' => $line->area->id,
+                    'name' => $line->area->name,
+                ] : null,
+                'machines' => $line->machines->map(function ($machine) {
+                    return [
+                        'id' => $machine->id,
+                        'machine_name' => $machine->machine_name,
+                        'barcode' => $machine->barcode,
+                        'machine_type' => $machine->machine_type,
+                        'total_operation_hours' => (float) ($machine->total_operation_hours ?? 0),
+                        'total_repair_hours' => (float) ($machine->total_repair_hours ?? 0),
+                        'total_failures' => (int) ($machine->total_failures ?? 0),
+                        'mttr_hours' => $machine->mttr_hours ? (float) $machine->mttr_hours : null,
+                        'mtbf_hours' => $machine->mtbf_hours ? (float) $machine->mtbf_hours : null,
+                    ];
+                }),
+            ],
+        ]);
+}
 }

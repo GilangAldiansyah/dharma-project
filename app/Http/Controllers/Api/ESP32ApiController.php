@@ -38,6 +38,9 @@ class ESP32ApiController extends Controller
                     'production_started_at' => now(),
                     'relay_status' => $validated['relay_status'] ?? false,
                     'error_b' => $validated['error_B'] ?? false,
+                    'is_paused' => false,
+                    'paused_at' => null,
+                    'total_pause_seconds' => 0,
                     'last_update' => now(),
                 ]);
 
@@ -53,6 +56,9 @@ class ESP32ApiController extends Controller
                     'production_started_at' => $device->production_started_at,
                     'relay_status' => $validated['relay_status'] ?? false,
                     'error_b' => $validated['error_B'] ?? false,
+                    'is_paused' => false,
+                    'paused_at' => null,
+                    'total_pause_seconds' => 0,
                     'logged_at' => now(),
                 ]);
 
@@ -65,35 +71,57 @@ class ESP32ApiController extends Controller
                 ], 200);
             }
 
-            $shouldLog = false;
+            $counterChanged = $oldDevice->counter_a != $validated['counter_a'] ||
+                $oldDevice->counter_b != ($validated['counter_b'] ?? 0);
 
-            if ($oldDevice->counter_a != $validated['counter_a'] ||
-                $oldDevice->counter_b != ($validated['counter_b'] ?? 0) ||
-                $oldDevice->error_b != ($validated['error_B'] ?? false)) {
-                $shouldLog = true;
-            }
+            $shouldLog = $counterChanged || $oldDevice->error_b != ($validated['error_B'] ?? false);
 
             $productionStartedAt = $oldDevice->production_started_at;
+            $totalPauseSeconds = $oldDevice->total_pause_seconds;
+            $isPaused = $oldDevice->is_paused;
+            $pausedAt = $oldDevice->paused_at;
+            $lastUpdate = $oldDevice->last_update;
+
+            if ($counterChanged) {
+                $lastUpdate = now();
+
+                if ($isPaused) {
+                    $pauseDuration = now()->timestamp - Carbon::parse($pausedAt)->timestamp;
+                    $totalPauseSeconds += $pauseDuration;
+                    $isPaused = false;
+                    $pausedAt = null;
+                }
+            }
 
             if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
                 $this->saveProductionHistory($oldDevice);
+
+                $oldDevice->autoStopLineOperation();
+
                 $productionStartedAt = now();
-            }
-            elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
+                $totalPauseSeconds = 0;
+                $isPaused = false;
+                $pausedAt = null;
+                $lastUpdate = now();
+            } elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
+                $oldDevice->autoStartLineOperation();
+
                 if ($oldDevice->cycle_time > 0) {
-                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time);
+                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time + $totalPauseSeconds);
                 } else {
                     $productionStartedAt = now();
                 }
-            }
-            elseif (!$productionStartedAt && $validated['counter_a'] > 0) {
+                $lastUpdate = now();
+            } elseif (!$productionStartedAt && $validated['counter_a'] > 0) {
+                $oldDevice->autoStartLineOperation();
+
                 if ($oldDevice->cycle_time > 0) {
-                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time);
+                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time + $totalPauseSeconds);
                 } else {
                     $productionStartedAt = now();
                 }
-            }
-            elseif (!$productionStartedAt) {
+                $lastUpdate = now();
+            } elseif (!$productionStartedAt) {
                 $productionStartedAt = now();
             }
 
@@ -103,7 +131,10 @@ class ESP32ApiController extends Controller
                 'relay_status' => $validated['relay_status'] ?? $oldDevice->relay_status,
                 'error_b' => $validated['error_B'] ?? $oldDevice->error_b,
                 'production_started_at' => $productionStartedAt,
-                'last_update' => now(),
+                'is_paused' => $isPaused,
+                'paused_at' => $pausedAt,
+                'total_pause_seconds' => $totalPauseSeconds,
+                'last_update' => $lastUpdate,
             ]);
 
             if ($shouldLog) {
@@ -119,10 +150,12 @@ class ESP32ApiController extends Controller
                     'production_started_at' => $productionStartedAt,
                     'relay_status' => $validated['relay_status'] ?? $oldDevice->relay_status,
                     'error_b' => $validated['error_B'] ?? $oldDevice->error_b,
+                    'is_paused' => $isPaused,
+                    'paused_at' => $pausedAt,
+                    'total_pause_seconds' => $totalPauseSeconds,
                     'logged_at' => now(),
                 ]);
 
-                // ✅ HAPUS LOG YANG LEBIH DARI 48 JAM
                 Esp32Log::where('device_id', $validated['device_id'])
                     ->where('logged_at', '<', now()->subHours(48))
                     ->delete();
@@ -162,11 +195,12 @@ class ESP32ApiController extends Controller
         }
 
         $productionStarted = Carbon::parse($device->production_started_at);
-        $productionFinished = now();
+        $productionFinished = Carbon::parse($device->last_update);
 
         $actualTimeSeconds = $productionFinished->timestamp - $productionStarted->timestamp;
+        $netTimeSeconds = $actualTimeSeconds - $device->total_pause_seconds;
         $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
-        $delaySeconds = $actualTimeSeconds - $expectedTimeSeconds;
+        $delaySeconds = $netTimeSeconds - $expectedTimeSeconds;
 
         if (abs($delaySeconds) <= $device->cycle_time) {
             $completionStatus = 'on_time';
@@ -185,7 +219,7 @@ class ESP32ApiController extends Controller
             'max_count' => $device->max_count,
             'max_stroke' => $device->max_stroke,
             'expected_time_seconds' => $expectedTimeSeconds,
-            'actual_time_seconds' => $actualTimeSeconds,
+            'actual_time_seconds' => $netTimeSeconds,
             'delay_seconds' => $delaySeconds,
             'production_started_at' => $productionStarted,
             'production_finished_at' => $productionFinished,

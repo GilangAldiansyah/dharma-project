@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class Line extends Model
 {
@@ -81,6 +82,7 @@ class Line extends Model
     {
         return $this->belongsTo(Line::class, 'parent_line_id');
     }
+
     public function esp32Device(): HasOne
     {
         return $this->hasOne(Esp32Device::class);
@@ -233,6 +235,62 @@ class Line extends Model
                 'last_operation_start' => null,
                 'last_line_stop' => null,
                 'current_period_start' => now()
+            ]);
+        });
+    }
+
+    // ← TAMBAHAN: Method untuk auto archive & reset
+    public function autoArchiveAndReset(string $reason = 'Auto-reset'): void
+    {
+        DB::transaction(function () use ($reason) {
+            $now = Carbon::now();
+            $timestamp = $now->format('YmdHis');
+
+            // Archive line
+            $archivedLine = $this->replicate();
+            $archivedLine->is_archived = true;
+            $archivedLine->period_start = $this->current_period_start ?? $this->created_at;
+            $archivedLine->period_end = $now;
+            $archivedLine->parent_line_id = $this->id;
+            $archivedLine->line_code = $this->line_code . '_' . $timestamp;
+            $archivedLine->qr_code = $this->qr_code . '_archived_' . $timestamp;
+            $originalDesc = $this->description ?? '';
+            $archivedLine->description = $originalDesc . "\n\n[ARCHIVED - " . $now->format('d M Y H:i:s') . "]\nAlasan: " . $reason;
+            $archivedLine->save();
+
+            // Archive machines
+            foreach ($this->machines()->where('is_archived', false)->get() as $machine) {
+                $archivedMachine = $machine->replicate();
+                $archivedMachine->is_archived = true;
+                $archivedMachine->period_start = $machine->current_period_start ?? $machine->created_at;
+                $archivedMachine->period_end = $now;
+                $archivedMachine->parent_machine_id = $machine->id;
+                $archivedMachine->line_id = $archivedLine->id;
+                $archivedMachine->barcode = $machine->barcode . '_archived_' . $timestamp;
+                $archivedMachine->save();
+            }
+
+            // Reset metrics
+            $this->update([
+                'total_operation_hours' => 0,
+                'total_repair_hours' => 0,
+                'uptime_hours' => 0,
+                'total_failures' => 0,
+                'total_line_stops' => 0,
+                'average_mtbf' => null,
+                'average_mttr' => null,
+                'current_period_start' => $now,
+                'status' => 'stopped',
+                'last_operation_start' => null,
+            ]);
+
+            $this->machines()->where('is_archived', false)->update([
+                'total_operation_hours' => 0,
+                'total_repair_hours' => 0,
+                'total_failures' => 0,
+                'mtbf_hours' => null,
+                'mttr_hours' => null,
+                'current_period_start' => $now
             ]);
         });
     }

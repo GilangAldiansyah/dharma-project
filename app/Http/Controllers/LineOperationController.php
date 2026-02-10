@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Line;
 use App\Models\LineOperation;
+use App\Models\Esp32Device;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -84,14 +85,21 @@ class LineOperationController extends Controller
             }
 
             $operation->pause($validated['paused_by'] ?? 'System');
-
             $operation->line->update(['status' => 'paused']);
+
+            $esp32Device = $operation->line->esp32Device;
+            if ($esp32Device && !$esp32Device->is_paused) {
+                $esp32Device->update([
+                    'is_paused' => true,
+                    'paused_at' => now(),
+                ]);
+            }
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Operasi di-pause',
+                'message' => 'Operasi dan produksi di-pause',
                 'data' => $operation->fresh(),
             ]);
 
@@ -125,14 +133,24 @@ class LineOperationController extends Controller
             }
 
             $operation->resume($validated['resumed_by'] ?? 'System');
-
             $operation->line->update(['status' => 'operating']);
+
+            $esp32Device = $operation->line->esp32Device;
+            if ($esp32Device && $esp32Device->is_paused) {
+                $pauseDuration = now()->diffInSeconds($esp32Device->paused_at);
+
+                $esp32Device->update([
+                    'is_paused' => false,
+                    'total_pause_seconds' => $esp32Device->total_pause_seconds + $pauseDuration,
+                    'paused_at' => null,
+                ]);
+            }
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Operasi dilanjutkan',
+                'message' => 'Operasi dan produksi dilanjutkan',
                 'data' => $operation->fresh(),
             ]);
 
@@ -176,12 +194,21 @@ class LineOperationController extends Controller
             $operation->calculateMetrics();
 
             $line = $operation->line;
-            $line->update([
-                'status' => 'stopped',
-                'last_line_stop' => now(),
-            ]);
 
-            $line->recalculateMetrics();
+            $esp32Device = $line->esp32Device;
+            if ($esp32Device) {
+                if ($esp32Device->is_paused && $esp32Device->paused_at) {
+                    $lastPauseDuration = now()->diffInSeconds($esp32Device->paused_at);
+                    $esp32Device->total_pause_seconds += $lastPauseDuration;
+                }
+
+                $esp32Device->update([
+                    'is_paused' => false,
+                    'paused_at' => null,
+                ]);
+            }
+
+            $line->autoArchiveAndReset('Stop operation by ' . ($validated['stopped_by'] ?? 'System'));
 
             $line->refresh();
             $line->load('currentOperation', 'machines');
@@ -190,7 +217,7 @@ class LineOperationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Operasi line dihentikan!',
+                'message' => 'Operasi dihentikan dan metrics telah direset. Data periode sebelumnya tersimpan dalam history.',
                 'data' => [
                     'operation' => $operation->fresh(),
                     'line' => $line,

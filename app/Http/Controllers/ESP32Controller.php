@@ -6,6 +6,7 @@ use App\Models\Esp32Device;
 use App\Models\Esp32Log;
 use App\Models\Esp32ProductionHistory;
 use App\Models\Area;
+use App\Models\Line;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -17,7 +18,7 @@ class ESP32Controller extends Controller
         $areaId = $request->input('area');
 
         $devices = Esp32Device::query()
-            ->with('area')
+            ->with(['area', 'line'])
             ->when($search, function ($query, $search) {
                 $query->where('device_id', 'like', "%{$search}%");
             })
@@ -28,10 +29,14 @@ class ESP32Controller extends Controller
             ->get();
 
         $areas = Area::orderBy('name', 'asc')->get();
+        $lines = Line::where('is_archived', false)
+            ->orderBy('line_code', 'asc')
+            ->get(['id', 'line_code', 'line_name']);
 
         return Inertia::render('ESP32/Monitor', [
             'devices' => $devices,
             'areas' => $areas,
+            'lines' => $lines,
             'filters' => [
                 'search' => $search,
                 'area' => $areaId,
@@ -39,24 +44,39 @@ class ESP32Controller extends Controller
         ]);
     }
 
-    public function detail($deviceId)
+    public function detail($deviceId, Request $request)
     {
-        $device = Esp32Device::where('device_id', $deviceId)->firstOrFail();
+        $device = Esp32Device::where('device_id', $deviceId)
+            ->with(['area', 'line'])
+            ->firstOrFail();
 
         $logs = Esp32Log::where('device_id', $deviceId)
             ->orderBy('logged_at', 'desc')
-            ->paginate(50);
+            ->paginate(100);
 
-        $productionHistories = Esp32ProductionHistory::where('device_id', $deviceId)
+        $historyQuery = Esp32ProductionHistory::where('device_id', $deviceId);
+
+        if ($request->filled('history_date')) {
+            $historyQuery->whereDate('production_started_at', $request->input('history_date'));
+        }
+
+        if ($request->filled('history_shift')) {
+            $historyQuery->where('shift', $request->input('history_shift'));
+        }
+
+        $productionHistories = $historyQuery
             ->orderBy('production_finished_at', 'desc')
-            ->limit(10)
-            ->get();
+            ->paginate(10, ['*'], 'history_page');
 
         return Inertia::render('ESP32/Detail', [
             'device' => $device,
             'logs' => $logs,
             'productionHistories' => $productionHistories,
             'shifts' => \App\Helpers\DateHelper::getAllShifts(),
+            'filters' => [
+                'history_date' => $request->input('history_date'),
+                'history_shift' => $request->input('history_shift'),
+            ],
         ]);
     }
 
@@ -69,6 +89,7 @@ class ESP32Controller extends Controller
             'reject' => 'required|integer|min:0',
             'cycle_time' => 'required|integer|min:0',
             'area_id' => 'nullable|integer|exists:areas,id',
+            'line_id' => 'nullable|integer|exists:lines,id',
             'new_area_name' => 'nullable|string|max:255',
             'reset_counter' => 'nullable|boolean',
         ]);
@@ -83,9 +104,15 @@ class ESP32Controller extends Controller
             $areaId = $validated['area_id'];
         }
 
+        $lineId = $validated['line_id'] ?? null;
+
         if ($validated['reset_counter'] ?? false) {
             if ($device->counter_a > 0) {
                 $this->saveProductionHistory($device);
+            }
+
+            if ($device->line_id) {
+                $device->autoStopLineOperation();
             }
 
             $device->update([
@@ -93,7 +120,11 @@ class ESP32Controller extends Controller
                 'counter_b' => 0,
                 'reject' => 0,
                 'area_id' => $areaId,
-                'production_started_at' => now(),
+                'line_id' => $lineId,
+                'production_started_at' => null,
+                'is_paused' => false,
+                'paused_at' => null,
+                'total_pause_seconds' => 0,
             ]);
 
             return back()->with('success', 'Counter berhasil direset ke 0');
@@ -102,8 +133,11 @@ class ESP32Controller extends Controller
         $loadingTime = $validated['max_count'] * $validated['cycle_time'];
         $productionStartedAt = $device->production_started_at;
 
-        if ($device->cycle_time != $validated['cycle_time'] && $device->counter_a > 0) {
-            $productionStartedAt = now()->subSeconds($device->counter_a * $validated['cycle_time']);
+        if ($device->counter_a > 0) {
+            $netElapsedSeconds = $device->counter_a * $validated['cycle_time'];
+            $productionStartedAt = now()->subSeconds($netElapsedSeconds + $device->total_pause_seconds);
+        } elseif (!$productionStartedAt) {
+            $productionStartedAt = now();
         }
 
         $updateData = [
@@ -112,6 +146,7 @@ class ESP32Controller extends Controller
             'cycle_time' => $validated['cycle_time'],
             'loading_time' => $loadingTime,
             'area_id' => $areaId,
+            'line_id' => $lineId,
             'production_started_at' => $productionStartedAt,
         ];
 
@@ -134,8 +169,9 @@ class ESP32Controller extends Controller
         $productionFinished = now();
 
         $actualTimeSeconds = $productionFinished->timestamp - $productionStarted->timestamp;
+        $netTimeSeconds = $actualTimeSeconds - $device->total_pause_seconds;
         $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
-        $delaySeconds = $actualTimeSeconds - $expectedTimeSeconds;
+        $delaySeconds = $netTimeSeconds - $expectedTimeSeconds;
 
         if (abs($delaySeconds) <= $device->cycle_time) {
             $completionStatus = 'on_time';
@@ -154,7 +190,7 @@ class ESP32Controller extends Controller
             'max_count' => $device->max_count,
             'max_stroke' => $device->max_stroke,
             'expected_time_seconds' => $expectedTimeSeconds,
-            'actual_time_seconds' => $actualTimeSeconds,
+            'actual_time_seconds' => $netTimeSeconds,
             'delay_seconds' => $delaySeconds,
             'production_started_at' => $productionStarted,
             'production_finished_at' => $productionFinished,

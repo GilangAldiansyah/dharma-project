@@ -23,14 +23,27 @@ class Esp32Device extends Model
         'production_started_at',
         'relay_status',
         'error_b',
+        'is_paused',
+        'paused_at',
+        'total_pause_seconds',
         'last_update',
     ];
 
     protected $casts = [
         'relay_status' => 'boolean',
         'error_b' => 'boolean',
+        'is_paused' => 'boolean',
         'last_update' => 'datetime',
         'production_started_at' => 'datetime',
+        'paused_at' => 'datetime',
+        'total_pause_seconds' => 'integer',
+        'counter_a' => 'integer',
+        'counter_b' => 'integer',
+        'reject' => 'integer',
+        'cycle_time' => 'integer',
+        'max_count' => 'integer',
+        'max_stroke' => 'integer',
+        'loading_time' => 'integer',
     ];
 
     protected $appends = [
@@ -76,7 +89,17 @@ class Esp32Device extends Model
     public function getExpectedFinishTimeAttribute()
     {
         if (!$this->production_started_at) return null;
-        return Carbon::parse($this->production_started_at)->addSeconds($this->loading_time);
+
+        $totalPauseSeconds = (int) $this->total_pause_seconds;
+
+        if ($this->is_paused && $this->paused_at) {
+            $currentPauseSeconds = Carbon::parse($this->paused_at)->diffInSeconds(now());
+            $totalPauseSeconds += $currentPauseSeconds;
+        }
+
+        return Carbon::parse($this->production_started_at)
+            ->addSeconds((int) $this->loading_time)
+            ->addSeconds($totalPauseSeconds);
     }
 
     public function getDelaySecondsAttribute(): int
@@ -84,7 +107,14 @@ class Esp32Device extends Model
         if (!$this->production_started_at || $this->cycle_time == 0) return 0;
 
         $productionStarted = Carbon::parse($this->production_started_at);
-        $actualCounter = $this->counter_a;
+        $actualCounter = (int) $this->counter_a;
+
+        $totalPauseSeconds = (int) $this->total_pause_seconds;
+
+        if ($this->is_paused && $this->paused_at) {
+            $currentPauseSeconds = Carbon::parse($this->paused_at)->diffInSeconds(now());
+            $totalPauseSeconds += $currentPauseSeconds;
+        }
 
         if ($actualCounter >= $this->max_count) {
             $completionLog = $this->logs()
@@ -99,13 +129,16 @@ class Esp32Device extends Model
             }
 
             $actualTimeSeconds = $completionTime->timestamp - $productionStarted->timestamp;
+            $netTimeSeconds = $actualTimeSeconds - $totalPauseSeconds;
             $expectedTimeSeconds = $this->max_count * $this->cycle_time;
-            return (int)($actualTimeSeconds - $expectedTimeSeconds);
+
+            return (int)($netTimeSeconds - $expectedTimeSeconds);
         }
 
         $lastUpdate = Carbon::parse($this->last_update);
         $elapsedSeconds = $lastUpdate->timestamp - $productionStarted->timestamp;
-        $expectedCounter = floor($elapsedSeconds / $this->cycle_time);
+        $netElapsedSeconds = $elapsedSeconds - $totalPauseSeconds;
+        $expectedCounter = floor($netElapsedSeconds / $this->cycle_time);
         $counterDiff = $expectedCounter - $actualCounter;
 
         return (int)($counterDiff * $this->cycle_time);
@@ -119,5 +152,68 @@ class Esp32Device extends Model
     public function getIsCompletedAttribute(): bool
     {
         return $this->counter_a >= $this->max_count;
+    }
+
+    // ← TAMBAHAN: Method untuk auto-start operation
+    public function autoStartLineOperation(): ?LineOperation
+    {
+        if (!$this->line_id) {
+            return null;
+        }
+
+        $line = $this->line;
+
+        // Cek apakah sudah ada operation running
+        $currentOperation = $line->currentOperation;
+
+        if ($currentOperation) {
+            return $currentOperation;
+        }
+
+        // Auto-create operation
+        $operation = LineOperation::create([
+            'line_id' => $this->line_id,
+            'operation_number' => LineOperation::generateOperationNumber(),
+            'started_at' => now(),
+            'started_by' => 'System (Auto-started from ESP32: ' . $this->device_id . ')',
+            'status' => 'running',
+            'notes' => 'Operation otomatis dibuat dari ESP32 device: ' . $this->device_id,
+        ]);
+
+        $line->update([
+            'status' => 'operating',
+            'last_operation_start' => now(),
+        ]);
+
+        return $operation;
+    }
+
+    // ← TAMBAHAN: Method untuk auto-stop operation
+    public function autoStopLineOperation(): void
+    {
+        if (!$this->line_id) {
+            return;
+        }
+
+        $line = $this->line;
+        $currentOperation = $line->currentOperation;
+
+        if (!$currentOperation) {
+            return;
+        }
+
+        // Stop operation
+        $currentOperation->update([
+            'stopped_at' => now(),
+            'stopped_by' => 'System (Auto-stopped from ESP32: ' . $this->device_id . ')',
+            'status' => 'stopped',
+            'notes' => ($currentOperation->notes ? $currentOperation->notes . "\n" : '') .
+                      'Operation otomatis dihentikan dari ESP32 device (counter reset to 0)',
+        ]);
+
+        $currentOperation->calculateMetrics();
+
+        // Auto archive & reset
+        $line->autoArchiveAndReset('Auto-reset from ESP32 device: ' . $this->device_id . ' (counter reset to 0)');
     }
 }

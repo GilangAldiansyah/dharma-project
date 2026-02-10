@@ -139,6 +139,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::prefix('maintenance/lines')->name('maintenance.lines.')->group(function () {
         Route::get('/', [LineController::class, 'index'])->name('index');
         Route::post('/', [LineController::class, 'store'])->name('store');
+        Route::get('/{id}', [LineController::class, 'show'])->name('show');
         Route::put('/{id}', [LineController::class, 'update'])->name('update');
         Route::delete('/{id}', [LineController::class, 'destroy'])->name('destroy');
         Route::post('/{id}/reset', [LineController::class, 'resetMetrics'])->name('reset');
