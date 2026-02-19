@@ -23,15 +23,20 @@ class Esp32Device extends Model
         'production_started_at',
         'relay_status',
         'error_b',
+        'reset_requested',
         'is_paused',
         'paused_at',
         'total_pause_seconds',
         'last_update',
+        'schedule_start_time',
+        'schedule_end_time',
+        'schedule_breaks',
     ];
 
     protected $casts = [
         'relay_status' => 'boolean',
         'error_b' => 'boolean',
+        'reset_requested' => 'boolean',
         'is_paused' => 'boolean',
         'last_update' => 'datetime',
         'production_started_at' => 'datetime',
@@ -44,6 +49,7 @@ class Esp32Device extends Model
         'max_count' => 'integer',
         'max_stroke' => 'integer',
         'loading_time' => 'integer',
+        'schedule_breaks' => 'array',
     ];
 
     protected $appends = [
@@ -154,7 +160,11 @@ class Esp32Device extends Model
         return $this->counter_a >= $this->max_count;
     }
 
-    // ← TAMBAHAN: Method untuk auto-start operation
+    public function getScheduleBreaksFormattedAttribute()
+    {
+        return $this->schedule_breaks ?? [];
+    }
+
     public function autoStartLineOperation(): ?LineOperation
     {
         if (!$this->line_id) {
@@ -163,14 +173,12 @@ class Esp32Device extends Model
 
         $line = $this->line;
 
-        // Cek apakah sudah ada operation running
         $currentOperation = $line->currentOperation;
 
         if ($currentOperation) {
             return $currentOperation;
         }
 
-        // Auto-create operation
         $operation = LineOperation::create([
             'line_id' => $this->line_id,
             'operation_number' => LineOperation::generateOperationNumber(),
@@ -188,32 +196,51 @@ class Esp32Device extends Model
         return $operation;
     }
 
-    // ← TAMBAHAN: Method untuk auto-stop operation
-    public function autoStopLineOperation(): void
-    {
-        if (!$this->line_id) {
-            return;
-        }
-
-        $line = $this->line;
-        $currentOperation = $line->currentOperation;
-
-        if (!$currentOperation) {
-            return;
-        }
-
-        // Stop operation
-        $currentOperation->update([
-            'stopped_at' => now(),
-            'stopped_by' => 'System (Auto-stopped from ESP32: ' . $this->device_id . ')',
-            'status' => 'stopped',
-            'notes' => ($currentOperation->notes ? $currentOperation->notes . "\n" : '') .
-                      'Operation otomatis dihentikan dari ESP32 device (counter reset to 0)',
-        ]);
-
-        $currentOperation->calculateMetrics();
-
-        // Auto archive & reset
-        $line->autoArchiveAndReset('Auto-reset from ESP32 device: ' . $this->device_id . ' (counter reset to 0)');
+   public function autoStopLineOperation(): void
+{
+    if (!$this->line_id) {
+        return;
     }
+
+    $line = Line::with('currentOperation')->find($this->line_id);
+
+    if (!$line) {
+        return;
+    }
+
+    $currentOperation = $line->currentOperation;
+
+    if (!$currentOperation) {
+        $line->update(['status' => 'stopped']);
+        return;
+    }
+
+    $totalPauseMinutes = $currentOperation->total_pause_minutes ?? 0;
+    if ($currentOperation->status === 'paused' && $currentOperation->paused_at) {
+        $pauseDurationSeconds = $currentOperation->paused_at->diffInSeconds(now());
+        $totalPauseMinutes += $pauseDurationSeconds / 60;
+    }
+
+    $currentOperation->update([
+        'stopped_at' => now(),
+        'stopped_by' => 'System (Auto-stopped from ESP32: ' . $this->device_id . ')',
+        'status' => 'stopped',
+        'total_pause_minutes' => $totalPauseMinutes,
+        'paused_at' => null,
+        'notes' => ($currentOperation->notes ? $currentOperation->notes . "\n" : '') .
+                'Operation otomatis dihentikan dari ESP32 device (counter reset to 0)',
+    ]);
+
+    $currentOperation->refresh();
+
+    if ($currentOperation->started_at && $currentOperation->stopped_at) {
+        $totalSeconds = $currentOperation->started_at->diffInSeconds($currentOperation->stopped_at);
+        $pauseSeconds = ($currentOperation->total_pause_minutes ?? 0) * 60;
+        $netSeconds = max(0, $totalSeconds - $pauseSeconds);
+        $currentOperation->duration_minutes = $netSeconds / 60;
+        $currentOperation->save();
+    }
+
+    $line->autoArchiveAndReset('Auto-reset from ESP32 device: ' . $this->device_id . ' (counter reset to 0)');
+}
 }

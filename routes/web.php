@@ -99,6 +99,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/esp32/monitor', [ESP32Controller::class, 'monitor'])->name('esp32.monitor');
     Route::get('/esp32/monitor/{device_id}', [ESP32Controller::class, 'detail'])->name('esp32.detail');
     Route::post('/esp32/monitor/update-settings', [ESP32Controller::class, 'updateSettings'])->name('esp32.update-settings');
+    Route::post('/esp32/monitor/update-schedule', [ESP32Controller::class, 'updateSchedule'])->name('esp32.update-schedule');
 
     Route::get('materials/search/api', [MaterialController::class, 'searchApi'])->name('materials.search');
     Route::post('/materials/import', [MaterialController::class, 'import'])->name('materials.import');
@@ -143,6 +144,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/{id}', [LineController::class, 'update'])->name('update');
         Route::delete('/{id}', [LineController::class, 'destroy'])->name('destroy');
         Route::post('/{id}/reset', [LineController::class, 'resetMetrics'])->name('reset');
+        Route::post('/{id}/schedule', [LineController::class, 'updateSchedule'])->name('update-schedule');
         Route::post('/line-stop', [LineController::class, 'lineStop'])->name('line-stop');
         Route::post('/scan-qr', [LineController::class, 'scanQrCode'])->name('scan-qr');
         Route::post('/reports/{reportId}/complete', [LineController::class, 'quickComplete'])->name('reports.complete');

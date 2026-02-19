@@ -38,6 +38,7 @@ class ESP32ApiController extends Controller
                     'production_started_at' => now(),
                     'relay_status' => $validated['relay_status'] ?? false,
                     'error_b' => $validated['error_B'] ?? false,
+                    'reset_requested' => false,
                     'is_paused' => false,
                     'paused_at' => null,
                     'total_pause_seconds' => 0,
@@ -71,6 +72,8 @@ class ESP32ApiController extends Controller
                 ], 200);
             }
 
+            $resetRequested = $oldDevice->reset_requested ?? false;
+
             $counterChanged = $oldDevice->counter_a != $validated['counter_a'] ||
                 $oldDevice->counter_b != ($validated['counter_b'] ?? 0);
 
@@ -93,17 +96,18 @@ class ESP32ApiController extends Controller
                 }
             }
 
-            if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
-                $this->saveProductionHistory($oldDevice);
+                if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
+                    $this->saveProductionHistory($oldDevice);
 
-                $oldDevice->autoStopLineOperation();
+                    $oldDevice->refresh();
+                    $oldDevice->autoStopLineOperation();
 
-                $productionStartedAt = now();
-                $totalPauseSeconds = 0;
-                $isPaused = false;
-                $pausedAt = null;
-                $lastUpdate = now();
-            } elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
+                    $productionStartedAt = now();
+                    $totalPauseSeconds = 0;
+                    $isPaused = false;
+                    $pausedAt = null;
+                    $lastUpdate = now();
+                } elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
                 $oldDevice->autoStartLineOperation();
 
                 if ($oldDevice->cycle_time > 0) {
@@ -135,6 +139,7 @@ class ESP32ApiController extends Controller
                 'paused_at' => $pausedAt,
                 'total_pause_seconds' => $totalPauseSeconds,
                 'last_update' => $lastUpdate,
+                'reset_requested' => false,
             ]);
 
             if ($shouldLog) {
@@ -166,7 +171,7 @@ class ESP32ApiController extends Controller
                 'message' => "Status for {$validated['device_id']} updated successfully",
                 'new_max_count' => $oldDevice->max_count,
                 'new_cycle_time' => $oldDevice->cycle_time,
-                'reset_counter' => false,
+                'reset_counter' => $resetRequested,
             ], 200);
 
         } catch (\Illuminate\Validation\ValidationException $e) {

@@ -33,6 +33,9 @@ class Line extends Model
         'parent_line_id',
         'current_period_start',
         'area_id',
+        'schedule_start_time',
+        'schedule_end_time',
+        'schedule_breaks',
     ];
 
     protected $casts = [
@@ -44,7 +47,8 @@ class Line extends Model
         'is_archived' => 'boolean',
         'period_start' => 'date',
         'period_end' => 'date',
-        'current_period_start' => 'datetime'
+        'current_period_start' => 'datetime',
+        'schedule_breaks' => 'array',
     ];
 
     protected $appends = ['average_mttr', 'average_mtbf'];
@@ -239,14 +243,21 @@ class Line extends Model
         });
     }
 
-    // ← TAMBAHAN: Method untuk auto archive & reset
     public function autoArchiveAndReset(string $reason = 'Auto-reset'): void
     {
         DB::transaction(function () use ($reason) {
             $now = Carbon::now();
+
+            $this->operations()
+                ->whereIn('status', ['running', 'paused'])
+                ->update([
+                    'status' => 'stopped',
+                    'stopped_at' => $now,
+                    'stopped_by' => 'System (autoArchiveAndReset)',
+                ]);
+
             $timestamp = $now->format('YmdHis');
 
-            // Archive line
             $archivedLine = $this->replicate();
             $archivedLine->is_archived = true;
             $archivedLine->period_start = $this->current_period_start ?? $this->created_at;
@@ -258,7 +269,6 @@ class Line extends Model
             $archivedLine->description = $originalDesc . "\n\n[ARCHIVED - " . $now->format('d M Y H:i:s') . "]\nAlasan: " . $reason;
             $archivedLine->save();
 
-            // Archive machines
             foreach ($this->machines()->where('is_archived', false)->get() as $machine) {
                 $archivedMachine = $machine->replicate();
                 $archivedMachine->is_archived = true;
@@ -270,7 +280,6 @@ class Line extends Model
                 $archivedMachine->save();
             }
 
-            // Reset metrics
             $this->update([
                 'total_operation_hours' => 0,
                 'total_repair_hours' => 0,
@@ -290,7 +299,7 @@ class Line extends Model
                 'total_failures' => 0,
                 'mtbf_hours' => null,
                 'mttr_hours' => null,
-                'current_period_start' => $now
+                'current_period_start' => $now,
             ]);
         });
     }

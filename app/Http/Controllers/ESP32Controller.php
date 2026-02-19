@@ -125,14 +125,15 @@ class ESP32Controller extends Controller
                 'is_paused' => false,
                 'paused_at' => null,
                 'total_pause_seconds' => 0,
+                'reset_requested' => true,
             ]);
 
             return back()->with('success', 'Counter berhasil direset ke 0');
         }
 
         $loadingTime = $validated['max_count'] * $validated['cycle_time'];
-        $productionStartedAt = $device->production_started_at;
 
+        $productionStartedAt = $device->production_started_at;
         if ($device->counter_a > 0) {
             $netElapsedSeconds = $device->counter_a * $validated['cycle_time'];
             $productionStartedAt = now()->subSeconds($netElapsedSeconds + $device->total_pause_seconds);
@@ -157,6 +158,28 @@ class ESP32Controller extends Controller
         $device->update($updateData);
 
         return back()->with('success', 'Settings berhasil diupdate');
+    }
+
+    public function updateSchedule(Request $request)
+    {
+        $validated = $request->validate([
+            'device_id' => 'required|string|exists:esp32_devices,device_id',
+            'schedule_start_time' => 'required|date_format:H:i',
+            'schedule_end_time' => 'required|date_format:H:i',
+            'schedule_breaks' => 'nullable|array',
+            'schedule_breaks.*.start' => 'required_with:schedule_breaks|date_format:H:i',
+            'schedule_breaks.*.end' => 'required_with:schedule_breaks|date_format:H:i',
+        ]);
+
+        $device = Esp32Device::where('device_id', $validated['device_id'])->firstOrFail();
+
+        $device->update([
+            'schedule_start_time' => $validated['schedule_start_time'] . ':00',
+            'schedule_end_time' => $validated['schedule_end_time'] . ':00',
+            'schedule_breaks' => $validated['schedule_breaks'] ?? [],
+        ]);
+
+        return back()->with('success', 'Schedule berhasil diupdate');
     }
 
     private function saveProductionHistory($device)
