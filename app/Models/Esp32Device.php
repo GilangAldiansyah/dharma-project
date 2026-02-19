@@ -196,7 +196,7 @@ class Esp32Device extends Model
         return $operation;
     }
 
-   public function autoStopLineOperation(): void
+  public function autoStopLineOperation(): void
 {
     if (!$this->line_id) {
         return;
