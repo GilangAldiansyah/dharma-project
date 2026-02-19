@@ -10,6 +10,7 @@ use App\Models\MaintenanceReport;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OeeController extends Controller
 {
@@ -156,140 +157,164 @@ class OeeController extends Controller
         }
 
         $periods = $this->generateDailyPeriods($startDate, $endDate);
+        $allShifts = \App\Helpers\DateHelper::getAllShifts();
+
+        $shiftsToProcess = $shiftFilter
+            ? collect($allShifts)->filter(fn($s) => $s['value'] == $shiftFilter)->values()
+            : collect($allShifts);
+
         $oeeRecords = collect();
 
         foreach ($periods as $period) {
-            $productionQuery = Esp32ProductionHistory::where('device_id', $esp32Device->device_id)
-                ->where(function($q) use ($period) {
-                    $q->whereBetween('production_started_at', [$period['start'], $period['end']])
-                      ->orWhereBetween('production_finished_at', [$period['start'], $period['end']])
-                      ->orWhere(function($q2) use ($period) {
-                          $q2->where('production_started_at', '<=', $period['start'])
-                             ->where('production_finished_at', '>=', $period['end']);
-                      });
+            foreach ($shiftsToProcess as $shiftInfo) {
+                $shift = $shiftInfo['value'];
+
+                $productionHistories = Esp32ProductionHistory::where('device_id', $esp32Device->device_id)
+                    ->where('shift', $shift)
+                    ->where('production_started_at', '<=', $period['end'])
+                    ->where('production_finished_at', '>=', $period['start'])
+                    ->get();
+
+                if ($productionHistories->isEmpty()) {
+                    continue;
+                }
+
+                $totalCounterA = $productionHistories->sum('total_counter_a');
+                $totalReject = $productionHistories->sum('total_reject');
+                $targetProduction = $productionHistories->sum('max_count');
+                $avgCycleTime = $productionHistories->avg('cycle_time') ?? 0;
+
+                if ($totalCounterA == 0) {
+                    continue;
+                }
+
+                $goodCount = $totalCounterA - $totalReject;
+
+                $operations = LineOperation::where('line_id', $line->id)
+                    ->where('status', 'stopped')
+                    ->where('shift', $shift)
+                    ->where('started_at', '<=', $period['end'])
+                    ->where('stopped_at', '>=', $period['start'])
+                    ->get();
+
+                $operationTimeMinutes = $operations->sum(function ($op) use ($period) {
+                    $actualStart = $op->started_at->lt($period['start'])
+                        ? $period['start']
+                        : $op->started_at;
+
+                    $actualEnd = $op->stopped_at->gt($period['end'])
+                        ? $period['end']
+                        : $op->stopped_at;
+
+                    return $actualStart->diffInMinutes($actualEnd);
                 });
 
-            if ($shiftFilter) {
-                $productionQuery->where('shift', $shiftFilter);
-            }
+                $operationTimeHours = $operationTimeMinutes / 60;
 
-            $productionHistories = $productionQuery->get();
+                $totalPauseMinutes = $operations->sum('total_pause_minutes');
 
-            if ($productionHistories->isEmpty()) {
-                continue;
-            }
+                if ($operationTimeHours == 0 && $productionHistories->isNotEmpty()) {
+                    Log::warning("No line_operations data, using production time as fallback", [
+                        'line_id' => $line->id,
+                        'period_date' => $period['start']->toDateString(),
+                        'shift' => $shift,
+                    ]);
 
-            $totalCounterA = $productionHistories->sum('total_counter_a');
-            $totalReject = $productionHistories->sum('total_reject');
-            $targetProduction = $productionHistories->sum('max_count');
-            $avgCycleTime = $productionHistories->avg('cycle_time') ?? 0;
+                    foreach ($productionHistories as $prod) {
+                        $prodStart = Carbon::parse($prod->production_started_at);
+                        $prodEnd = Carbon::parse($prod->production_finished_at);
 
-            if ($totalCounterA == 0) {
-                continue;
-            }
+                        $actualStart = $prodStart->lt($period['start'])
+                            ? $period['start']
+                            : $prodStart;
 
-            $goodCount = $totalCounterA - $totalReject;
+                        $actualEnd = $prodEnd->gt($period['end'])
+                            ? $period['end']
+                            : $prodEnd;
 
-            $operationsQuery = LineOperation::where('line_id', $line->id)
-                ->where('status', 'stopped')
-                ->where(function($q) use ($period) {
-                    $q->whereBetween('started_at', [$period['start'], $period['end']])
-                      ->orWhereBetween('stopped_at', [$period['start'], $period['end']])
-                      ->orWhere(function($q2) use ($period) {
-                          $q2->where('started_at', '<=', $period['start'])
-                             ->where('stopped_at', '>=', $period['end']);
-                      });
+                        $operationTimeMinutes += $actualStart->diffInMinutes($actualEnd);
+                    }
+
+                    $operationTimeHours = $operationTimeMinutes / 60;
+
+                    Log::info("Using production-based operation time", [
+                        'operation_hours' => $operationTimeHours,
+                        'shift' => $shift,
+                    ]);
+                }
+
+                if ($operationTimeHours == 0) {
+                    Log::warning("Skipping record due to zero operation time", [
+                        'line_id' => $line->id,
+                        'period_date' => $period['start']->toDateString(),
+                        'shift' => $shift,
+                    ]);
+                    continue;
+                }
+
+                $maintenanceReports = MaintenanceReport::query()
+                    ->whereHas('machine', function ($query) use ($line) {
+                        $query->where('line_id', $line->id)
+                            ->where('is_archived', false);
+                    })
+                    ->where('status', 'Selesai')
+                    ->whereNotNull('completed_at')
+                    ->where('shift', $shift)
+                    ->whereBetween('completed_at', [$period['start'], $period['end']])
+                    ->get();
+
+                $downtimeHours = $maintenanceReports->sum(function ($report) {
+                    return round($report->repair_duration_minutes * 60) / 3600;
                 });
 
-            if ($shiftFilter) {
-                $operationsQuery->where('shift', $shiftFilter);
+                $pauseHours = $totalPauseMinutes / 60;
+                $uptimeHours = max(0, $operationTimeHours - $downtimeHours - $pauseHours);
+
+                $availability = $operationTimeHours > 0
+                    ? ($uptimeHours / $operationTimeHours) * 100
+                    : 0;
+
+                $uptimeSeconds = $uptimeHours * 3600;
+                $performance = $uptimeSeconds > 0 && $avgCycleTime > 0
+                    ? (($avgCycleTime * $totalCounterA) / $uptimeSeconds) * 100
+                    : 0;
+
+                $quality = $totalCounterA > 0
+                    ? ($goodCount / $totalCounterA) * 100
+                    : 0;
+
+                $achievementRate = $targetProduction > 0
+                    ? ($totalCounterA / $targetProduction) * 100
+                    : 0;
+
+                $oee = ($availability * $performance * $quality) / 10000;
+
+                $totalFailures = $maintenanceReports->count();
+
+                $oeeRecords->push((object) [
+                    'id' => null,
+                    'line_id' => $line->id,
+                    'period_date' => $period['start']->toDateString(),
+                    'period_start' => $period['start'],
+                    'period_end' => $period['end'],
+                    'shift' => $shift,
+                    'shift_label' => \App\Helpers\DateHelper::getShiftLabel($shift),
+                    'operation_time_hours' => round($operationTimeHours, 4),
+                    'uptime_hours' => round($uptimeHours, 4),
+                    'downtime_hours' => round($downtimeHours + $pauseHours, 4),
+                    'total_counter_a' => $totalCounterA,
+                    'target_production' => $targetProduction,
+                    'total_reject' => $totalReject,
+                    'good_count' => $goodCount,
+                    'avg_cycle_time' => round($avgCycleTime, 4),
+                    'availability' => round($availability, 2),
+                    'performance' => round($performance, 2),
+                    'quality' => round($quality, 2),
+                    'achievement_rate' => round($achievementRate, 2),
+                    'oee' => round($oee, 2),
+                    'total_failures' => $totalFailures,
+                ]);
             }
-
-            $operations = $operationsQuery->get();
-
-            $operationTimeMinutes = $operations->sum(function($op) use ($period) {
-                $actualStart = max($op->started_at, $period['start']);
-                $actualEnd = min($op->stopped_at, $period['end']);
-                return $actualStart->diffInMinutes($actualEnd);
-            });
-
-            $operationTimeHours = $operationTimeMinutes / 60;
-
-            $totalPauseMinutes = $operations->sum('total_pause_minutes');
-
-            if ($operationTimeHours == 0) {
-                continue;
-            }
-
-            $maintenanceQuery = MaintenanceReport::query()
-                ->whereHas('machine', function ($query) use ($line) {
-                    $query->where('line_id', $line->id)
-                        ->where('is_archived', false);
-                })
-                ->where('status', 'Selesai')
-                ->whereNotNull('completed_at')
-                ->whereBetween('completed_at', [$period['start'], $period['end']]);
-
-            if ($shiftFilter) {
-                $maintenanceQuery->where('shift', $shiftFilter);
-            }
-
-            $maintenanceReports = $maintenanceQuery->get();
-
-            $downtimeHours = $maintenanceReports->sum(function($report) {
-                return round($report->repair_duration_minutes * 60) / 3600;
-            });
-
-            $pauseHours = $totalPauseMinutes / 60;
-            $uptimeHours = max(0, $operationTimeHours - $downtimeHours - $pauseHours);
-
-            $availability = $operationTimeHours > 0
-                ? ($uptimeHours / $operationTimeHours) * 100
-                : 0;
-
-            $uptimeSeconds = $uptimeHours * 3600;
-            $performance = $uptimeSeconds > 0 && $avgCycleTime > 0
-                ? (($avgCycleTime * $totalCounterA) / $uptimeSeconds) * 100
-                : 0;
-
-            $quality = $totalCounterA > 0
-                ? ($goodCount / $totalCounterA) * 100
-                : 0;
-
-            $achievementRate = $targetProduction > 0
-                ? ($totalCounterA / $targetProduction) * 100
-                : 0;
-
-            $oee = ($availability * $performance * $quality) / 10000;
-
-            $totalFailures = $maintenanceReports->count();
-
-            $firstProduction = $productionHistories->sortBy('production_started_at')->first();
-            $shift = $shiftFilter ?? ($firstProduction->shift ?? \App\Helpers\DateHelper::getCurrentShift($firstProduction->production_started_at));
-
-            $oeeRecords->push((object)[
-                'id' => null,
-                'line_id' => $line->id,
-                'period_date' => $period['start']->toDateString(),
-                'period_start' => $period['start'],
-                'period_end' => $period['end'],
-                'shift' => $shift,
-                'shift_label' => \App\Helpers\DateHelper::getShiftLabel($shift),
-                'operation_time_hours' => round($operationTimeHours, 4),
-                'uptime_hours' => round($uptimeHours, 4),
-                'downtime_hours' => round($downtimeHours + $pauseHours, 4),
-                'total_counter_a' => $totalCounterA,
-                'target_production' => $targetProduction,
-                'total_reject' => $totalReject,
-                'good_count' => $goodCount,
-                'avg_cycle_time' => round($avgCycleTime, 4),
-                'availability' => round($availability, 2),
-                'performance' => round($performance, 2),
-                'quality' => round($quality, 2),
-                'achievement_rate' => round($achievementRate, 2),
-                'oee' => round($oee, 2),
-                'total_failures' => $totalFailures,
-            ]);
         }
 
         return $oeeRecords->sortByDesc('period_date')->values();
@@ -301,10 +326,14 @@ class OeeController extends Controller
         $currentDate = $startDate->copy();
 
         while ($currentDate <= $endDate) {
+            $periodStart = $currentDate->copy()->setTime(7, 0, 0);
+            $periodEnd = $currentDate->copy()->addDay()->setTime(6, 59, 59);
+
             $periods[] = [
-                'start' => $currentDate->copy()->startOfDay(),
-                'end' => $currentDate->copy()->endOfDay(),
+                'start' => $periodStart,
+                'end' => $periodEnd,
             ];
+
             $currentDate->addDay();
         }
 
@@ -376,7 +405,7 @@ class OeeController extends Controller
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ];
 
-        $callback = function() use ($oeeRecords) {
+        $callback = function () use ($oeeRecords) {
             $file = fopen('php://output', 'w');
 
             fputcsv($file, [

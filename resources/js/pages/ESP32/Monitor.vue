@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { Search, Activity, AlertCircle, Eye, RefreshCw, Settings, Maximize2, Minimize2, Sun, Moon, Zap, TrendingUp, PauseCircle, Link as LinkIcon } from 'lucide-vue-next';
+import { Search, Activity, AlertCircle, Eye, RefreshCw, Settings, Maximize2, Minimize2, Sun, Moon, Zap, TrendingUp, PauseCircle } from 'lucide-vue-next';
 
 interface Device {
     id: number;
@@ -28,6 +28,9 @@ interface Device {
     paused_at: string | null;
     total_pause_seconds: number;
     line_id?: number | null;
+    schedule_start_time: string;
+    schedule_end_time: string;
+    schedule_breaks: Array<{ start: string; end: string }>;
     area?: {
         id: number;
         name: string;
@@ -81,12 +84,10 @@ const lastActivityTime = ref(Date.now());
 const isFullscreen = ref(false);
 const fullscreenDarkMode = ref(true);
 
-const deviceSchedules = ref<Record<string, { startTime: string; endTime: string; breaks: Array<{ start: string; end: string }> }>>({});
-
 const stats = computed(() => ({
     total: props.devices.length,
     active: props.devices.filter(d => isDeviceActive(d)).length,
-    errors: props.devices.filter(d => d.error_b).length,
+    errors: props.devices.filter(d => d.counter_a > d.max_count).length,
     delayed: props.devices.filter(d => d.is_delayed && !d.is_completed).length,
 }));
 
@@ -98,9 +99,16 @@ const isDeviceActive = (device: Device): boolean => {
 };
 
 const getDeviceStatus = (device: Device): { label: string; class: string } => {
+    if (device.counter_a > device.max_count) {
+        return {
+            label: 'Over Count',
+            class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+        };
+    }
+
     if (device.error_b) {
         return {
-            label: 'Error',
+            label: 'Over Count',
             class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
         };
     }
@@ -118,24 +126,6 @@ const getDeviceStatus = (device: Device): { label: string; class: string } => {
     };
 };
 
-const loadDeviceSchedule = (deviceId: string) => {
-    const saved = localStorage.getItem(`schedule_${deviceId}`);
-    if (saved) {
-        const data = JSON.parse(saved);
-        deviceSchedules.value[deviceId] = {
-            startTime: data.startTime || '07:00',
-            endTime: data.endTime || '14:00',
-            breaks: data.breaks || []
-        };
-    } else {
-        deviceSchedules.value[deviceId] = {
-            startTime: '07:00',
-            endTime: '14:00',
-            breaks: []
-        };
-    }
-};
-
 const parseTimeToDate = (timeStr: string, baseDate: Date = new Date()) => {
     const [hours, minutes] = timeStr.split(':').map(Number);
     const date = new Date(baseDate);
@@ -148,17 +138,12 @@ const getTimelineData = (device: Device) => {
         return null;
     }
 
-    if (!deviceSchedules.value[device.device_id]) {
-        loadDeviceSchedule(device.device_id);
-    }
-
-    const schedule = deviceSchedules.value[device.device_id];
     const actualStartTime = new Date(device.production_started_at);
     const baseDate = new Date(actualStartTime);
     baseDate.setHours(0, 0, 0, 0);
 
-    const scheduleStart = parseTimeToDate(schedule.startTime, baseDate);
-    const scheduleEnd = parseTimeToDate(schedule.endTime, baseDate);
+    const scheduleStart = parseTimeToDate(device.schedule_start_time.substring(0, 5), baseDate);
+    const scheduleEnd = parseTimeToDate(device.schedule_end_time.substring(0, 5), baseDate);
     const currentTime = new Date();
     const lastUpdateTime = new Date(device.last_update);
 
@@ -183,7 +168,7 @@ const getTimelineData = (device: Device) => {
 
     const barWidth = currentPercentage - productionStartPercentage;
 
-    const breaks = schedule.breaks.map(brk => {
+    const breaks = (device.schedule_breaks || []).map(brk => {
         const breakStart = parseTimeToDate(brk.start, baseDate);
         const breakEnd = parseTimeToDate(brk.end, baseDate);
 
@@ -225,7 +210,6 @@ const getTimelineData = (device: Device) => {
 const formatTimeOnly = (date: Date) => {
     return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 };
-
 const search = () => {
     router.get('/esp32/monitor', {
         search: searchQuery.value,
@@ -419,10 +403,6 @@ onMounted(() => {
     window.addEventListener('keydown', resetActivity);
     window.addEventListener('click', resetActivity);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    props.devices.forEach(device => {
-        loadDeviceSchedule(device.device_id);
-    });
 });
 
 onUnmounted(() => {
@@ -497,7 +477,7 @@ const toggleAutoRefresh = () => {
                 <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-red-500 hover:shadow-xl transition-all duration-300">
                     <div class="flex justify-between items-start">
                         <div>
-                            <p class="text-sm text-gray-600 dark:text-gray-400 font-medium">Errors</p>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 font-medium">Over Count</p>
                             <p class="text-3xl font-bold text-red-600 mt-1">{{ stats.errors }}</p>
                         </div>
                         <div class="p-3 bg-red-100 dark:bg-red-900/30 rounded-xl">
@@ -545,10 +525,6 @@ const toggleAutoRefresh = () => {
                             <h3 class="text-xl font-bold text-gray-900 dark:text-white">{{ device.device_id }}</h3>
                             <div class="flex items-center gap-2 mt-1">
                                 <p v-if="device.area" class="text-xs text-blue-600 dark:text-blue-400 font-semibold">{{ device.area.name }}</p>
-                                <p v-if="device.line" class="text-xs text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1">
-                                    <LinkIcon class="w-3 h-3" />
-                                    {{ device.line.line_name }}
-                                </p>
                             </div>
                             <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                 <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
@@ -737,10 +713,6 @@ const toggleAutoRefresh = () => {
     <div v-else :class="['fixed inset-0 overflow-auto', fullscreenDarkMode ? 'bg-gray-900' : 'bg-gray-50']">
         <div class="min-h-screen p-8">
             <div class="flex justify-between items-center mb-8">
-                <h1 :class="['text-4xl font-bold flex items-center gap-3', fullscreenDarkMode ? 'text-white' : 'text-gray-900']">
-                    <Activity class="w-10 h-10 text-blue-500" />
-                    Robot Monitor Display
-                </h1>
                 <div class="flex gap-3">
                     <div :class="['px-5 py-3 rounded-xl font-semibold', fullscreenDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900 shadow-lg']">
                         Auto: {{ currentRefreshInterval / 1000 }}s
@@ -772,15 +744,11 @@ const toggleAutoRefresh = () => {
                             <h3 :class="['text-2xl font-bold', fullscreenDarkMode ? 'text-white' : 'text-gray-900']">{{ device.device_id }}</h3>
                             <div class="flex items-center gap-2 mt-1">
                                 <p v-if="device.area" :class="['text-sm font-semibold', fullscreenDarkMode ? 'text-blue-400' : 'text-blue-600']">{{ device.area.name }}</p>
-                                <p v-if="device.line" :class="['text-sm font-semibold flex items-center gap-1', fullscreenDarkMode ? 'text-purple-400' : 'text-purple-600']">
-                                    <LinkIcon class="w-3 h-3" />
-                                    {{ device.line.line_code }}
-                                </p>
                             </div>
                             <p :class="['text-sm mt-1', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">{{ formatLastUpdate(device.last_update) }}</p>
                         </div>
-                        <div :class="['px-3 py-1.5 rounded-lg text-sm font-bold', device.error_b ? 'bg-red-500 text-white' : isDeviceActive(device) ? 'bg-green-500 text-white' : 'bg-gray-500 text-white']">
-                            {{ device.error_b ? 'Error' : isDeviceActive(device) ? 'Active' : 'Idle' }}
+                        <div :class="['px-3 py-1.5 rounded-lg text-sm font-bold', device.counter_a > device.max_count ? 'bg-red-500 text-white' : device.error_b ? 'bg-red-500 text-white' : isDeviceActive(device) ? 'bg-green-500 text-white' : 'bg-gray-500 text-white']">
+                            {{ device.counter_a > device.max_count ? 'Over Count' : device.error_b ? 'Over Count' : isDeviceActive(device) ? 'Active' : 'Idle' }}
                         </div>
                     </div>
 
@@ -810,120 +778,12 @@ const toggleAutoRefresh = () => {
                                 <div class="h-full bg-gradient-to-r from-purple-400 to-pink-500 transition-all duration-500" :style="{ width: `${getProgressPercentage(device.counter_b, device.max_stroke > 0 ? device.max_stroke : device.max_count)}%` }"></div>
                             </div>
                         </div>
-
-                        <div v-if="getTimelineData(device)">
-                            <div :class="['flex justify-between mb-2', fullscreenDarkMode ? 'text-gray-300' : 'text-gray-700']">
-                                <span class="font-semibold text-sm">Timeline</span>
-                                <span :class="['font-bold text-sm', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-400' : device.delay_seconds > 0 ? 'text-red-400' : 'text-blue-400']">
-                                    {{ formatDelayTime(device.delay_seconds, device.is_completed, device.cycle_time) }}
-                                </span>
-                            </div>
-                            <div class="space-y-1">
-                                <div :class="['relative w-full h-4 rounded-full overflow-visible', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-200']">
-                                    <div v-for="(brk, idx) in getTimelineData(device)!.breaks" :key="`break-${idx}`"
-                                        :class="['absolute h-full rounded-full', fullscreenDarkMode ? 'bg-orange-800' : 'bg-orange-200']"
-                                        :style="{
-                                            left: `${brk.startPercentage}%`,
-                                            width: `${brk.width}%`
-                                        }"
-                                    ></div>
-
-                                    <div
-                                        :class="['absolute h-full rounded-full transition-all duration-500', getTimelineData(device)!.isOvertime ? 'bg-gradient-to-r from-orange-400 to-red-500' : 'bg-gradient-to-r from-green-400 to-emerald-500']"
-                                        :style="{
-                                            left: `${getTimelineData(device)!.productionStartPercentage}%`,
-                                            width: `${getTimelineData(device)!.barWidth}%`
-                                        }"
-                                    ></div>
-
-                                    <div class="absolute top-0 left-0 h-full w-1 bg-gray-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10">
-                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                            <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                <div class="font-medium">Schedule Start</div>
-                                                <div class="text-[10px] text-gray-300">{{ formatTimeOnly(getTimelineData(device)!.scheduleStart) }}</div>
-                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                    <div class="border-4 border-transparent border-t-gray-900"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="absolute top-0 right-0 h-full w-1 bg-gray-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10">
-                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                            <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                <div class="font-medium">Schedule End</div>
-                                                <div class="text-[10px] text-gray-300">{{ formatTimeOnly(getTimelineData(device)!.scheduleEnd) }}</div>
-                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                    <div class="border-4 border-transparent border-t-gray-900"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="absolute top-0 h-full w-1 bg-green-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                        :style="{ left: `${getTimelineData(device)!.productionStartPercentage}%` }">
-                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                            <div class="bg-green-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                <div class="font-medium">Actual Start</div>
-                                                <div class="text-[10px] text-green-300">{{ formatTimeOnly(getTimelineData(device)!.actualStartTime) }}</div>
-                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                    <div class="border-4 border-transparent border-t-green-900"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div v-if="!getTimelineData(device)!.isActive" class="absolute top-0 h-full w-1 bg-red-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                        :style="{ left: `${getTimelineData(device)!.lastActivityPercentage}%` }">
-                                        <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                            <div class="bg-red-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                <div class="font-medium">Last Activity</div>
-                                                <div class="text-[10px] text-red-300">{{ formatTimeOnly(getTimelineData(device)!.lastUpdateTime) }}</div>
-                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                    <div class="border-4 border-transparent border-t-red-900"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div v-for="(brk, idx) in getTimelineData(device)!.breaks" :key="`break-marker-${idx}`">
-                                        <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                            :style="{ left: `${brk.startPercentage}%` }">
-                                            <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                                <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                    <div class="font-medium">Break {{ idx + 1 }} Start</div>
-                                                    <div class="text-[10px] text-orange-300">{{ formatTimeOnly(brk.startTime) }}</div>
-                                                    <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                        <div class="border-4 border-transparent border-t-orange-900"></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                            :style="{ left: `${brk.endPercentage}%` }">
-                                            <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
-                                                <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
-                                                    <div class="font-medium">Break {{ idx + 1 }} End</div>
-                                                    <div class="text-[10px] text-orange-300">{{ formatTimeOnly(brk.endTime) }}</div>
-                                                    <div class="absolute top-full left-1/2 transform -translate-x-1/2">
-                                                        <div class="border-4 border-transparent border-t-orange-900"></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div :class="['flex justify-between text-[10px] font-medium px-1', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">
-                                    <span>{{ formatTimeOnly(getTimelineData(device)!.scheduleStart) }}</span>
-                                    <span v-if="!device.is_completed && getTimelineData(device)!.isActive" :class="['font-bold', fullscreenDarkMode ? 'text-blue-400' : 'text-blue-600']">Now</span>
-                                    <span v-if="!device.is_completed && !getTimelineData(device)!.isActive" :class="['font-bold', fullscreenDarkMode ? 'text-red-400' : 'text-red-600']">Idle</span>
-                                    <span>{{ formatTimeOnly(getTimelineData(device)!.scheduleEnd) }}</span>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
     <div v-if="showSettingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showSettingsModal = false">
         <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-96 shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Settings - {{ selectedDevice?.device_id }}</h3>

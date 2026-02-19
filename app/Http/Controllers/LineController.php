@@ -4,6 +4,7 @@ use App\Models\Line;
 use App\Models\Machine;
 use App\Models\MaintenanceReport;
 use App\Models\LineOperation;
+use App\Services\LineScheduleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,13 @@ use Carbon\Carbon;
 
 class LineController extends Controller
 {
+    protected $scheduleService;
+
+    public function __construct(LineScheduleService $scheduleService)
+    {
+        $this->scheduleService = $scheduleService;
+    }
+
     public function index(Request $request): Response
     {
         $query = Line::where('is_archived', false)
@@ -53,6 +61,21 @@ class LineController extends Controller
                     ->withQueryString();
 
         $lines->getCollection()->transform(function ($line) {
+            $this->scheduleService->checkAndApplySchedule($line);
+
+            $machinesCount = $line->machines_count;
+            $maintenanceReportsCount = $line->maintenance_reports_count;
+            $operationsCount = $line->operations_count;
+
+            $line->refresh();
+            $line->load(['machines' => function($q) {
+                $q->where('is_archived', false);
+            }, 'currentOperation']);
+
+            $line->machines_count = $machinesCount;
+            $line->maintenance_reports_count = $maintenanceReportsCount;
+            $line->operations_count = $operationsCount;
+
             return [
                 'id' => $line->id,
                 'line_code' => $line->line_code,
@@ -78,15 +101,20 @@ class LineController extends Controller
                 'total_repair_hours' => (float) ($line->total_repair_hours ?? 0),
                 'uptime_hours' => (float) ($line->uptime_hours ?? 0),
                 'total_failures' => (int) ($line->total_failures ?? 0),
+                'schedule_start_time' => $line->schedule_start_time,
+                'schedule_end_time' => $line->schedule_end_time,
+                'schedule_breaks' => $line->schedule_breaks ?? [],
                 'current_operation' => $line->currentOperation ? [
                     'id' => $line->currentOperation->id,
                     'operation_number' => $line->currentOperation->operation_number,
                     'started_at' => $line->currentOperation->started_at,
+                    'paused_at' => $line->currentOperation->paused_at,
                     'status' => $line->currentOperation->status,
                     'total_pause_minutes' => $line->currentOperation->total_pause_minutes ?? 0,
                     'formatted_pause_duration' => $line->currentOperation->formatted_pause_duration,
                     'shift' => $line->currentOperation->shift,
                     'shift_label' => $line->currentOperation->shift_label,
+                    'is_auto_paused' => $line->currentOperation->is_auto_paused ?? false,
                 ] : null,
                 'machines' => $line->machines->map(function ($machine) {
                     return [
@@ -134,9 +162,15 @@ class LineController extends Controller
             'line_name' => 'required|string|max:255',
             'plant' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'area_id' => 'nullable | integer | exists:areas,id',
-            'new_area_name' => 'nullable|string|max:255'
+            'area_id' => 'nullable|integer|exists:areas,id',
+            'new_area_name' => 'nullable|string|max:255',
+            'schedule_start_time' => 'nullable|date_format:H:i',
+            'schedule_end_time' => 'nullable|date_format:H:i',
+            'schedule_breaks' => 'nullable|array',
+            'schedule_breaks.*.start' => 'required_with:schedule_breaks|date_format:H:i',
+            'schedule_breaks.*.end' => 'required_with:schedule_breaks|date_format:H:i',
         ]);
+
         if (isset($validated['new_area_name']) && $validated['new_area_name']) {
             $area = \App\Models\Area::firstOrCreate(['name' => $validated['new_area_name']]);
             $validated['area_id'] = $area->id;
@@ -144,9 +178,16 @@ class LineController extends Controller
         unset($validated['new_area_name']);
 
         $validated['line_code'] = Line::generateLineCode($validated['plant']);
-        $validated['qr_code']   = $validated['line_code'];
+        $validated['qr_code'] = $validated['line_code'];
         $validated['status'] = 'stopped';
         $validated['is_archived'] = false;
+
+        if (isset($validated['schedule_start_time'])) {
+            $validated['schedule_start_time'] = $validated['schedule_start_time'] . ':00';
+        }
+        if (isset($validated['schedule_end_time'])) {
+            $validated['schedule_end_time'] = $validated['schedule_end_time'] . ':00';
+        }
 
         Line::create($validated);
 
@@ -174,6 +215,30 @@ class LineController extends Controller
         $line->update($validated);
 
         return back()->with('success', 'Line berhasil diupdate!');
+    }
+
+    public function updateSchedule(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'schedule_start_time' => 'required|date_format:H:i',
+            'schedule_end_time' => 'required|date_format:H:i',
+            'schedule_breaks' => 'nullable|array',
+            'schedule_breaks.*.start' => 'required_with:schedule_breaks|date_format:H:i',
+            'schedule_breaks.*.end' => 'required_with:schedule_breaks|date_format:H:i',
+        ]);
+
+        $line = Line::where('is_archived', false)->findOrFail($id);
+
+        $line->update([
+            'schedule_start_time' => $validated['schedule_start_time'] . ':00',
+            'schedule_end_time' => $validated['schedule_end_time'] . ':00',
+            'schedule_breaks' => $validated['schedule_breaks'] ?? [],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Schedule berhasil diupdate',
+        ]);
     }
 
     public function destroy(int $id)
@@ -688,6 +753,7 @@ class LineController extends Controller
             ],
         ]);
     }
+
     public function show(int $id): Response
     {
         $line = Line::where('is_archived', false)
@@ -710,6 +776,9 @@ class LineController extends Controller
                 'total_line_stops' => (int) ($line->total_line_stops ?? 0),
                 'average_mtbf' => $line->average_mtbf,
                 'average_mttr' => $line->average_mttr,
+                'schedule_start_time' => $line->schedule_start_time,
+                'schedule_end_time' => $line->schedule_end_time,
+                'schedule_breaks' => $line->schedule_breaks ?? [],
                 'area' => $line->area ? [
                     'id' => $line->area->id,
                     'name' => $line->area->name,
@@ -729,5 +798,5 @@ class LineController extends Controller
                 }),
             ],
         ]);
-}
+    }
 }

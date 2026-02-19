@@ -38,6 +38,7 @@ class ESP32ApiController extends Controller
                     'production_started_at' => now(),
                     'relay_status' => $validated['relay_status'] ?? false,
                     'error_b' => $validated['error_B'] ?? false,
+                    'reset_requested' => false,
                     'is_paused' => false,
                     'paused_at' => null,
                     'total_pause_seconds' => 0,
@@ -71,6 +72,8 @@ class ESP32ApiController extends Controller
                 ], 200);
             }
 
+            $resetRequested = $oldDevice->reset_requested ?? false;
+
             $counterChanged = $oldDevice->counter_a != $validated['counter_a'] ||
                 $oldDevice->counter_b != ($validated['counter_b'] ?? 0);
 
@@ -96,6 +99,7 @@ class ESP32ApiController extends Controller
             if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
                 $this->saveProductionHistory($oldDevice);
 
+                $oldDevice->refresh();
                 $oldDevice->autoStopLineOperation();
 
                 $productionStartedAt = now();
@@ -135,6 +139,7 @@ class ESP32ApiController extends Controller
                 'paused_at' => $pausedAt,
                 'total_pause_seconds' => $totalPauseSeconds,
                 'last_update' => $lastUpdate,
+                'reset_requested' => false,
             ]);
 
             if ($shouldLog) {
@@ -161,12 +166,24 @@ class ESP32ApiController extends Controller
                     ->delete();
             }
 
+            if ($oldDevice->line_id) {
+                try {
+                    $line = \App\Models\Line::with('currentOperation')->find($oldDevice->line_id);
+                    if ($line && $line->currentOperation) {
+                        $scheduleService = app(\App\Services\LineScheduleService::class);
+                        $scheduleService->checkAndApplySchedule($line);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Auto-pause check failed for device {$validated['device_id']}: " . $e->getMessage());
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Status for {$validated['device_id']} updated successfully",
                 'new_max_count' => $oldDevice->max_count,
                 'new_cycle_time' => $oldDevice->cycle_time,
-                'reset_counter' => false,
+                'reset_counter' => $resetRequested,
             ], 200);
 
         } catch (\Illuminate\Validation\ValidationException $e) {

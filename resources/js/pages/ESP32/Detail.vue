@@ -28,6 +28,9 @@ interface Device {
     is_paused: boolean;
     paused_at: string | null;
     total_pause_seconds: number;
+    schedule_start_time: string;
+    schedule_end_time: string;
+    schedule_breaks: Array<{ start: string; end: string }>;
 }
 
 interface Log {
@@ -114,9 +117,9 @@ const currentRefreshInterval = ref(5000);
 const noChangeCount = ref(0);
 const lastActivityTime = ref(Date.now());
 
-const scheduleStartTime = ref('07:00');
-const scheduleEndTime = ref('14:00');
-const breaks = ref<Array<{ start: string; end: string }>>([]);
+const scheduleStartTime = ref(props.device.schedule_start_time.substring(0, 5));
+const scheduleEndTime = ref(props.device.schedule_end_time.substring(0, 5));
+const breaks = ref<Array<{ start: string; end: string }>>(props.device.schedule_breaks || []);
 const newBreakStart = ref('');
 const newBreakEnd = ref('');
 
@@ -296,7 +299,6 @@ const clearHistoryFilters = () => {
         only: ['productionHistories']
     });
 };
-
 const adaptRefreshInterval = () => {
     const currentData = JSON.stringify({
         counter_a: props.device.counter_a,
@@ -392,6 +394,7 @@ const formatDelayTime = (seconds: number, isCompleted: boolean, cycleTime: numbe
     }
     return seconds > 0 ? `Delay ${formatted}` : `Cepat ${formatted}`;
 };
+
 const openSettingsModal = () => {
     editMaxCount.value = props.device.max_count;
     editMaxStroke.value = props.device.max_stroke;
@@ -401,27 +404,22 @@ const openSettingsModal = () => {
 };
 
 const openScheduleModal = () => {
-    loadSchedule();
     showScheduleModal.value = true;
 };
 
-const loadSchedule = () => {
-    const saved = localStorage.getItem(`schedule_${props.device.device_id}`);
-    if (saved) {
-        const data = JSON.parse(saved);
-        scheduleStartTime.value = data.startTime || '07:00';
-        scheduleEndTime.value = data.endTime || '14:00';
-        breaks.value = data.breaks || [];
-    }
-};
-
 const saveSchedule = () => {
-    const data = {
-        startTime: scheduleStartTime.value,
-        endTime: scheduleEndTime.value,
-        breaks: breaks.value
-    };
-    localStorage.setItem(`schedule_${props.device.device_id}`, JSON.stringify(data));
+    router.post('/esp32/monitor/update-schedule', {
+        device_id: props.device.device_id,
+        schedule_start_time: scheduleStartTime.value,
+        schedule_end_time: scheduleEndTime.value,
+        schedule_breaks: breaks.value
+    }, {
+        preserveState: false,
+        preserveScroll: true,
+        onSuccess: () => {
+            showScheduleModal.value = false;
+        }
+    });
 };
 
 const addBreak = () => {
@@ -431,7 +429,6 @@ const addBreak = () => {
             end: newBreakEnd.value
         });
         breaks.value.sort((a, b) => a.start.localeCompare(b.start));
-        saveSchedule();
         newBreakStart.value = '';
         newBreakEnd.value = '';
     }
@@ -439,7 +436,6 @@ const addBreak = () => {
 
 const removeBreak = (index: number) => {
     breaks.value.splice(index, 1);
-    saveSchedule();
 };
 
 const updateSettings = () => {
@@ -462,7 +458,6 @@ const updateSettings = () => {
         }
     });
 };
-
 const calculateExpectedCounter = (log: Log) => {
     const cycleTime = log.cycle_time || props.device.cycle_time;
     const productionStartedAt = log.production_started_at;
@@ -561,7 +556,6 @@ onMounted(() => {
     window.addEventListener('mousemove', resetActivity);
     window.addEventListener('keydown', resetActivity);
     window.addEventListener('click', resetActivity);
-    loadSchedule();
 });
 
 onUnmounted(() => {
@@ -633,6 +627,7 @@ const toggleAutoRefresh = () => {
                     </div>
                 </div>
             </div>
+
             <div class="grid grid-cols-1 gap-6">
                 <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-100 dark:border-gray-700">
                     <div class="space-y-6">
@@ -767,6 +762,7 @@ const toggleAutoRefresh = () => {
                                 </div>
                             </div>
                         </div>
+
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
                             <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-lg border-l-4 border-red-500">
                                 <div class="text-sm text-gray-600 dark:text-gray-400 font-medium">NG</div>
@@ -793,7 +789,6 @@ const toggleAutoRefresh = () => {
                     </div>
                 </div>
             </div>
-
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <div class="flex border-b border-gray-200 dark:border-gray-700">
                     <button
@@ -926,6 +921,7 @@ const toggleAutoRefresh = () => {
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">{{ device.has_counter_b ? 'Counter A' : 'Counter' }}</th>
                                     <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stroke</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Expected</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Pause Time</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Delay Status</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">NG</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Relay</th>
@@ -936,6 +932,10 @@ const toggleAutoRefresh = () => {
                                     <td class="px-6 py-4">
                                         <div class="text-sm font-medium text-gray-900 dark:text-white">{{ formatDateTimeStacked(log.logged_at).date }}</div>
                                         <div class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeStacked(log.logged_at).time }}</div>
+                                        <span v-if="log.is_paused" class="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                            <PauseCircle class="w-3 h-3 mr-1" />
+                                            Paused
+                                        </span>
                                     </td>
                                     <td class="px-6 py-4 text-center">
                                         <span :class="['px-3 py-1.5 rounded-full text-xs font-semibold', getShiftBadgeColor(log.shift)]">
@@ -952,6 +952,17 @@ const toggleAutoRefresh = () => {
                                         <div class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ calculateExpectedCounter(log) }}</div>
                                     </td>
                                     <td class="px-6 py-4 text-center">
+                                        <div v-if="log.total_pause_seconds > 0" class="space-y-1">
+                                            <div class="text-sm font-bold text-blue-600 dark:text-blue-400">
+                                                {{ formatTime(log.total_pause_seconds) }}
+                                            </div>
+                                            <div v-if="log.is_paused && log.paused_at" class="text-xs text-gray-500 dark:text-gray-400">
+                                                Since: {{ formatDateTime(log.paused_at).split(' ')[1] }}
+                                            </div>
+                                        </div>
+                                        <div v-else class="text-xs text-gray-400">-</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
                                         <span :class="['px-4 py-2 rounded-lg text-xs font-bold', getDelayStatus(log).class]">
                                             {{ getDelayStatus(log).text }}
                                         </span>
@@ -966,7 +977,7 @@ const toggleAutoRefresh = () => {
                                     </td>
                                 </tr>
                                 <tr v-if="logs.data.length === 0">
-                                    <td :colspan="device.has_counter_b ? 8 : 7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                                    <td :colspan="device.has_counter_b ? 9 : 8" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                                         Belum ada history log
                                     </td>
                                 </tr>
@@ -997,6 +1008,7 @@ const toggleAutoRefresh = () => {
                 </div>
             </div>
         </div>
+
         <div v-if="showSettingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showSettingsModal = false">
             <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-96 shadow-2xl">
                 <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Settings - {{ device.device_id }}</h3>
@@ -1032,6 +1044,7 @@ const toggleAutoRefresh = () => {
                 </div>
             </div>
         </div>
+
         <div v-if="showScheduleModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showScheduleModal = false">
             <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-[600px] shadow-2xl max-h-[90vh] overflow-y-auto">
                 <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Production Schedule - {{ device.device_id }}</h3>
@@ -1046,11 +1059,11 @@ const toggleAutoRefresh = () => {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Start Time</label>
-                            <input v-model="scheduleStartTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" @change="saveSchedule" />
+                            <input v-model="scheduleStartTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                         </div>
                         <div>
                             <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">End Time</label>
-                            <input v-model="scheduleEndTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" @change="saveSchedule" />
+                            <input v-model="scheduleEndTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                         </div>
                     </div>
                 </div>
@@ -1097,9 +1110,14 @@ const toggleAutoRefresh = () => {
                     </div>
                 </div>
 
-                <button @click="showScheduleModal = false" class="w-full bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
-                    Close
-                </button>
+                <div class="flex gap-2">
+                    <button @click="saveSchedule" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
+                        Save Schedule
+                    </button>
+                    <button @click="showScheduleModal = false" class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
+                        Cancel
+                    </button>
+                </div>
             </div>
         </div>
     </AppLayout>

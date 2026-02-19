@@ -7,7 +7,7 @@ import jsQR from 'jsqr';
 import {
     Search, Factory, Plus, Edit, Printer, Activity, Clock, AlertCircle, Wrench,
     PlayCircle, Loader2, PauseCircle, StopCircle, RotateCcw,
-    CheckCircle, Archive, Maximize2, Minimize2, Sun, Moon, Eye, Trash2
+    CheckCircle, Archive, Maximize2, Minimize2, Sun, Moon, Eye, Trash2, Calendar
 } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
@@ -27,10 +27,12 @@ interface LineOperation {
     id: number;
     operation_number: string;
     started_at: string;
+    paused_at: string | null;
     status: string;
     total_pause_minutes: number;
     shift: number;
     shift_label: string;
+    is_auto_paused?: boolean;
 }
 
 interface Line {
@@ -54,6 +56,9 @@ interface Line {
     total_repair_hours: number;
     uptime_hours: number;
     total_failures: number;
+    schedule_start_time?: string;
+    schedule_end_time?: string;
+    schedule_breaks?: Array<{ start: string; end: string }>;
     machines: Machine[];
     current_operation?: LineOperation;
     area?: {
@@ -117,6 +122,7 @@ const showConfirmActionModal = ref(false);
 const showActiveReportsModal = ref(false);
 const showResetConfirmModal = ref(false);
 const showMachineModal = ref(false);
+const showScheduleModal = ref(false);
 
 const selectedLine = ref<Line | null>(null);
 const selectedMachines = ref<Machine[]>([]);
@@ -143,6 +149,12 @@ const actionForm = ref({
     problem: '',
 });
 
+const scheduleForm = ref({
+    schedule_start_time: '07:00',
+    schedule_end_time: '16:00',
+    schedule_breaks: [] as Array<{ start: string; end: string }>,
+});
+
 const resetForm = useForm({ reason: '' });
 const createForm = useForm({ line_name: '', plant: '', description: '' });
 const editForm = useForm({ line_name: '', plant: '', description: '' });
@@ -162,15 +174,25 @@ const calculateCurrentUptime = (line: Line): number => {
         return baseUptime;
     }
 
-    if (line.status === 'operating' || line.status === 'paused') {
+    if (line.status === 'paused' && line.current_operation.paused_at) {
+        const startedAt = new Date(line.current_operation.started_at);
+        const pausedAt = new Date(line.current_operation.paused_at);
+
+        const elapsedMs = pausedAt.getTime() - startedAt.getTime();
+        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
+        const frozenUptime = Math.max(0, elapsedHours - pauseHours);
+
+        return baseUptime + frozenUptime;
+    }
+
+    if (line.status === 'operating') {
         const startedAt = new Date(line.current_operation.started_at);
         const now = new Date();
 
         const elapsedMs = now.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
-
         const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
-
         const currentOperationUptime = Math.max(0, elapsedHours - pauseHours);
 
         return baseUptime + currentOperationUptime;
@@ -184,13 +206,25 @@ const calculateCurrentOperationTime = (line: Line): number => {
         return line.total_operation_hours ?? 0;
     }
 
-    if (line.status === 'operating' || line.status === 'paused' || line.status === 'maintenance') {
+    if (line.status === 'paused' && line.current_operation.paused_at) {
+        const startedAt = new Date(line.current_operation.started_at);
+        const pausedAt = new Date(line.current_operation.paused_at);
+
+        const elapsedMs = pausedAt.getTime() - startedAt.getTime();
+        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;  // tambah ini
+        const netHours = Math.max(0, elapsedHours - pauseHours);  // kurangi pause
+
+        return (line.total_operation_hours ?? 0) + netHours;
+    }
+
+    if (line.status === 'operating' || line.status === 'maintenance') {
         const startedAt = new Date(line.current_operation.started_at);
         const now = new Date();
         const elapsedMs = now.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
-
-        return (line.total_operation_hours ?? 0) + elapsedHours;
+        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;  // sudah ada ini
+        return (line.total_operation_hours ?? 0) + Math.max(0, elapsedHours - pauseHours);
     }
 
     return line.total_operation_hours ?? 0;
@@ -218,6 +252,55 @@ const openMachineModal = (line: Line) => {
     selectedLine.value = line;
     selectedMachines.value = line.machines;
     showMachineModal.value = true;
+};
+
+const openScheduleModal = (line: Line) => {
+    selectedLine.value = line;
+    scheduleForm.value.schedule_start_time = line.schedule_start_time?.substring(0, 5) || '07:00';
+    scheduleForm.value.schedule_end_time = line.schedule_end_time?.substring(0, 5) || '16:00';
+    scheduleForm.value.schedule_breaks = line.schedule_breaks?.map(b => ({
+        start: b.start.substring(0, 5),
+        end: b.end.substring(0, 5),
+    })) || [];
+    showScheduleModal.value = true;
+};
+
+const addBreak = () => {
+    scheduleForm.value.schedule_breaks.push({
+        start: '12:00',
+        end: '13:00',
+    });
+};
+
+const removeBreak = (index: number) => {
+    scheduleForm.value.schedule_breaks.splice(index, 1);
+};
+
+const submitSchedule = async () => {
+    if (!selectedLine.value) return;
+    try {
+        const response = await fetch(`/maintenance/lines/${selectedLine.value.id}/schedule`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify(scheduleForm.value),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showScheduleModal.value = false;
+            router.reload({ only: ['lines'] });
+            alert('Schedule berhasil diupdate!');
+        } else {
+            alert(data.message || 'Gagal update schedule');
+        }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+        alert('Terjadi kesalahan saat update schedule');
+    }
 };
 
 const formatDuration = (hours: number): string => {
@@ -618,7 +701,7 @@ const submitAction = async () => {
             payload = { paused_by: actionForm.value.user_name || 'System' };
         } else if (scanMode.value === 'resume') {
             endpoint = `/maintenance/operations/${actionForm.value.operation_id}/resume`;
-            payload = { paused_by: actionForm.value.user_name || 'System' };
+            payload = { resumed_by: actionForm.value.user_name || 'System' };
         } else if (scanMode.value === 'stop') {
             endpoint = `/maintenance/operations/${actionForm.value.operation_id}/stop`;
             payload = { stopped_by: actionForm.value.user_name || 'System', notes: actionForm.value.notes };
@@ -695,7 +778,6 @@ onUnmounted(() => {
     document.removeEventListener('fullscreenchange', handleFullscreenChange);
 });
 </script>
-
 <template>
     <Head title="Line - Maintenance" />
     <AppLayout v-if="!isFullscreen" :breadcrumbs="[
@@ -769,6 +851,7 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
+
             <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-5 shadow-lg">
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     <button @click="openActionModal('start')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
@@ -821,7 +904,7 @@ onUnmounted(() => {
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div v-for="line in lines.data" :key="`${line.id}-${refreshKey}`" class="group bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 border border-gray-100 dark:border-gray-700 hover:-translate-y-1">
+                <div v-for="line in lines.data" :key="`${line.id}-${refreshKey}`" class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg transition-all duration-300 border border-gray-100 dark:border-gray-700">
                     <div class="flex justify-between items-start mb-4">
                         <div class="flex-1">
                             <h3 class="text-xl font-bold text-gray-900 dark:text-white">{{ line.line_name }}</h3>
@@ -836,11 +919,14 @@ onUnmounted(() => {
                             <span v-if="line.current_operation" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
                                 {{ line.current_operation.shift_label }}
                             </span>
+                            <span v-if="line.current_operation?.is_auto_paused" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                Auto-Pause
+                            </span>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3 mb-4">
-                        <button @click="openMachineModal(line)" class="group/machine text-center p-3 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl hover:shadow-lg hover:scale-105 transition-all duration-300 border-2 border-blue-200 dark:border-blue-800 hover:border-blue-400 dark:hover:border-blue-600 cursor-pointer relative overflow-hidden">
+                        <button @click="openMachineModal(line)" class="group/machine text-center p-3 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl transition-all duration-300 border-2 border-blue-200 dark:border-blue-800 hover:border-blue-400 dark:hover:border-blue-600 cursor-pointer relative overflow-hidden">
                             <div class="absolute inset-0 bg-gradient-to-r from-blue-400/0 via-blue-400/10 to-blue-400/0 translate-x-[-100%] group-hover/machine:translate-x-[100%] transition-transform duration-700"></div>
                             <div class="relative">
                                 <div class="flex items-center justify-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 font-medium mb-1">
@@ -918,7 +1004,10 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-5 gap-2">
+                    <div class="grid grid-cols-6 gap-2">
+                        <button @click="openScheduleModal(line)" class="p-2.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl hover:shadow-lg transition-all duration-300" title="Schedule">
+                            <Calendar class="w-4 h-4 text-indigo-600 mx-auto" />
+                        </button>
                         <button @click="viewQrCode(line)" class="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-xl hover:shadow-lg transition-all duration-300" title="QR Code">
                             <Printer class="w-4 h-4 text-blue-600 mx-auto" />
                         </button>
@@ -939,7 +1028,6 @@ onUnmounted(() => {
             </div>
         </div>
     </AppLayout>
-
     <div v-else :class="['fixed inset-0 overflow-auto', fullscreenDarkMode ? 'bg-gray-900' : 'bg-gray-50']">
         <div class="min-h-screen p-8">
             <div class="flex justify-between items-center mb-8">
@@ -974,14 +1062,12 @@ onUnmounted(() => {
                             <div :class="['text-xs', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">Mesin</div>
                             <div class="text-lg font-bold text-blue-500 mt-1">{{ line.machines_count }}</div>
                         </div>
-
                         <div :class="['text-center p-2 rounded-xl', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-100']">
                             <div :class="['text-xs', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">Uptime</div>
                             <div class="text-xs font-bold text-green-500 mt-1">
                                 {{ formatDuration(calculateCurrentUptime(line)) }}
                             </div>
                         </div>
-
                         <div :class="['text-center p-2 rounded-xl', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-100']">
                             <div :class="['text-xs', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">Fail</div>
                             <div class="text-lg font-bold text-red-500 mt-1">{{ line.total_failures }}</div>
@@ -1007,6 +1093,122 @@ onUnmounted(() => {
             </div>
         </div>
     </div>
+    <Dialog :open="showScheduleModal" @update:open="showScheduleModal = $event">
+        <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+                <DialogTitle>Set Schedule - {{ selectedLine?.line_name }}</DialogTitle>
+                <DialogDescription>
+                    Atur jadwal operasi dan break time untuk auto-pause
+                </DialogDescription>
+            </DialogHeader>
+
+            <form @submit.prevent="submitSchedule" class="space-y-6 mt-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">Jam Mulai</label>
+                        <input
+                            v-model="scheduleForm.schedule_start_time"
+                            type="time"
+                            required
+                            class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">Jam Selesai</label>
+                        <input
+                            v-model="scheduleForm.schedule_end_time"
+                            type="time"
+                            required
+                            class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <label class="block text-sm font-semibold">Break Time (Auto-Pause)</label>
+                        <button
+                            type="button"
+                            @click="addBreak"
+                            class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-all"
+                        >
+                            + Tambah Break
+                        </button>
+                    </div>
+
+                    <div v-if="scheduleForm.schedule_breaks.length > 0" class="space-y-3">
+                        <div
+                            v-for="(breakItem, index) in scheduleForm.schedule_breaks"
+                            :key="index"
+                            class="flex gap-3 items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        >
+                            <div class="flex-1 grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Mulai</label>
+                                    <input
+                                        v-model="breakItem.start"
+                                        type="time"
+                                        required
+                                        class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Selesai</label>
+                                    <input
+                                        v-model="breakItem.end"
+                                        type="time"
+                                        required
+                                        class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700"
+                                    />
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                @click="removeBreak(index)"
+                                class="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-all"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div v-else class="text-center py-8 text-gray-500 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <p class="text-sm">Tidak ada break time. Klik "Tambah Break" untuk menambahkan.</p>
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                    <div class="flex gap-3">
+                        <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div class="text-sm text-blue-800 dark:text-blue-300">
+                            <p class="font-semibold mb-1">Auto-Pause System</p>
+                            <p>System akan otomatis pause operasi saat break time dan resume setelah break selesai. Total waktu pause akan tercatat dan tidak mempengaruhi perhitungan performa.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button
+                        type="button"
+                        @click="showScheduleModal = false"
+                        class="flex-1 px-4 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        type="submit"
+                        class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
+                    >
+                        Simpan Schedule
+                    </button>
+                </div>
+            </form>
+        </DialogContent>
+    </Dialog>
 
     <Dialog :open="showMachineModal" @update:open="showMachineModal = $event">
         <DialogContent class="max-w-4xl max-h-[85vh] overflow-y-auto">
