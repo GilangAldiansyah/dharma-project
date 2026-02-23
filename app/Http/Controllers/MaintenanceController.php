@@ -6,6 +6,8 @@ use App\Models\Line;
 use App\Models\Machine;
 use App\Models\MaintenanceReport;
 use App\Models\LineOperation;
+use App\Models\AppNotification;
+use App\Models\Area;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -17,7 +19,7 @@ class MaintenanceController extends Controller
 {
     public function index(Request $request): Response
     {
-        $query = MaintenanceReport::with(['machine', 'line', 'lineOperation']);
+        $query = MaintenanceReport::with(['machine', 'line', 'line.area', 'lineOperation']);
 
         if ($request->search) {
             $query->where(function ($q) use ($request) {
@@ -34,22 +36,20 @@ class MaintenanceController extends Controller
             });
         }
 
-        // Filter by status
         if ($request->status) {
             $query->status($request->status);
         }
 
-        // Filter by plant
-        if ($request->plant) {
-            $query->byPlant($request->plant);
+        if ($request->area_id) {
+            $query->whereHas('line', function ($q) use ($request) {
+                $q->where('area_id', $request->area_id);
+            });
         }
 
-        // Filter by line
         if ($request->line_id) {
             $query->byLineId($request->line_id);
         }
 
-        // ← TAMBAHAN: Filter by shift
         if ($request->shift) {
             $query->byShift($request->shift);
         }
@@ -58,15 +58,13 @@ class MaintenanceController extends Controller
                         ->paginate(20)
                         ->withQueryString();
 
-        // Add formatted duration to each report
         $reports->getCollection()->transform(function ($report) {
             $report->repair_duration_formatted = $report->repair_duration_formatted;
             $report->line_stop_duration_formatted = $report->line_stop_duration_formatted;
-            $report->shift_label = $report->shift_label; // ← TAMBAHAN
+            $report->shift_label = $report->shift_label;
             return $report;
         });
 
-        // Statistics
         $stats = [
             'total' => MaintenanceReport::count(),
             'dilaporkan' => MaintenanceReport::status('Dilaporkan')->count(),
@@ -100,23 +98,22 @@ class MaintenanceController extends Controller
         $mtbfValues = $lines->map(fn($line) => $line->average_mtbf)->filter()->values();
         $stats['mtbf'] = $mtbfValues->isNotEmpty() ? round($mtbfValues->avg(), 2) : null;
 
-        $lines = Line::orderBy('plant')->orderBy('line_code')->get();
-
-        $plants = Line::distinct()->pluck('plant');
+        $lines = Line::where('is_archived', false)->orderBy('line_code')->get();
+        $areas = Area::orderBy('name')->get();
 
         return Inertia::render('Maintenance/Index', [
             'reports' => $reports,
             'stats' => $stats,
             'lines' => $lines,
-            'plants' => $plants,
+            'areas' => $areas,
             'filters' => [
                 'search' => $request->search,
                 'status' => $request->status,
-                'plant' => $request->plant,
+                'area_id' => $request->area_id,
                 'line_id' => $request->line_id,
-                'shift' => $request->shift, // ← TAMBAHAN
+                'shift' => $request->shift,
             ],
-            'shifts' => \App\Helpers\DateHelper::getAllShifts(), // ← TAMBAHAN: Data shift untuk dropdown
+            'shifts' => \App\Helpers\DateHelper::getAllShifts(),
         ]);
     }
 
@@ -158,6 +155,10 @@ class MaintenanceController extends Controller
             ]);
 
             DB::commit();
+
+            try {
+                AppNotification::createLineStop($report->fresh(['line', 'machine']));
+            } catch (\Exception $e) {}
 
             return back()->with('success', 'Line Stop! Perbaikan otomatis dimulai dan MTTR sedang dihitung.');
 
@@ -209,10 +210,8 @@ class MaintenanceController extends Controller
                 ->where('id', '!=', $id)
                 ->count();
 
-             if ($remainingActiveReports === 0) {
-                $line->update([
-                    'status' => 'operating',
-                ]);
+            if ($remainingActiveReports === 0) {
+                $line->update(['status' => 'operating']);
                 $message = 'Perbaikan selesai! MTTR dihitung. Line kembali beroperasi.';
             } else {
                 $message = "Perbaikan selesai! MTTR dihitung. Masih ada {$remainingActiveReports} laporan maintenance aktif.";
@@ -220,7 +219,11 @@ class MaintenanceController extends Controller
 
             DB::commit();
 
-            return back()->with('success', 'Perbaikan selesai! MTTR dihitung. Line otomatis beroperasi kembali.');
+            try {
+                AppNotification::createLineStop($report->fresh(['line', 'machine']));
+            } catch (\Exception $e) {}
+
+            return back()->with('success', $message);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -293,8 +296,8 @@ class MaintenanceController extends Controller
             ->when($plantFilter, function ($q) use ($plantFilter) {
                 $q->whereHas('line', fn($lq) => $lq->where('plant', $plantFilter));
             })
-            ->when($shiftFilter, function ($q) use ($shiftFilter) { // ← TAMBAHAN
-            $q->byShift($shiftFilter);
+            ->when($shiftFilter, function ($q) use ($shiftFilter) {
+                $q->byShift($shiftFilter);
             })
             ->get()
             ->groupBy('line_id')
@@ -398,8 +401,7 @@ class MaintenanceController extends Controller
                 $machinesWithMttr = $allMachines->whereNotNull('mttr_hours');
                 $mttrHours = null;
                 if ($machinesWithMttr->isNotEmpty()) {
-                    $avgMttrHours = $machinesWithMttr->avg('mttr_hours');
-                    $mttrHours = (float) $avgMttrHours;
+                    $mttrHours = (float) $machinesWithMttr->avg('mttr_hours');
                 }
 
                 $machinesWithMtbf = $allMachines->whereNotNull('mtbf_hours');

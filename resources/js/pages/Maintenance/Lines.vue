@@ -42,6 +42,7 @@ interface Line {
     plant: string;
     qr_code: string;
     status: 'operating' | 'stopped' | 'maintenance' | 'paused';
+    pending_line_stop: boolean;
     last_operation_start: string | null;
     last_line_stop: string | null;
     description: string | null;
@@ -921,6 +922,12 @@ onUnmounted(() => {
                             </span>
                             <span v-if="line.current_operation?.is_auto_paused" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                                 Auto-Pause
+                            </span>
+                            <span v-if="line.pending_line_stop"
+                                @click="openActionModal('line-stop', line)"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer bg-red-500 text-white animate-pulse hover:bg-red-600 transition-all">
+                                <AlertCircle class="w-3.5 h-3.5" />
+                                Confirm Line Stop
                             </span>
                         </div>
                     </div>

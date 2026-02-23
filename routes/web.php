@@ -99,6 +99,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/esp32/monitor', [ESP32Controller::class, 'monitor'])->name('esp32.monitor');
     Route::get('/esp32/monitor/{device_id}', [ESP32Controller::class, 'detail'])->name('esp32.detail');
     Route::post('/esp32/monitor/update-settings', [ESP32Controller::class, 'updateSettings'])->name('esp32.update-settings');
+    Route::post('/esp32/monitor/update-history-ng', [ESP32Controller::class, 'updateHistoryNg'])->name('esp32.update-history-ng');
     Route::post('/esp32/monitor/update-schedule', [ESP32Controller::class, 'updateSchedule'])->name('esp32.update-schedule');
 
     Route::get('materials/search/api', [MaterialController::class, 'searchApi'])->name('materials.search');

@@ -5,6 +5,7 @@ use App\Models\Machine;
 use App\Models\MaintenanceReport;
 use App\Models\LineOperation;
 use App\Services\LineScheduleService;
+use App\Models\AppNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -104,6 +105,7 @@ class LineController extends Controller
                 'schedule_start_time' => $line->schedule_start_time,
                 'schedule_end_time' => $line->schedule_end_time,
                 'schedule_breaks' => $line->schedule_breaks ?? [],
+                'pending_line_stop' => (bool) $line->pending_line_stop,
                 'current_operation' => $line->currentOperation ? [
                     'id' => $line->currentOperation->id,
                     'operation_number' => $line->currentOperation->operation_number,
@@ -549,51 +551,63 @@ class LineController extends Controller
     public function lineStop(Request $request)
     {
         $validated = $request->validate([
-            'line_id' => 'required|exists:lines,id',
-            'machine_id' => 'required|exists:machines,id',
-            'problem' => 'nullable|string',
+            'line_id'     => 'required|exists:lines,id',
+            'machine_id'  => 'required|exists:machines,id',
+            'problem'     => 'nullable|string',
             'reported_by' => 'nullable|string|max:100',
         ]);
 
         DB::beginTransaction();
         try {
-            $line = Line::where('is_archived', false)->findOrFail($validated['line_id']);
+            $line    = Line::where('is_archived', false)->findOrFail($validated['line_id']);
             $machine = Machine::where('is_archived', false)->findOrFail($validated['machine_id']);
+
             $currentOperation = $line->currentOperation;
 
             if (!$currentOperation) {
                 $currentOperation = LineOperation::create([
-                    'line_id' => $validated['line_id'],
+                    'line_id'          => $validated['line_id'],
                     'operation_number' => LineOperation::generateOperationNumber(),
-                    'started_at' => now()->subMinutes(5),
-                    'started_by' => 'System (Auto-created for line stop)',
-                    'stopped_at' => now(),
-                    'stopped_by' => $validated['reported_by'] ?? 'System',
-                    'status' => 'stopped',
-                    'notes' => 'Operation otomatis dibuat saat line stop tanpa operasi aktif',
+                    'started_at'       => now()->subMinutes(5),
+                    'started_by'       => 'System (Auto-created for line stop)',
+                    'stopped_at'       => now(),
+                    'stopped_by'       => $validated['reported_by'] ?? 'System',
+                    'status'           => 'stopped',
+                    'notes'            => 'Operation otomatis dibuat saat line stop tanpa operasi aktif',
                 ]);
                 $currentOperation->calculateMetrics();
             }
 
+            $lineStoppedAt = $line->pending_line_stop && $line->last_line_stop
+                ? $line->last_line_stop
+                : now();
+
             $line->update([
-                'status' => 'maintenance',
-                'last_line_stop' => now(),
+                'status'            => 'maintenance',
+                'last_line_stop'    => $lineStoppedAt,
+                'pending_line_stop' => false,
             ]);
 
             $report = MaintenanceReport::create([
-                'line_id' => $validated['line_id'],
-                'machine_id' => $validated['machine_id'],
+                'line_id'           => $validated['line_id'],
+                'machine_id'        => $validated['machine_id'],
                 'line_operation_id' => $currentOperation->id,
-                'report_number' => MaintenanceReport::generateReportNumber(),
-                'problem' => $validated['problem'] ?? 'Line Stop - Mesin bermasalah',
-                'reported_by' => $validated['reported_by'] ?? '-',
-                'status' => 'Sedang Diperbaiki',
-                'reported_at' => now(),
-                'line_stopped_at' => now(),
-                'started_at' => now(),
+                'report_number'     => MaintenanceReport::generateReportNumber(),
+                'problem'           => $validated['problem'] ?? 'Line Stop - Mesin bermasalah',
+                'reported_by'       => $validated['reported_by'] ?? '-',
+                'status'            => 'Sedang Diperbaiki',
+                'reported_at'       => now(),
+                'line_stopped_at'   => $lineStoppedAt,
+                'started_at'        => $lineStoppedAt,
             ]);
 
             DB::commit();
+
+            try {
+                AppNotification::createLineStop($report->fresh(['line', 'machine']));
+            } catch (\Exception $e) {
+                Log::warning('[Notif] ' . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
@@ -655,6 +669,12 @@ class LineController extends Controller
             }
 
             DB::commit();
+
+            try {
+                AppNotification::createRepairComplete($report->fresh(['line', 'machine']));
+            } catch (\Exception $e) {
+                Log::warning('[Notif] ' . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,

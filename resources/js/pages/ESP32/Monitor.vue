@@ -498,7 +498,7 @@ const toggleAutoRefresh = () => {
                         <div v-if="getTimelineData(device)" class="pt-2">
                             <div class="flex justify-between text-sm mb-2">
                                 <span class="font-semibold text-gray-700 dark:text-gray-300">Production Timeline</span>
-                                <span :class="['font-bold text-sm', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-600' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-600' : 'text-blue-600') : (device.delay_seconds > 0 ? 'text-orange-600' : 'text-blue-600')]">
+                                <span v-if="device.counter_a > 0" :class="['font-bold text-sm', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-600' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-600' : 'text-blue-600') : (device.delay_seconds > 0 ? 'text-orange-600' : 'text-blue-600')]">
                                     {{ formatDelayTime(device.delay_seconds, device.is_completed, device.cycle_time) }}
                                 </span>
                             </div>
@@ -680,10 +680,10 @@ const toggleAutoRefresh = () => {
                     <div>
                         <div class="flex justify-between mb-1.5">
                             <span :class="['font-semibold text-xs', fullscreenDarkMode ? 'text-gray-300' : 'text-gray-700']">Production Timeline</span>
-                            <span v-if="getTimelineData(device)" :class="['font-bold text-xs', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-400' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-400' : 'text-blue-400') : (device.delay_seconds > 0 ? 'text-orange-400' : 'text-blue-400')]">
+                            <span v-if="device.counter_a > 0 && getTimelineData(device)" :class="['font-bold text-xs', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-400' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-400' : 'text-blue-400') : (device.delay_seconds > 0 ? 'text-orange-400' : 'text-blue-400')]">
                                 {{ formatDelayTime(device.delay_seconds, device.is_completed, device.cycle_time) }}
                             </span>
-                            <span v-else :class="['text-xs font-bold', fullscreenDarkMode ? 'text-gray-500' : 'text-gray-400']">—</span>
+                            <span v-else-if="!getTimelineData(device)" :class="['text-xs font-bold', fullscreenDarkMode ? 'text-gray-500' : 'text-gray-400']">—</span>
                         </div>
                         <div :class="['relative w-full h-3 rounded-full overflow-visible', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-200']">
                             <template v-if="getTimelineData(device)">

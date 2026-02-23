@@ -22,6 +22,7 @@ class Line extends Model
         'status',
         'last_operation_start',
         'last_line_stop',
+        'pending_line_stop',
         'description',
         'total_operation_hours',
         'total_repair_hours',
@@ -36,11 +37,13 @@ class Line extends Model
         'schedule_start_time',
         'schedule_end_time',
         'schedule_breaks',
+
     ];
 
     protected $casts = [
         'last_operation_start' => 'datetime',
         'last_line_stop' => 'datetime',
+        'pending_line_stop',
         'total_operation_hours' => 'decimal:4',
         'total_repair_hours' => 'decimal:4',
         'uptime_hours' => 'decimal:4',
@@ -291,6 +294,8 @@ class Line extends Model
                 'current_period_start' => $now,
                 'status' => 'stopped',
                 'last_operation_start' => null,
+                'pending_line_stop'     => false,
+
             ]);
 
             $this->machines()->where('is_archived', false)->update([

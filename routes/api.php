@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\DieShopApiController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ESP32ApiController;
 use App\Http\Controllers\ESP32Controller;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\DeviceTokenController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -60,4 +62,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/devices', [ESP32ApiController::class, 'getDevices'])
             ->name('api.esp32.devices');
     });
+
+    Route::prefix('notifications')->group(function () {
+        Route::get('/',             [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/mark-read',   [NotificationController::class, 'markAllRead']);
+    });
+
+     Route::post('/device-token',   [DeviceTokenController::class, 'store']);
+    Route::delete('/device-token', [DeviceTokenController::class, 'destroy']);
 });
