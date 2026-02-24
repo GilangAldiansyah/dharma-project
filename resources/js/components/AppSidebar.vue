@@ -39,13 +39,21 @@ import {
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
+import { usePermissions } from '@/composables/usePermissions';
+
+const { can } = usePermissions();
+
+interface NavItemWithPermission extends NavItem {
+    permission?: string;
+}
 
 interface NavGroup {
     title: string;
     icon: any;
-    items: NavItem[];
+    items: NavItemWithPermission[];
     routes: string[];
     dashboardRoute: string;
+    permission: string;
 }
 
 const page = usePage();
@@ -54,183 +62,103 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Control Stock System',
         icon: Package,
+        permission: 'dashboard.view',
         routes: ['/dashboard', '/output', '/stock', '/forecast'],
         dashboardRoute: '/dashboard',
         items: [
-            {
-                title: 'Dashboard',
-                href: '/dashboard',
-                icon: LayoutGrid,
-            },
-            {
-                title: 'Output Product',
-                href: '/output',
-                icon: PackageSearch,
-            },
-            {
-                title: 'Stock Control',
-                href: '/stock',
-                icon: Warehouse,
-            },
-            {
-                title: 'Forecast',
-                href: '/forecast',
-                icon: TrendingUp,
-            },
+            { title: 'Dashboard',      href: '/dashboard', icon: LayoutGrid,    permission: 'dashboard.view' },
+            { title: 'Output Product', href: '/output',    icon: PackageSearch, permission: 'output.view' },
+            { title: 'Stock Control',  href: '/stock',     icon: Warehouse,     permission: 'stock.view' },
+            { title: 'Forecast',       href: '/forecast',  icon: TrendingUp,    permission: 'forecast.view' },
         ],
     },
     {
         title: 'NG System',
         icon: AlertTriangle,
+        permission: 'ng.view',
         routes: ['/ng-reports', '/suppliers', '/parts'],
         dashboardRoute: '/ng-reports/dashboard',
         items: [
-            {
-                title: 'Dashboard NG',
-                href: '/ng-reports/dashboard',
-                icon: BarChart3,
-            },
-            {
-                title: 'NG Reports',
-                href: '/ng-reports',
-                icon: AlertTriangle,
-            },
-            {
-                title: 'Master Suppliers',
-                href: '/suppliers',
-                icon: Users,
-            },
-            {
-                title: 'Master Parts',
-                href: '/parts',
-                icon: BoxIcon,
-            },
+            { title: 'Dashboard NG',     href: '/ng-reports/dashboard', icon: BarChart3,    permission: 'ng.view' },
+            { title: 'NG Reports',       href: '/ng-reports',           icon: AlertTriangle, permission: 'ng.view' },
+            { title: 'Master Suppliers', href: '/suppliers',            icon: Users,         permission: 'suppliers.view' },
+            { title: 'Master Parts',     href: '/parts',                icon: BoxIcon,       permission: 'parts.view' },
         ],
     },
     {
         title: 'Die Shop System',
         icon: Wrench,
+        permission: 'die-shop.view',
         routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts'],
         dashboardRoute: '/die-shop-dashboard',
         items: [
-            {
-                title: 'Dashboard Die Shop',
-                href: '/die-shop-dashboard',
-                icon: BarChart3,
-            },
-            {
-                title: 'Laporan Perbaikan',
-                href: '/die-shop-reports',
-                icon: FileText,
-            },
-            {
-                title: 'Master Die Parts',
-                href: '/die-parts',
-                icon: Box,
-            },
+            { title: 'Dashboard Die Shop', href: '/die-shop-dashboard', icon: BarChart3, permission: 'die-shop.view' },
+            { title: 'Laporan Perbaikan',  href: '/die-shop-reports',  icon: FileText,  permission: 'die-shop.view' },
+            { title: 'Master Die Parts',   href: '/die-parts',         icon: Box,       permission: 'die-parts.edit' },
         ],
     },
     {
         title: 'Robot Monitor',
         icon: Bot,
+        permission: 'esp32.view',
         routes: ['/esp32/monitor'],
         dashboardRoute: '/esp32/monitor',
         items: [
-            {
-                title: 'Monitor',
-                href: '/esp32/monitor',
-                icon: Activity,
-            },
+            { title: 'Monitor', href: '/esp32/monitor', icon: Activity, permission: 'esp32.view' },
         ],
     },
     {
         title: 'Material Monitoring',
         icon: ClipboardList,
-        routes: ['/transaksi', '/transaksi/dashboard', '/materials', '/part-materials'],
+        permission: 'transaksi.view',
+        routes: ['/transaksi', '/materials', '/part-materials'],
         dashboardRoute: '/transaksi',
         items: [
-            {
-                title: 'Transaksi Material',
-                href: '/transaksi',
-                icon: ClipboardList,
-            },
-            {
-                title: 'Dashboard Transaksi',
-                href: '/transaksi/dashboard',
-                icon: BarChart3,
-            },
-            {
-                title: 'Master Material',
-                href: '/materials',
-                icon: Database,
-            },
-            {
-                title: 'Master Part',
-                href: '/part-materials',
-                icon: Layers,
-            },
+            { title: 'Transaksi Material',  href: '/transaksi',          icon: ClipboardList, permission: 'transaksi.view' },
+            { title: 'Dashboard Transaksi', href: '/transaksi/dashboard', icon: BarChart3,     permission: 'transaksi.dashboard' },
+            { title: 'Master Material',     href: '/materials',          icon: Database,      permission: 'materials.view' },
+            { title: 'Master Part',         href: '/part-materials',     icon: Layers,        permission: 'materials.view' },
         ],
     },
     {
         title: 'Maintenance Monitoring',
         icon: Activity,
+        permission: 'maintenance.view',
         routes: ['/maintenance'],
         dashboardRoute: '/maintenance/lines',
         items: [
-            {
-                title: 'Dashboard',
-                href: '/maintenance/dashboard',
-                icon: BarChart3,
-            },
-            {
-                title: 'Laporan Maintenance',
-                href: '/maintenance',
-                icon: Activity,
-            },
-            {
-                title: 'Line',
-                href: '/maintenance/lines',
-                icon: Layers,
-            },
-            {
-                title: 'Mesin',
-                href: '/maintenance/mesin',
-                icon: Cog,
-            },
+            { title: 'Dashboard',           href: '/maintenance/dashboard', icon: BarChart3, permission: 'maintenance.view' },
+            { title: 'Laporan Maintenance', href: '/maintenance',           icon: Activity,  permission: 'maintenance.view' },
+            { title: 'Line',                href: '/maintenance/lines',     icon: Layers,    permission: 'lines.view' },
+            { title: 'Mesin',               href: '/maintenance/mesin',     icon: Cog,       permission: 'lines.view' },
         ],
     },
     {
         title: 'OEE',
         icon: TrendingUp,
+        permission: 'oee.view',
         routes: ['/oee'],
         dashboardRoute: '/oee',
         items: [
-            {
-                title: 'Dashboard',
-                href: '/oee',
-                icon: BarChart3,
-            },
+            { title: 'Dashboard', href: '/oee', icon: BarChart3, permission: 'oee.view' },
         ],
     },
     {
         title: 'Kanban Production',
         icon: Package,
+        permission: 'stock.view',
         routes: ['/products', '/kanbans'],
         dashboardRoute: '/products',
         items: [
-            {
-                title: 'Products',
-                href: '/products',
-                icon: Package,
-            },
-            {
-                title: 'Scan History',
-                href: '/kanbans',
-                icon: Scan,
-            },
+            { title: 'Products',     href: '/products', icon: Package, permission: 'stock.view' },
+            { title: 'Scan History', href: '/kanbans',  icon: Scan,    permission: 'stock.view' },
         ],
     },
 ];
+
+const visibleNavGroups = computed(() =>
+    allNavGroups.filter(group => can(group.permission))
+);
 
 const currentSystem = computed(() => {
     const currentUrl = page.url;
@@ -239,9 +167,9 @@ const currentSystem = computed(() => {
         return null;
     }
 
-    let foundSystem = null;
+    let foundSystem: NavGroup | null = null;
 
-    for (const group of allNavGroups) {
+    for (const group of visibleNavGroups.value) {
         for (const route of group.routes) {
             if (currentUrl.startsWith(route)) {
                 foundSystem = group;
@@ -255,11 +183,18 @@ const currentSystem = computed(() => {
     if (!foundSystem && currentUrl.startsWith('/settings')) {
         const lastSystemTitle = localStorage.getItem('lastSystem');
         if (lastSystemTitle) {
-            foundSystem = allNavGroups.find(g => g.title === lastSystemTitle) || null;
+            foundSystem = visibleNavGroups.value.find(g => g.title === lastSystemTitle) || null;
         }
     }
 
     return foundSystem;
+});
+
+const visibleItems = computed(() => {
+    if (!currentSystem.value) return [];
+    return currentSystem.value.items.filter(item =>
+        !item.permission || can(item.permission)
+    );
 });
 
 const logoHref = computed(() => {
@@ -270,16 +205,8 @@ const logoHref = computed(() => {
 });
 
 const footerNavItems: NavItem[] = [
-    {
-        title: 'Home',
-        href: '/welcome',
-        icon: Home,
-    },
-    {
-        title: 'Settings',
-        href: '/settings',
-        icon: Settings,
-    },
+    { title: 'Home',     href: '/welcome',  icon: Home },
+    { title: 'Settings', href: '/settings', icon: Settings },
 ];
 </script>
 
@@ -301,7 +228,7 @@ const footerNavItems: NavItem[] = [
             <SidebarGroup v-if="currentSystem">
                 <SidebarGroupContent>
                     <SidebarMenu>
-                        <SidebarMenuItem v-for="item in currentSystem.items" :key="item.title">
+                        <SidebarMenuItem v-for="item in visibleItems" :key="item.title">
                             <SidebarMenuButton
                                 as-child
                                 :tooltip="item.title"

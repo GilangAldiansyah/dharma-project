@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import Heading from '@/components/Heading.vue';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { toUrl, urlIsActive } from '@/lib/utils';
 import { edit as editAppearance } from '@/routes/appearance';
 import { edit as editProfile } from '@/routes/profile';
@@ -9,64 +7,59 @@ import { show } from '@/routes/two-factor';
 import { edit as editPassword } from '@/routes/user-password';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import { usePermissions } from '@/composables/usePermissions';
 
-const sidebarNavItems: NavItem[] = [
-    {
-        title: 'Profile',
-        href: editProfile(),
-    },
-    {
-        title: 'Password',
-        href: editPassword(),
-    },
-    {
-        title: 'Two-Factor Auth',
-        href: show(),
-    },
-    {
-        title: 'Appearance',
-        href: editAppearance(),
-    },
+const { can } = usePermissions();
+
+const baseNavItems: NavItem[] = [
+    { title: 'Profile',         href: editProfile() },
+    { title: 'Password',        href: editPassword() },
+    { title: 'Two-Factor Auth', href: show() },
+    { title: 'Appearance',      href: editAppearance() },
 ];
 
-const currentPath = typeof window !== undefined ? window.location.pathname : '';
+const adminNavItems = computed<NavItem[]>(() => {
+    const items: NavItem[] = [];
+    if (can('settings.roles')) {
+        items.push({ title: 'Roles & Permissions', href: '/settings/roles' as any });
+        items.push({ title: 'Permissions',         href: '/settings/permissions' as any });
+    }
+    if (can('settings.users')) {
+        items.push({ title: 'User Management', href: '/settings/users' as any });
+    }
+    return items;
+});
+
+const sidebarNavItems = computed(() => [...baseNavItems, ...adminNavItems.value]);
+
+const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
 </script>
 
 <template>
-    <div class="px-4 py-6">
+    <div class="px-4 py-6 space-y-6">
         <Heading
             title="Settings"
             description="Manage your profile and account settings"
         />
-
-        <div class="flex flex-col lg:flex-row lg:space-x-12">
-            <aside class="w-full max-w-xl lg:w-48">
-                <nav class="flex flex-col space-y-1 space-x-0">
-                    <Button
-                        v-for="item in sidebarNavItems"
-                        :key="toUrl(item.href)"
-                        variant="ghost"
-                        :class="[
-                            'w-full justify-start',
-                            { 'bg-muted': urlIsActive(item.href, currentPath) },
-                        ]"
-                        as-child
-                    >
-                        <Link :href="item.href">
-                            <component :is="item.icon" class="h-4 w-4" />
-                            {{ item.title }}
-                        </Link>
-                    </Button>
-                </nav>
-            </aside>
-
-            <Separator class="my-6 lg:hidden" />
-
-            <div class="flex-1 md:max-w-2xl">
-                <section class="max-w-xl space-y-12">
-                    <slot />
-                </section>
-            </div>
+        <nav class="flex items-center gap-1 border-b overflow-x-auto pb-px">
+            <Link
+                v-for="item in sidebarNavItems"
+                :key="toUrl(item.href)"
+                :href="toUrl(item.href) ?? ''"
+                :class="[
+                    'inline-flex items-center gap-2 px-4 py-2.5 text-sm whitespace-nowrap transition-colors rounded-t-md border-b-2 -mb-px',
+                    urlIsActive(item.href, currentPath)
+                        ? 'border-foreground font-medium text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40',
+                ]"
+            >
+                <component :is="item.icon" v-if="item.icon" class="h-4 w-4 shrink-0" />
+                {{ item.title }}
+            </Link>
+        </nav>
+        <div class="w-full">
+            <slot />
         </div>
     </div>
 </template>

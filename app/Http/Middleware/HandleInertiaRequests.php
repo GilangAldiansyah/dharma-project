@@ -38,14 +38,37 @@ class HandleInertiaRequests extends Middleware
     {
         [$message, $author] = str(Inspiring::quotes()->random())->explode('-');
 
+        $user = $request->user();
+
+        // Pre-load roles + permissions sekali per request agar tidak N+1
+        if ($user) {
+            $user->load('roles.permissions');
+        }
+
         return [
             ...parent::share($request),
-            'name' => config('app.name'),
-            'quote' => ['message' => trim($message), 'author' => trim($author)],
-            'auth' => [
-                'user' => $request->user(),
-            ],
+            'name'        => config('app.name'),
+            'quote'       => ['message' => trim($message), 'author' => trim($author)],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            'auth' => [
+                'user' => $user ? [
+                    'id'    => $user->id,
+                    'name'  => $user->name,
+                    'email' => $user->email,
+                    'roles' => $user->roles->map(fn($r) => [
+                        'id'           => $r->id,
+                        'name'         => $r->name,
+                        'display_name' => $r->display_name,
+                        'color'        => $r->color,
+                    ]),
+                ] : null,
+                // Array semua permission name milik user — dipakai di Vue via usePermissions()
+                'permissions' => $user ? $user->getAllPermissions() : [],
+            ],
+            'flash' => [
+                'success' => $request->session()->get('success'),
+                'error'   => $request->session()->get('error'),
+            ],
         ];
     }
 }
