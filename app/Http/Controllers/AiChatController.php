@@ -82,7 +82,6 @@ DATA REAL-TIME DARI DATABASE:
             );
 
         if ($response->failed()) {
-            \Log::error('Cloudflare AI error: ' . $response->body());
             return response()->json(['error' => 'Gagal menghubungi AI', 'detail' => $response->body()], 500);
         }
 
@@ -140,7 +139,7 @@ DATA REAL-TIME DARI DATABASE:
 
             $jamKerja = $now->hour >= 7 && $now->hour < 16;
             if ($jamKerja) {
-                $robotOn = DB::table('esp32_devices')->where('relay_status', 1)->count();
+                $robotOn    = DB::table('esp32_devices')->where('relay_status', 1)->count();
                 $totalRobot = DB::table('esp32_devices')->count();
                 if ($totalRobot > 0 && $robotOn === 0) {
                     $alerts[] = [
@@ -199,7 +198,6 @@ DATA REAL-TIME DARI DATABASE:
             }
 
         } catch (\Exception $e) {
-            \Log::error('AI Alerts Error: ' . $e->getMessage());
         }
 
         return response()->json(['alerts' => $alerts]);
@@ -208,14 +206,14 @@ DATA REAL-TIME DARI DATABASE:
     public function exportData(Request $request)
     {
         $request->validate(['type' => 'required|string']);
-        $type  = $request->type;
-        $rows  = [];
+        $type      = $request->type;
+        $rows      = [];
         $sheetName = $type;
 
         switch ($type) {
             case 'robot':
                 $sheetName = 'Robot ESP32';
-                $data = DB::table('esp32_devices as d')
+                $data      = DB::table('esp32_devices as d')
                     ->leftJoin('lines as l', 'l.id', '=', 'd.line_id')
                     ->select('d.device_id', 'l.line_name', 'd.counter_a', 'd.counter_b', 'd.reject', 'd.max_count', 'd.cycle_time', 'd.relay_status', 'd.is_paused', 'd.last_update')
                     ->get();
@@ -227,7 +225,7 @@ DATA REAL-TIME DARI DATABASE:
 
             case 'ng':
                 $sheetName = 'NG Reports';
-                $data = DB::table('ng_reports as n')
+                $data      = DB::table('ng_reports as n')
                     ->leftJoin('parts as p', 'p.id', '=', 'n.part_id')
                     ->select('n.report_number', 'p.part_name', 'n.status', 'n.ta_status', 'n.pica_status', 'n.reported_by', 'n.reported_at')
                     ->orderByDesc('n.reported_at')
@@ -240,7 +238,7 @@ DATA REAL-TIME DARI DATABASE:
 
             case 'maintenance':
                 $sheetName = 'Maintenance';
-                $data = DB::table('maintenance_reports as m')
+                $data      = DB::table('maintenance_reports as m')
                     ->leftJoin('lines as l', 'l.id', '=', 'm.line_id')
                     ->leftJoin('machines as mc', 'mc.id', '=', 'm.machine_id')
                     ->select('m.report_number', 'l.line_name', 'mc.machine_name', 'm.problem', 'm.status', 'm.shift', 'm.reported_by', 'm.reported_at', 'm.repair_duration_minutes', 'm.line_stop_duration_minutes')
@@ -254,7 +252,7 @@ DATA REAL-TIME DARI DATABASE:
 
             case 'oee':
                 $sheetName = 'OEE Records';
-                $data = DB::table('line_oee_records as o')
+                $data      = DB::table('line_oee_records as o')
                     ->leftJoin('lines as l', 'l.id', '=', 'o.line_id')
                     ->select('l.line_name', 'o.oee', 'o.availability', 'o.performance', 'o.quality', 'o.shift', 'o.period_date', 'o.period_type', 'o.total_counter_a', 'o.total_reject', 'o.good_count')
                     ->orderByDesc('o.period_date')
@@ -267,7 +265,7 @@ DATA REAL-TIME DARI DATABASE:
 
             case 'stock':
                 $sheetName = 'Transaksi Material';
-                $data = DB::table('transaksi_materials as t')
+                $data      = DB::table('transaksi_materials as t')
                     ->leftJoin('materials as m', 'm.id', '=', 't.material_id')
                     ->select('t.transaksi_id', 'm.nama_material', 'm.material_type', 'm.satuan', 't.qty', 't.pic', 't.shift', 't.tanggal')
                     ->orderByDesc('t.tanggal')
@@ -280,7 +278,7 @@ DATA REAL-TIME DARI DATABASE:
 
             case 'output':
                 $sheetName = 'Output Product';
-                $data = DB::table('output_products')
+                $data      = DB::table('output_products')
                     ->select('type', 'sap_no', 'penanggung_jawab', 'product_unit', 'qty_day', 'out_shift1', 'out_shift2', 'out_shift3', 'ng_shift1', 'ng_shift2', 'ng_shift3', 'total', 'stock_date')
                     ->orderByDesc('stock_date')
                     ->get();
@@ -302,13 +300,13 @@ DATA REAL-TIME DARI DATABASE:
         $combined = strtolower($message . ' ' . implode(' ', array_column($history, 'content')));
         $types    = [];
 
-        if ($this->contains($combined, ['oee', 'availability', 'performance', 'quality']))      $types[] = 'oee';
-        if ($this->contains($combined, ['ng', 'defect', 'cacat', 'pica']))                      $types[] = 'ng';
-        if ($this->contains($combined, ['robot', 'esp32', 'counter', 'device', 'relay']))       $types[] = 'robot';
-        if ($this->contains($combined, ['maintenance', 'perbaikan', 'repair', 'downtime']))     $types[] = 'maintenance';
-        if ($this->contains($combined, ['material', 'transaksi', 'stock', 'stok', 'gudang']))  $types[] = 'material';
-        if ($this->contains($combined, ['output', 'produk', 'sap', 'hasil']))                   $types[] = 'output';
-        if ($this->contains($combined, ['summary', 'ringkasan', 'rekap', 'dashboard']))         $types[] = 'summary';
+        if ($this->contains($combined, ['oee', 'availability', 'performance', 'quality']))     $types[] = 'oee';
+        if ($this->contains($combined, ['ng', 'defect', 'cacat', 'pica']))                     $types[] = 'ng';
+        if ($this->contains($combined, ['robot', 'esp32', 'counter', 'device', 'relay']))      $types[] = 'robot';
+        if ($this->contains($combined, ['maintenance', 'perbaikan', 'repair', 'downtime']))    $types[] = 'maintenance';
+        if ($this->contains($combined, ['material', 'transaksi', 'stock', 'stok', 'gudang'])) $types[] = 'material';
+        if ($this->contains($combined, ['output', 'produk', 'sap', 'hasil']))                  $types[] = 'output';
+        if ($this->contains($combined, ['summary', 'ringkasan', 'rekap', 'dashboard']))        $types[] = 'summary';
 
         return $types;
     }
@@ -340,8 +338,8 @@ DATA REAL-TIME DARI DATABASE:
                 if ($devices->isNotEmpty()) {
                     $context[] = "=== DATA ROBOT/ESP32 (Real-time) ===";
                     foreach ($devices as $d) {
-                        $relay  = $d->relay_status ? 'ON' : 'OFF';
-                        $status = $d->is_paused ? 'PAUSED' : 'RUNNING';
+                        $relay     = $d->relay_status ? 'ON' : 'OFF';
+                        $status    = $d->is_paused ? 'PAUSED' : 'RUNNING';
                         $context[] = "Device: {$d->device_id} | Line: " . ($d->line_name ?? 'N/A');
                         $context[] = "  Counter A: {$d->counter_a} | Counter B: {$d->counter_b} | Reject: {$d->reject} | Max: {$d->max_count}";
                         $context[] = "  Relay: {$relay} | Status: {$status} | Cycle Time: {$d->cycle_time}ms | Last Update: {$d->last_update}";
@@ -351,7 +349,7 @@ DATA REAL-TIME DARI DATABASE:
                 }
 
                 if ($this->contains($combined, ['histor', 'riwayat', 'kemarin', 'hari ini', 'today', 'produksi'])) {
-                    $keyword = $this->extractDeviceKeyword($msg);
+                    $keyword      = $this->extractDeviceKeyword($msg);
                     $history_data = DB::table('esp32_production_histories')
                         ->when($keyword, fn($q) => $q->where('device_id', 'like', "%{$keyword}%"))
                         ->orderByDesc('production_finished_at')
@@ -396,10 +394,10 @@ DATA REAL-TIME DARI DATABASE:
                     foreach ($ngReports as $n) {
                         $taOverdue   = !$n->ta_submitted_at && Carbon::parse($n->reported_at)->addDay()->isPast() ? ' [OVERDUE TA]' : '';
                         $picaOverdue = !$n->pica_uploaded_at && Carbon::parse($n->reported_at)->addDays(3)->isPast() ? ' [OVERDUE PICA]' : '';
-                        $context[] = "No: {$n->report_number} | Part: " . ($n->part_name ?? '-') . " ({$n->part_code}){$taOverdue}{$picaOverdue}";
-                        $context[] = "  Status: {$n->status} | TA: " . ($n->ta_status ?? 'belum') . " | PICA: " . ($n->pica_status ?? 'belum') . " | Oleh: {$n->reported_by} | {$n->reported_at}";
+                        $context[]   = "No: {$n->report_number} | Part: " . ($n->part_name ?? '-') . " ({$n->part_code}){$taOverdue}{$picaOverdue}";
+                        $context[]   = "  Status: {$n->status} | TA: " . ($n->ta_status ?? 'belum') . " | PICA: " . ($n->pica_status ?? 'belum') . " | Oleh: {$n->reported_by} | {$n->reported_at}";
                     }
-                    $summary = DB::table('ng_reports')->selectRaw("status, COUNT(*) as total")->groupBy('status')->get();
+                    $summary   = DB::table('ng_reports')->selectRaw("status, COUNT(*) as total")->groupBy('status')->get();
                     $context[] = "Ringkasan: " . $summary->map(fn($s) => "{$s->status}: {$s->total}")->join(' | ');
                 } else {
                     $context[] = "\n=== DATA NG REPORTS === Tidak ada laporan NG.";
@@ -469,8 +467,8 @@ DATA REAL-TIME DARI DATABASE:
                 if ($outputs->isNotEmpty()) {
                     $context[] = "\n=== DATA OUTPUT PRODUCT TERBARU ===";
                     foreach ($outputs as $o) {
-                        $totalOut = $o->out_shift1 + $o->out_shift2 + $o->out_shift3;
-                        $totalNg  = $o->ng_shift1 + $o->ng_shift2 + $o->ng_shift3;
+                        $totalOut  = $o->out_shift1 + $o->out_shift2 + $o->out_shift3;
+                        $totalNg   = $o->ng_shift1 + $o->ng_shift2 + $o->ng_shift3;
                         $context[] = "{$o->type} | SAP: {$o->sap_no} | PJ: {$o->penanggung_jawab} | Unit: {$o->product_unit}";
                         $context[] = "  Out: S1={$o->out_shift1} S2={$o->out_shift2} S3={$o->out_shift3} (Total: {$totalOut}) | NG: {$totalNg} | {$o->stock_date}";
                     }
@@ -490,7 +488,7 @@ DATA REAL-TIME DARI DATABASE:
                 if ($oee->isNotEmpty()) {
                     $context[] = "\n=== DATA OEE TERBARU ===";
                     foreach ($oee as $o) {
-                        $status = $o->oee >= 85 ? 'EXCELLENT' : ($o->oee >= 70 ? 'GOOD' : ($o->oee >= 50 ? 'FAIR' : 'POOR'));
+                        $status    = $o->oee >= 85 ? 'EXCELLENT' : ($o->oee >= 70 ? 'GOOD' : ($o->oee >= 50 ? 'FAIR' : 'POOR'));
                         $context[] = "Line: " . ($o->line_name ?? '-') . " | OEE: {$o->oee}% [{$status}] | A: {$o->availability}% | P: {$o->performance}% | Q: {$o->quality}%";
                         $context[] = "  Shift: " . ($o->shift ?? '-') . " | Tipe: {$o->period_type} | Tanggal: {$o->period_date}";
                         $context[] = "  Counter A: {$o->total_counter_a} | Target: {$o->target_production} | Good: {$o->good_count} | Reject: {$o->total_reject}";
@@ -525,8 +523,6 @@ DATA REAL-TIME DARI DATABASE:
             }
 
         } catch (\Exception $e) {
-            \Log::error('AI DB Context Error: ' . $e->getMessage() . ' | ' . $e->getTraceAsString());
-            $context[] = "\nCatatan sistem: Terjadi error: " . $e->getMessage();
         }
 
         return empty($context)
@@ -545,8 +541,8 @@ DATA REAL-TIME DARI DATABASE:
     private function extractDeviceKeyword(string $message): ?string
     {
         preg_match_all('/\b([a-z0-9]{2,}(?:[-_][a-z0-9]+)*)\b/', $message, $matches);
-        $stopWords = ['data','ambil','cari','lihat','tampil','robot','histori','riwayat','produksi',
-                      'monitoring','dari','untuk','yang','semua','hari','ini','kemarin','today','terbaru','tampilkan'];
+        $stopWords = ['data', 'ambil', 'cari', 'lihat', 'tampil', 'robot', 'histori', 'riwayat', 'produksi',
+                      'monitoring', 'dari', 'untuk', 'yang', 'semua', 'hari', 'ini', 'kemarin', 'today', 'terbaru', 'tampilkan'];
         foreach ($matches[1] ?? [] as $match) {
             if (!in_array($match, $stopWords) && strlen($match) > 2) return $match;
         }
