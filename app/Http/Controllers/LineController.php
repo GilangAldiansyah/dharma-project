@@ -334,18 +334,48 @@ class LineController extends Controller
         }
     }
 
-    public function history(int $id)
+    public function history(Request $request, int $id)
     {
         try {
             $line = Line::where('is_archived', false)->findOrFail($id);
 
-            $archivedLines = Line::where('parent_line_id', $line->id)
+            $query = Line::where('parent_line_id', $line->id)
                 ->where('is_archived', true)
                 ->with(['machines' => function($q) {
                     $q->where('is_archived', true);
-                }])
-                ->orderBy('period_end', 'desc')
-                ->get();
+                }]);
+
+            $filterType = $request->input('filter_type', 'all');
+            $filterShift = $request->input('shift');
+
+            if ($filterType === 'today') {
+                $effectiveToday = \App\Helpers\DateHelper::getEffectiveDate();
+                $query->whereDate('period_end', $effectiveToday);
+            } elseif ($filterType === 'week') {
+                $effectiveToday = \App\Helpers\DateHelper::getEffectiveDate();
+                $weekStart = $effectiveToday->copy()->startOfWeek();
+                $weekEnd = $effectiveToday->copy()->endOfWeek()->endOfDay();
+                $query->whereBetween('period_end', [$weekStart, $weekEnd]);
+            } elseif ($filterType === 'month') {
+                $effectiveToday = \App\Helpers\DateHelper::getEffectiveDate();
+                $monthStart = $effectiveToday->copy()->startOfMonth();
+                $monthEnd = $effectiveToday->copy()->endOfMonth()->endOfDay();
+                $query->whereBetween('period_end', [$monthStart, $monthEnd]);
+            }
+            if ($request->input('date')) {
+                $filterDate = \App\Helpers\DateHelper::getEffectiveDate(Carbon::parse($request->input('date')));
+                $query->whereDate('period_end', $filterDate);
+            }
+
+            $archivedLines = $query->orderBy('period_end', 'desc')->get();
+
+            if ($filterShift) {
+                $archivedLines = $archivedLines->filter(function($archived) use ($filterShift) {
+                    if (!$archived->period_end) return false;
+                    $periodEnd = Carbon::parse($archived->period_end);
+                    return \App\Helpers\DateHelper::getCurrentShift($periodEnd) == $filterShift;
+                })->values();
+            }
 
             return response()->json([
                 'success' => true,
@@ -375,8 +405,13 @@ class LineController extends Controller
                         }
                     }
 
+                    $hasData = $archived->total_operation_hours > 0
+                        || $archived->total_repair_hours > 0
+                        || $archived->total_failures > 0;
+
                     return [
-                        'period' => $archived->period_start->format('d M Y') . ' - ' . $archived->period_end->format('d M Y H:i'),
+                        'period' => $this->formatPeriodLabel($archived->period_start, $archived->period_end),
+                        'has_data' => $hasData,
                         'line' => [
                             'id' => $archived->id,
                             'line_code' => $archived->line_code,
@@ -395,6 +430,7 @@ class LineController extends Controller
                                 'id' => $m->id,
                                 'machine_name' => $m->machine_name,
                                 'machine_type' => $m->machine_type,
+                                'barcode' => $m->barcode,
                                 'total_operation_hours' => (float) $m->total_operation_hours,
                                 'total_repair_hours' => (float) $m->total_repair_hours,
                                 'total_failures' => (int) $m->total_failures,
@@ -404,7 +440,7 @@ class LineController extends Controller
                         }),
                         'reason' => $this->extractReasonFromDescription($archived->description),
                     ];
-                })
+                })->filter(fn($item) => $item['has_data'])->values()
             ]);
 
         } catch (\Exception $e) {
@@ -414,6 +450,23 @@ class LineController extends Controller
                 'message' => 'Gagal mengambil data history: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    private function formatPeriodLabel($periodStart, $periodEnd): string
+    {
+        if (!$periodStart || !$periodEnd) return '-';
+
+        $start = Carbon::parse($periodStart);
+        $end = Carbon::parse($periodEnd);
+
+        $effectiveStartDate = \App\Helpers\DateHelper::getEffectiveDate($start);
+        $effectiveEndDate = \App\Helpers\DateHelper::getEffectiveDate($end);
+
+        if ($effectiveStartDate->isSameDay($effectiveEndDate)) {
+            return $effectiveEndDate->format('d M Y') . ', ' . $start->format('H:i') . ' - ' . $end->format('H:i');
+        }
+
+        return $start->format('d M Y H:i') . ' - ' . $end->format('d M Y H:i');
     }
 
     public function getSummary(Request $request, int $id)

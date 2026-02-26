@@ -69,6 +69,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/mark-read',   [NotificationController::class, 'markAllRead']);
     });
 
-     Route::post('/device-token',   [DeviceTokenController::class, 'store']);
+    Route::post('/device-token',   [DeviceTokenController::class, 'store']);
     Route::delete('/device-token', [DeviceTokenController::class, 'destroy']);
 });

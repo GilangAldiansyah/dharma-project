@@ -48,8 +48,8 @@ class Line extends Model
         'total_repair_hours' => 'decimal:4',
         'uptime_hours' => 'decimal:4',
         'is_archived' => 'boolean',
-        'period_start' => 'date',
-        'period_end' => 'date',
+        'period_start' => 'datetime',
+        'period_end' => 'datetime',
         'current_period_start' => 'datetime',
         'schedule_breaks' => 'array',
     ];
