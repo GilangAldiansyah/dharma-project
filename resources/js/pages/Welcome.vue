@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import { Package, AlertTriangle, Wrench, CheckCircle2, Bot, ClipboardList, Activity, TrendingUp, Layers } from 'lucide-vue-next';
-
+import AiChat from '@/components/AiChat.vue';
 type ColorType = 'blue' | 'orange' | 'green' | 'red' | 'black' | 'violet' | 'indigo' | 'emerald';
 
 interface System {
@@ -261,6 +261,7 @@ const colorSchemes: Record<ColorType, {
             </div>
         </div>
     </div>
+    <AiChat/>
 </template>
 
 <style scoped>

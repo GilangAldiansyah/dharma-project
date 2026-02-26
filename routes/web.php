@@ -24,6 +24,7 @@ use App\Http\Controllers\LineOperationController;
 use App\Http\Controllers\OeeController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\KanbanController;
+use App\Http\Controllers\AiChatController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -281,6 +282,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('/kanbans/master/{rfidMaster}', [KanbanController::class, 'destroyMaster'])->name('kanbans.master.destroy');
         Route::post('/kanbans/scan', [KanbanController::class, 'scan'])->name('kanbans.scan');
     });
+
+    Route::post('/ai/chat', [AiChatController::class, 'chat']);
+    Route::get('/ai/alerts', [AiChatController::class, 'alerts']);
+    Route::get('/ai/export-data', [AiChatController::class, 'exportData']);
 });
 
 require __DIR__.'/settings.php';
