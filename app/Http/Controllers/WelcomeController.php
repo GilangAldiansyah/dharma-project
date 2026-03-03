@@ -105,6 +105,20 @@ class WelcomeController extends Controller
                 'Line Comparison & Export',
             ],
         ],
+        [
+            'id'          => 'jig-monitoring',
+            'title'       => 'JIG Monitoring',
+            'description' => 'Sistem monitoring preventive & corrective maintenance JIG',
+            'icon'        => 'Wrench',
+            'color'       => 'indigo',
+            'route'       => '/jig/dashboard',
+            'permission'  => 'jig.view',
+            'features'    => [
+                'Dashboard PM & CM',
+                'Auto Generate PM Schedule',
+                'Laporan Corrective Maintenance',
+            ],
+        ],
     ];
 
     public function index(Request $request)

@@ -36,6 +36,7 @@ import {
     Activity,
     Cog,
     Scan,
+    Calendar,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
@@ -152,6 +153,21 @@ const allNavGroups: NavGroup[] = [
         items: [
             { title: 'Products',     href: '/products', icon: Package, permission: 'stock.view' },
             { title: 'Scan History', href: '/kanbans',  icon: Scan,    permission: 'stock.view' },
+        ],
+    },
+    {
+        title: 'JIG Monitoring',
+        icon: Wrench,
+        permission: 'jig.view',
+        routes: ['/jig'],
+        dashboardRoute: '/jig/dashboard',
+        items: [
+            { title: 'Dashboard',     href: '/jig/dashboard',     icon: BarChart3,     permission: 'jig.view' },
+            { title: 'Master JIG',    href: '/jig',               icon: Wrench,        permission: 'jig.edit' },
+            { title: 'Sparepart',     href: '/jig/sparepart',     icon: Package,       permission: 'jig.edit' },
+            { title: 'PM Schedule',   href: '/jig/pm/schedule',   icon: Calendar,      permission: 'jig.leader' },
+            { title: 'PM Report',     href: '/jig/pm/report',     icon: ClipboardList, permission: 'jig.view' },
+            { title: 'CM Report',     href: '/jig/cm',            icon: AlertTriangle, permission: 'jig.view' },
         ],
     },
 ];

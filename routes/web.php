@@ -25,6 +25,12 @@ use App\Http\Controllers\OeeController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\AiChatController;
+use App\Http\Controllers\JigController;
+use App\Http\Controllers\JigDashboardController;
+use App\Http\Controllers\PmScheduleController;
+use App\Http\Controllers\PmReportController;
+use App\Http\Controllers\CmReportController;
+use App\Http\Controllers\SparepartController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -283,9 +289,71 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/kanbans/scan', [KanbanController::class, 'scan'])->name('kanbans.scan');
     });
 
+   // ── JIG Dashboard ─────────────────────────────────────────────────────────────
+    Route::get('/jig/dashboard', [JigDashboardController::class, 'index'])
+        ->middleware('permission:jig.view')
+        ->name('jig.dashboard');
+
+    // ── Master JIG ────────────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig', [JigController::class, 'index'])->name('jig.index');
+    });
+    Route::middleware('permission:jig.edit')->group(function () {
+        Route::post('/jig', [JigController::class, 'store'])->name('jig.store');
+        Route::put('/jig/{jig}', [JigController::class, 'update'])->name('jig.update');
+        Route::delete('/jig/{jig}', [JigController::class, 'destroy'])->name('jig.destroy');
+    });
+
+    // ── Master Sparepart ──────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig/sparepart', [SparepartController::class, 'index'])->name('jig.sparepart.index');
+    });
+    Route::middleware('permission:jig.edit')->group(function () {
+        Route::post('/jig/sparepart', [SparepartController::class, 'store'])->name('jig.sparepart.store');
+        Route::put('/jig/sparepart/{sparepart}', [SparepartController::class, 'update'])->name('jig.sparepart.update');
+        Route::delete('/jig/sparepart/{sparepart}', [SparepartController::class, 'destroy'])->name('jig.sparepart.destroy');
+        Route::post('/jig/sparepart/{sparepart}/tambah-stok', [SparepartController::class, 'tambahStok'])->name('jig.sparepart.tambah-stok');
+    });
+
+    // ── PM Schedule ───────────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig/pm/schedule', [PmScheduleController::class, 'index'])->name('jig.pm.schedule.index');
+    });
+    Route::middleware('permission:jig.leader')->group(function () {
+        Route::post('/jig/pm/schedule', [PmScheduleController::class, 'store'])->name('jig.pm.schedule.store');
+        Route::post('/jig/pm/schedule/generate-bulk', [PmScheduleController::class, 'generateBulk'])->name('jig.pm.schedule.generate-bulk');
+        Route::put('/jig/pm/schedule/{pmSchedule}', [PmScheduleController::class, 'update'])->name('jig.pm.schedule.update');
+        Route::delete('/jig/pm/schedule/{pmSchedule}', [PmScheduleController::class, 'destroy'])->name('jig.pm.schedule.destroy');
+    });
+
+    // ── PM Report ─────────────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig/pm/report', [PmReportController::class, 'index'])->name('jig.pm.report.index');
+        Route::get('/jig/pm/report/{pmReport}', [PmReportController::class, 'show'])->name('jig.pm.report.show');
+    });
+    Route::post('/jig/pm/report/{pmReport}/submit', [PmReportController::class, 'submit'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.pm.report.submit');
+
+    // ── CM Report ─────────────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig/cm', [CmReportController::class, 'index'])->name('jig.cm.index');
+        Route::get('/jig/cm/{cmReport}', [CmReportController::class, 'show'])->name('jig.cm.show');
+    });
+    Route::post('/jig/cm', [CmReportController::class, 'store'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.cm.store');
+    Route::put('/jig/cm/{cmReport}', [CmReportController::class, 'update'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.cm.update');
+    Route::post('/jig/cm/{cmReport}/close', [CmReportController::class, 'close'])
+        ->middleware('permission:jig.leader')
+        ->name('jig.cm.close');
+
     Route::post('/ai/chat', [AiChatController::class, 'chat']);
     Route::get('/ai/alerts', [AiChatController::class, 'alerts']);
     Route::get('/ai/export-data', [AiChatController::class, 'exportData']);
+
 });
 
 require __DIR__.'/settings.php';

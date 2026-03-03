@@ -462,7 +462,7 @@ class ESP32ApiController extends Controller
     {
         Esp32Device::where('counter_a', '>', 0)
             ->whereNotNull('production_started_at')
-            ->where('last_update', '<=', now()->subHour())
+            ->where('last_update', '<=', now()->subHour(2))
             ->each(function ($device) {
                 $this->saveProductionHistory($device);
 
