@@ -17,24 +17,26 @@ class CmReportController extends Controller
     {
         $user     = User::with('roles')->find(Auth::id());
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
-        $isPic    = !$isLeader && $user->hasRole('pic_jig');
 
-        $query = CmReport::with('jig:id,name,type,line', 'pic:id,name', 'spareparts.sparepart:id,name,satuan')
-            ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
-            ->when($request->status, fn($q) => $q->where('status', $request->status))
-            ->latest('report_date');
+        $query = CmReport::with([
+            'jig:id,name,type,line',
+            'pic:id,name',
+            'closedBy:id,name',
+            'spareparts.sparepart:id,name,satuan',
+        ])
+        ->when($request->status, fn($q) => $q->where('status', $request->status))
+        ->when($request->jig_id, fn($q) => $q->where('jig_id', $request->jig_id))
+        ->latest('report_date');
 
         $reports = $query->get();
 
-        $baseQ = CmReport::when($isPic, fn($q) => $q->where('pic_id', $user->id));
         $summary = [
-            'open'        => (clone $baseQ)->where('status', 'open')->count(),
-            'in_progress' => (clone $baseQ)->where('status', 'in_progress')->count(),
-            'closed'      => (clone $baseQ)->where('status', 'closed')->count(),
+            'open'        => CmReport::where('status', 'open')->count(),
+            'in_progress' => CmReport::where('status', 'in_progress')->count(),
+            'closed'      => CmReport::where('status', 'closed')->count(),
         ];
 
         $jigs = \App\Models\Jig::select('id', 'name', 'type', 'line')
-            ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
             ->orderBy('name')->get();
 
         return Inertia::render('Cm/Index', [
@@ -42,31 +44,44 @@ class CmReportController extends Controller
             'jigs'       => $jigs,
             'spareparts' => Sparepart::select('id', 'name', 'satuan', 'stok')->orderBy('name')->get(),
             'summary'    => $summary,
-            'filters'    => ['status' => $request->status ?? ''],
+            'isLeader'   => $isLeader,
+            'authId'     => Auth::id(),
+            'filters'    => [
+                'status' => $request->status ?? '',
+                'jig_id' => $request->jig_id ?? '',
+            ],
         ]);
     }
 
     public function store(Request $request)
     {
         $request->validate([
-            'jig_id'      => 'required|exists:jigs,id',
-            'description' => 'required|string',
-            'photo'       => 'nullable|image|max:5120',
+            'jig_id'                    => 'required|exists:jigs,id',
+            'description'               => 'required|string',
+            'penyebab'                  => 'nullable|string',
+            'perbaikan'                 => 'nullable|string',
+            'photo'                     => 'nullable|image|max:5120',
+            'photo_perbaikan'           => 'nullable|image|max:5120',
             'spareparts'                => 'nullable|array',
             'spareparts.*.sparepart_id' => 'required|exists:spareparts,id',
             'spareparts.*.qty'          => 'required|numeric|min:0.01',
+            'spareparts.*.notes'        => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request) {
-            $photoPath = $request->file('photo')?->store('cm-reports', 'public');
+            $photoPath      = $request->file('photo')?->store('cm-reports', 'public');
+            $photoPerbaikan = $request->file('photo_perbaikan')?->store('cm-reports', 'public');
 
             $cm = CmReport::create([
-                'jig_id'      => $request->jig_id,
-                'pic_id'      => Auth::id(),
-                'report_date' => now()->toDateString(),
-                'description' => $request->description,
-                'photo'       => $photoPath,
-                'status'      => 'open',
+                'jig_id'          => $request->jig_id,
+                'pic_id'          => Auth::id(),
+                'report_date'     => now()->toDateString(),
+                'description'     => $request->description,
+                'penyebab'        => $request->penyebab,
+                'perbaikan'       => $request->perbaikan,
+                'photo'           => $photoPath,
+                'photo_perbaikan' => $photoPerbaikan,
+                'status'          => 'open',
             ]);
 
             if ($request->spareparts) {
@@ -76,8 +91,10 @@ class CmReportController extends Controller
                         'report_id'    => $cm->id,
                         'sparepart_id' => $sp['sparepart_id'],
                         'qty'          => $sp['qty'],
+                        'notes'        => $sp['notes'] ?? null,
                     ]);
-                    Sparepart::find($sp['sparepart_id'])?->kurangiStok($sp['qty']);
+                    Sparepart::find($sp['sparepart_id'])
+                        ?->kurangiStok($sp['qty'], 'cm', $cm->id, $sp['notes'] ?? null);
                 }
             }
         });
@@ -87,19 +104,43 @@ class CmReportController extends Controller
 
     public function update(Request $request, CmReport $cmReport)
     {
-        $cmReport->update(['status' => 'in_progress']);
-        return back()->with('success', 'Status CM diperbarui.');
+        $request->validate([
+            'penyebab'        => 'nullable|string',
+            'perbaikan'       => 'nullable|string',
+            'photo_perbaikan' => 'nullable|image|max:5120',
+        ]);
+
+        $data = ['status' => 'in_progress'];
+
+        if ($request->penyebab)  $data['penyebab']   = $request->penyebab;
+        if ($request->perbaikan) $data['perbaikan']   = $request->perbaikan;
+        if ($request->hasFile('photo_perbaikan')) {
+            $data['photo_perbaikan'] = $request->file('photo_perbaikan')->store('cm-reports', 'public');
+        }
+
+        $cmReport->update($data);
+        return back()->with('success', 'Laporan CM diperbarui.');
     }
 
     public function close(Request $request, CmReport $cmReport)
     {
         $request->validate(['action' => 'required|string']);
+
+        $user     = User::with('roles')->find(Auth::id());
+        $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
+        $isPic    = $cmReport->pic_id === Auth::id();
+
+        if (!$isLeader && !$isPic) {
+            abort(403, 'Unauthorized');
+        }
+
         $cmReport->update([
             'status'    => 'closed',
             'action'    => $request->action,
             'closed_by' => Auth::id(),
             'closed_at' => now(),
         ]);
+
         return back()->with('success', 'CM berhasil ditutup.');
     }
 }

@@ -13,7 +13,7 @@ class PmScheduleService
         $months = $this->getTargetMonths($schedule);
 
         foreach ($months as $month) {
-            [$start, $end] = $this->getPlannedWeek($month, $schedule->tahun);
+            [$start, $end] = $this->getPlannedWeek($month, $schedule->tahun, $schedule->target_week);
 
             PmReport::firstOrCreate(
                 [
@@ -34,11 +34,9 @@ class PmScheduleService
         $schedules = PmSchedule::with('jig')->where('is_active', true)->where('tahun', $year)->get();
 
         foreach ($schedules as $schedule) {
-            if (!in_array($month, $this->getTargetMonths($schedule))) {
-                continue;
-            }
+            if (!in_array($month, $this->getTargetMonths($schedule))) continue;
 
-            [$start, $end] = $this->getPlannedWeek($month, $year);
+            [$start, $end] = $this->getPlannedWeek($month, $year, $schedule->target_week);
 
             PmReport::firstOrCreate(
                 [
@@ -59,15 +57,21 @@ class PmScheduleService
         return $schedule->interval === '1_bulan' ? range(1, 12) : [1, 4, 7, 10];
     }
 
-    /**
-     * Planned week = 7 hari terakhir bulan.
-     * end   = hari terakhir bulan
-     * start = end - 6 hari
-     */
-    private function getPlannedWeek(int $month, int $year): array
+    private function getPlannedWeek(int $month, int $year, int $targetWeek): array
     {
-        $end   = Carbon::create($year, $month, 1)->endOfMonth()->startOfDay();
-        $start = $end->copy()->subDays(6);
+        $lastDay    = Carbon::create($year, $month, 1)->endOfMonth()->day;
+        $startDays  = [1 => 1, 2 => 8, 3 => 15, 4 => 22, 5 => 29];
+        $endDays    = [1 => 7, 2 => 14, 3 => 21, 4 => 28, 5 => $lastDay];
+
+        $startDay = $startDays[$targetWeek];
+
+        if ($startDay > $lastDay) {
+            $targetWeek = 4;
+            $startDay   = $startDays[$targetWeek];
+        }
+
+        $start = Carbon::create($year, $month, $startDay)->startOfDay();
+        $end   = Carbon::create($year, $month, $endDays[$targetWeek])->startOfDay();
 
         return [$start, $end];
     }

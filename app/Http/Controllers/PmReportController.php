@@ -26,6 +26,7 @@ class PmReportController extends Controller
         $query = PmReport::with([
             'pmSchedule.jig:id,name,type,line',
             'pic:id,name',
+            'nokClosedBy:id,name',
             'spareparts.sparepart:id,name,satuan',
         ])->when($isPic, fn($q) => $q->where('pic_id', $user->id))
           ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
@@ -50,6 +51,7 @@ class PmReportController extends Controller
             'reports'    => $reports,
             'spareparts' => Sparepart::select('id', 'name', 'satuan', 'stok')->orderBy('name')->get(),
             'summary'    => $summary,
+            'isLeader'   => $isLeader,
             'filters'    => [
                 'bulan'  => $bulan,
                 'tahun'  => $tahun,
@@ -62,24 +64,28 @@ class PmReportController extends Controller
     {
         $request->validate([
             'photo'                     => 'required|image|max:5120',
+            'photo_sparepart'           => 'nullable|image|max:5120',
             'condition'                 => 'required|in:ok,nok',
             'notes'                     => 'nullable|string',
             'spareparts'                => 'nullable|array',
             'spareparts.*.sparepart_id' => 'required|exists:spareparts,id',
             'spareparts.*.qty'          => 'required|numeric|min:0.01',
+            'spareparts.*.notes'        => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request, $pmReport) {
-            $photoPath  = $request->file('photo')->store('pm-reports', 'public');
-            $actualDate = Carbon::today();
-            $status     = $actualDate->isAfter($pmReport->planned_week_end) ? 'late' : 'done';
+            $photoPath      = $request->file('photo')->store('pm-reports', 'public');
+            $photoSparepart = $request->file('photo_sparepart')?->store('pm-reports', 'public');
+            $actualDate     = Carbon::today();
+            $status         = $actualDate->isAfter($pmReport->planned_week_end) ? 'late' : 'done';
 
             $pmReport->update([
-                'actual_date' => $actualDate,
-                'photo'       => $photoPath,
-                'condition'   => $request->condition,
-                'notes'       => $request->notes,
-                'status'      => $status,
+                'actual_date'     => $actualDate,
+                'photo'           => $photoPath,
+                'photo_sparepart' => $photoSparepart,
+                'condition'       => $request->condition,
+                'notes'           => $request->notes,
+                'status'          => $status,
             ]);
 
             if ($request->spareparts) {
@@ -89,12 +95,34 @@ class PmReportController extends Controller
                         'report_id'    => $pmReport->id,
                         'sparepart_id' => $sp['sparepart_id'],
                         'qty'          => $sp['qty'],
+                        'notes'        => $sp['notes'] ?? null,
                     ]);
-                    Sparepart::find($sp['sparepart_id'])?->kurangiStok($sp['qty']);
+                    Sparepart::find($sp['sparepart_id'])
+                        ?->kurangiStok($sp['qty'], 'pm', $pmReport->id, $sp['notes'] ?? null);
                 }
             }
         });
 
         return back()->with('success', 'Laporan PM berhasil dikirim.');
+    }
+
+    public function closeNok(Request $request, PmReport $pmReport)
+    {
+        abort_if($pmReport->condition !== 'nok', 403, 'Hanya laporan NOK yang bisa di-close.');
+
+        $request->validate([
+            'nok_notes' => 'nullable|string',
+        ]);
+
+        $pmReport->update([
+            'condition'     => 'ok',
+            'nok_closed_by' => Auth::id(),
+            'nok_closed_at' => now(),
+            'notes'         => $request->nok_notes
+                ? ($pmReport->notes ? $pmReport->notes . "\n[Close NOK] " . $request->nok_notes : '[Close NOK] ' . $request->nok_notes)
+                : $pmReport->notes,
+        ]);
+
+        return back()->with('success', 'Status JIG berhasil diubah menjadi OK.');
     }
 }

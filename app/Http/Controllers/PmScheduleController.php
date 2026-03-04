@@ -55,9 +55,10 @@ class PmScheduleController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'jig_id'   => 'required|exists:jigs,id',
-            'interval' => 'required|in:1_bulan,3_bulan',
-            'tahun'    => 'required|integer|min:2020|max:2099',
+            'jig_id'      => 'required|exists:jigs,id',
+            'interval'    => 'required|in:1_bulan,3_bulan',
+            'tahun'       => 'required|integer|min:2020|max:2099',
+            'target_week' => 'required|integer|min:1|max:5',
         ]);
 
         $exists = PmSchedule::where('jig_id', $request->jig_id)->where('tahun', $request->tahun)->exists();
@@ -65,7 +66,7 @@ class PmScheduleController extends Controller
             return back()->withErrors(['jig_id' => 'Schedule untuk JIG ini di tahun tersebut sudah ada.']);
         }
 
-        $schedule = PmSchedule::create($request->only('jig_id','interval','tahun'));
+        $schedule = PmSchedule::create($request->only('jig_id','interval','tahun','target_week'));
         $schedule->load('jig');
         $this->service->generateReports($schedule);
 
@@ -78,24 +79,27 @@ class PmScheduleController extends Controller
     public function update(Request $request, PmSchedule $pmSchedule)
     {
         $request->validate([
-            'interval' => 'required|in:1_bulan,3_bulan',
-            'tahun'    => 'required|integer|min:2020|max:2099',
+            'interval'    => 'required|in:1_bulan,3_bulan',
+            'tahun'       => 'required|integer|min:2020|max:2099',
+            'target_week' => 'required|integer|min:1|max:5',
         ]);
 
-        $intervalChanged = $pmSchedule->interval !== $request->interval;
-        $tahunChanged    = (int) $pmSchedule->tahun !== (int) $request->tahun;
+        $intervalChanged   = $pmSchedule->interval !== $request->interval;
+        $tahunChanged      = (int) $pmSchedule->tahun !== (int) $request->tahun;
+        $targetWeekChanged = (int) $pmSchedule->target_week !== (int) $request->target_week;
 
-        DB::transaction(function () use ($request, $pmSchedule, $intervalChanged, $tahunChanged) {
+        DB::transaction(function () use ($request, $pmSchedule, $intervalChanged, $tahunChanged, $targetWeekChanged) {
             // Jika interval atau tahun berubah → hapus laporan pending lalu generate ulang
-            if ($intervalChanged || $tahunChanged) {
+            if ($intervalChanged || $tahunChanged || $targetWeekChanged) {
                 // Hanya hapus yg masih pending (yang sudah done/late jangan dihapus)
                 PmReport::where('pm_schedule_id', $pmSchedule->id)
                     ->where('status', 'pending')
                     ->delete();
 
                 $pmSchedule->update([
-                    'interval' => $request->interval,
-                    'tahun'    => $request->tahun,
+                    'interval'    => $request->interval,
+                    'tahun'       => $request->tahun,
+                    'target_week' => $request->target_week,
                 ]);
 
                 $pmSchedule->load('jig');
@@ -103,7 +107,7 @@ class PmScheduleController extends Controller
             }
         });
 
-        return back()->with('success', 'Schedule berhasil diupdate' . ($intervalChanged || $tahunChanged ? ' dan laporan PM di-generate ulang.' : '.'));
+        return back()->with('success', 'Schedule berhasil diupdate' . ($intervalChanged || $tahunChanged || $targetWeekChanged ? ' dan laporan PM di-generate ulang.' : '.'));
     }
 
     public function generateBulk(Request $request)
@@ -137,7 +141,7 @@ class PmScheduleController extends Controller
                     $existing->delete();
                 }
 
-                $schedule = PmSchedule::create(['jig_id' => $jig->id, 'interval' => $interval, 'tahun' => $tahun]);
+                $schedule = PmSchedule::create(['jig_id' => $jig->id, 'interval' => $interval, 'tahun' => $tahun, 'target_week' => 3]);
                 $schedule->setRelation('jig', $jig);
                 $this->service->generateReports($schedule);
                 $created++;

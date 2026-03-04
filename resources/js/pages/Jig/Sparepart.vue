@@ -2,9 +2,9 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
-import { Package, Plus, Pencil, Trash2, X, AlertTriangle, ArrowUp } from 'lucide-vue-next';
+import { Package, Plus, Pencil, Trash2, X, AlertTriangle, ArrowUp, History } from 'lucide-vue-next';
 
-interface Sparepart { id: number; name: string; satuan: string; stok: number; stok_minimum: number; }
+interface Sparepart { id: number; sap_id: string|null; name: string; satuan: string; stok: number; stok_minimum: number; }
 interface Props {
     spareparts:   Sparepart[];
     lowStokCount: number;
@@ -25,11 +25,11 @@ watch(filterSearch, () => { clearTimeout(timer); timer = setTimeout(() => applyF
 watch(filterLow, () => applyFilter());
 const applyFilter = () => router.get('/jig/sparepart', { search: filterSearch.value, filter: filterLow.value }, { preserveState: true, preserveScroll: true });
 
-const form = useForm({ name: '', satuan: '', stok: 0, stok_minimum: 0 });
+const form     = useForm({ sap_id: '', name: '', satuan: '', stok: 0, stok_minimum: 0 });
 const stokForm = useForm({ qty: '' });
 
 const openCreate = () => { editTarget.value = null; form.reset(); showModal.value = true; };
-const openEdit   = (sp: Sparepart) => { editTarget.value = sp; form.name = sp.name; form.satuan = sp.satuan; form.stok = sp.stok; form.stok_minimum = sp.stok_minimum; showModal.value = true; };
+const openEdit   = (sp: Sparepart) => { editTarget.value = sp; form.sap_id = sp.sap_id ?? ''; form.name = sp.name; form.satuan = sp.satuan; form.stok = sp.stok; form.stok_minimum = sp.stok_minimum; showModal.value = true; };
 const closeModal = () => { showModal.value = false; editTarget.value = null; form.reset(); };
 const openStok   = (sp: Sparepart) => { stokTarget.value = sp; stokForm.reset(); showStokModal.value = true; };
 const closeStok  = () => { showStokModal.value = false; stokTarget.value = null; stokForm.reset(); };
@@ -70,13 +70,18 @@ const stokStatus = (sp: Sparepart) => {
                     </h1>
                     <p class="text-sm text-gray-500 mt-0.5">Kelola sparepart dan stok JIG</p>
                 </div>
-                <button @click="openCreate"
-                    class="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-sm">
-                    <Plus class="w-4 h-4" /> Tambah Sparepart
-                </button>
+                <div class="flex items-center gap-2">
+                    <button @click="router.visit('/jig/sparepart/history')"
+                        class="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors font-medium text-sm">
+                        <History class="w-4 h-4" /> History
+                    </button>
+                    <button @click="openCreate"
+                        class="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-sm">
+                        <Plus class="w-4 h-4" /> Tambah Sparepart
+                    </button>
+                </div>
             </div>
 
-            <!-- Low stok alert -->
             <div v-if="lowStokCount > 0" class="flex items-center gap-3 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl text-sm">
                 <AlertTriangle class="w-5 h-5 text-yellow-600 flex-shrink-0" />
                 <div>
@@ -86,9 +91,8 @@ const stokStatus = (sp: Sparepart) => {
                 </div>
             </div>
 
-            <!-- Filter -->
             <div class="flex flex-wrap items-center gap-2">
-                <input v-model="filterSearch" type="text" placeholder="Cari nama sparepart..."
+                <input v-model="filterSearch" type="text" placeholder="Cari nama / ID SAP..."
                     class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none w-52" />
                 <button @click="filterLow = filterLow === 'low' ? '' : 'low'"
                     :class="['px-3 py-2 rounded-xl text-xs font-semibold transition-all border',
@@ -98,12 +102,12 @@ const stokStatus = (sp: Sparepart) => {
                 <span class="text-xs text-gray-400">{{ spareparts.length }} item</span>
             </div>
 
-            <!-- Table -->
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
                             <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">ID SAP</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Nama</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Satuan</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Stok</th>
@@ -114,10 +118,11 @@ const stokStatus = (sp: Sparepart) => {
                         </thead>
                         <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
                             <tr v-if="spareparts.length === 0">
-                                <td colspan="6" class="py-14 text-center text-gray-400 text-sm">Belum ada sparepart</td>
+                                <td colspan="7" class="py-14 text-center text-gray-400 text-sm">Belum ada sparepart</td>
                             </tr>
                             <tr v-for="sp in spareparts" :key="sp.id"
                                 :class="['hover:bg-gray-50/80 transition-colors', sp.stok <= sp.stok_minimum && sp.stok_minimum > 0 ? 'bg-yellow-50/30' : '']">
+                                <td class="px-4 py-3 text-xs text-gray-400 font-mono">{{ sp.sap_id ?? '—' }}</td>
                                 <td class="px-4 py-3 text-xs font-bold text-gray-900 dark:text-white">{{ sp.name }}</td>
                                 <td class="px-4 py-3 text-center text-xs text-gray-500">{{ sp.satuan }}</td>
                                 <td class="px-4 py-3 text-center">
@@ -152,7 +157,6 @@ const stokStatus = (sp: Sparepart) => {
             </div>
         </div>
 
-        <!-- Create/Edit Modal -->
         <div v-if="showModal" class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full shadow-2xl">
                 <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
@@ -160,6 +164,11 @@ const stokStatus = (sp: Sparepart) => {
                     <button @click="closeModal" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
                 </div>
                 <form @submit.prevent="submit" class="p-5 space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">ID SAP</label>
+                        <input v-model="form.sap_id" placeholder="Opsional" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none font-mono" />
+                        <p v-if="form.errors.sap_id" class="text-xs text-red-500 mt-1">{{ form.errors.sap_id }}</p>
+                    </div>
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Nama <span class="text-red-500">*</span></label>
                         <input v-model="form.name" required class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
@@ -172,11 +181,11 @@ const stokStatus = (sp: Sparepart) => {
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Stok Awal</label>
-                            <input v-model="form.stok" type="number" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
+                            <input v-model="form.stok" type="number" min="0" step="1" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
                         </div>
                         <div>
                             <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Stok Minimum</label>
-                            <input v-model="form.stok_minimum" type="number" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
+                            <input v-model="form.stok_minimum" type="number" min="0" step="1" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
                             <p class="text-xs text-gray-400 mt-1">Alert jika stok ≤ nilai ini</p>
                         </div>
                     </div>
@@ -191,7 +200,6 @@ const stokStatus = (sp: Sparepart) => {
             </div>
         </div>
 
-        <!-- Tambah Stok Modal -->
         <div v-if="showStokModal && stokTarget" class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-sm w-full shadow-2xl">
                 <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
@@ -201,14 +209,15 @@ const stokStatus = (sp: Sparepart) => {
                 <form @submit.prevent="submitStok" class="p-5 space-y-4">
                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-xs">
                         <p class="font-bold text-gray-900 dark:text-white">{{ stokTarget.name }}</p>
+                        <p v-if="stokTarget.sap_id" class="text-gray-400 font-mono">{{ stokTarget.sap_id }}</p>
                         <p class="text-gray-500 mt-0.5">Stok saat ini: <span class="font-bold text-indigo-600">{{ Math.floor(stokTarget.stok) }} {{ stokTarget.satuan }}</span></p>
                     </div>
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Jumlah Tambah <span class="text-red-500">*</span></label>
-                        <input v-model="stokForm.qty" type="number" min="0.01" step="0.01" required placeholder="0"
+                        <input v-model="stokForm.qty" type="number" min="1" step="1" required placeholder="0"
                             class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
                         <p v-if="stokForm.qty" class="text-xs text-gray-400 mt-1">
-                            Stok setelah: <span class="font-bold text-green-600">{{ Math.floor(parseFloat(stokTarget.stok as any) + parseFloat(stokForm.qty || '0')) }} {{ stokTarget.satuan }}</span>
+                            Stok setelah: <span class="font-bold text-green-600">{{ Math.floor(parseFloat(stokTarget.stok as any) + parseInt(stokForm.qty || '0')) }} {{ stokTarget.satuan }}</span>
                         </p>
                     </div>
                     <div class="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">

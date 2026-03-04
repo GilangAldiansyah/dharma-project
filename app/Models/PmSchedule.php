@@ -3,25 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PmSchedule extends Model
 {
-    protected $fillable = ['jig_id', 'interval', 'tahun', 'is_active'];
+    protected $fillable = ['jig_id', 'interval', 'tahun', 'target_week', 'is_active'];
 
     protected $casts = [
-        'is_active' => 'boolean',
-        'tahun'     => 'integer',
+        'is_active'   => 'boolean',
+        'target_week' => 'integer',
     ];
 
-    public function jig(): BelongsTo
-    {
-        return $this->belongsTo(Jig::class);
-    }
-
-    public function pmReports(): HasMany
-    {
-        return $this->hasMany(PmReport::class);
-    }
+    public function jig()     { return $this->belongsTo(Jig::class); }
+    public function reports() { return $this->hasMany(PmReport::class); }
 }

@@ -2,11 +2,11 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref, watch, computed } from 'vue';
-import { Calendar, Plus, Trash2, X, User, Zap, AlertTriangle, CheckCircle2, Info, Pencil } from 'lucide-vue-next';
+import { Calendar, Plus, Trash2, X, User, Zap, AlertTriangle, CheckCircle2, Info, Pencil, Search } from 'lucide-vue-next';
 
 interface Pic { id: number; name: string; }
 interface Jig { id: number; name: string; type: string; line: string; kategori: string; pic_id: number; pic: Pic; }
-interface PmSchedule { id: number; interval: '1_bulan'|'3_bulan'; tahun: number; is_active: boolean; jig: Jig; }
+interface PmSchedule { id: number; interval: '1_bulan'|'3_bulan'; tahun: number; target_week: number; is_active: boolean; jig: Jig; }
 
 interface Props {
     schedules: PmSchedule[]; jigs: Jig[]; pics: Pic[];
@@ -41,30 +41,86 @@ watch(previewTahun, (val) => {
     }, { preserveState: true, preserveScroll: true });
 });
 
-// Form tambah
-const form = useForm({ jig_id: null as number|null, interval: '1_bulan' as '1_bulan'|'3_bulan', tahun: new Date().getFullYear() });
+const form = useForm({ jig_id: null as number|null, interval: '1_bulan' as '1_bulan'|'3_bulan', tahun: new Date().getFullYear(), target_week: 3 });
 watch(() => form.jig_id, (id) => {
     const jig = props.jigs.find(j => j.id === id);
     if (jig?.kategori === 'regular')     form.interval = '1_bulan';
     if (jig?.kategori === 'slow_moving') form.interval = '3_bulan';
 });
 
-// Form edit
-const editForm = useForm({ interval: '1_bulan' as '1_bulan'|'3_bulan', tahun: new Date().getFullYear() });
+// ── Searchable JIG dropdown for Add modal ─────────────────────────────────
+const jigSearch      = ref('');
+const jigOpen        = ref(false);
+const selectedJig    = ref<Jig | null>(null);
+
+const filteredJigs = computed(() => {
+    const q = jigSearch.value.toLowerCase().trim();
+    if (!q) return props.jigs;
+    return props.jigs.filter(j =>
+        j.name.toLowerCase().includes(q) ||
+        j.line.toLowerCase().includes(q) ||
+        j.type.toLowerCase().includes(q)
+    );
+});
+
+const selectJig = (j: Jig) => {
+    selectedJig.value = j;
+    form.jig_id       = j.id;
+    jigSearch.value   = j.name;
+    jigOpen.value     = false;
+};
+
+const clearJig = () => {
+    selectedJig.value = null;
+    form.jig_id       = null;
+    jigSearch.value   = '';
+    jigOpen.value     = true;
+};
+
+const closeJigDropdown = () => { setTimeout(() => { jigOpen.value = false; }, 180); };
+
+const highlightMatch = (name: string, query: string): { text: string; match: boolean }[] => {
+    if (!query.trim()) return [{ text: name, match: false }];
+    const idx = name.toLowerCase().indexOf(query.toLowerCase().trim());
+    if (idx === -1) return [{ text: name, match: false }];
+    return [
+        { text: name.slice(0, idx),                         match: false },
+        { text: name.slice(idx, idx + query.trim().length), match: true  },
+        { text: name.slice(idx + query.trim().length),      match: false },
+    ].filter(p => p.text !== '');
+};
+// ─────────────────────────────────────────────────────────────────────────
+
+const editForm = useForm({ interval: '1_bulan' as '1_bulan'|'3_bulan', tahun: new Date().getFullYear(), target_week: 3 });
 
 const openEdit = (s: PmSchedule) => {
-    editTarget.value = s;
-    editForm.interval = s.interval;
-    editForm.tahun    = s.tahun;
-    showEditModal.value = true;
+    editTarget.value     = s;
+    editForm.interval    = s.interval;
+    editForm.tahun       = s.tahun;
+    editForm.target_week = s.target_week ?? 3;
+    showEditModal.value  = true;
 };
 const closeEdit = () => { showEditModal.value = false; editTarget.value = null; editForm.reset(); };
 
-// Form bulk
 const bulkForm = useForm({ tahun: new Date().getFullYear(), skip_exists: true });
 
+const openAdd = () => {
+    form.reset();
+    selectedJig.value = null;
+    jigSearch.value   = '';
+    jigOpen.value     = false;
+    showAddModal.value = true;
+};
+const closeAdd = () => {
+    showAddModal.value = false;
+    form.reset();
+    selectedJig.value = null;
+    jigSearch.value   = '';
+    jigOpen.value     = false;
+};
+
 const submitAdd = () => {
-    form.post('/jig/pm/schedule', { onSuccess: () => { showAddModal.value = false; form.reset(); } });
+    form.post('/jig/pm/schedule', { onSuccess: closeAdd });
 };
 const submitEdit = () => {
     if (!editTarget.value) return;
@@ -83,17 +139,16 @@ const destroy = (s: PmSchedule) => {
 };
 
 const KATEGORI_INTERVAL: Record<string, string> = { regular: '1 Bulan', slow_moving: '3 Bulan' };
-const intervalColor = (i: string) => i === '1_bulan' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700';
+const intervalColor  = (i: string) => i === '1_bulan' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700';
 const getTargetMonths = (i: string) => i === '1_bulan' ? 'Setiap bulan (12x/tahun)' : 'Jan · Apr · Jul · Okt (4x/tahun)';
 
 const bulkRegular    = computed(() => props.jigsBelumAda.filter(j => j.kategori === 'regular').length);
 const bulkSlowMoving = computed(() => props.jigsBelumAda.filter(j => j.kategori === 'slow_moving').length);
 const bulkTotal      = computed(() => bulkRegular.value + bulkSlowMoving.value);
 
-// Edit: show warning if interval or tahun will change
 const editWillRegenerate = computed(() => {
     if (!editTarget.value) return false;
-    return editForm.interval !== editTarget.value.interval || editForm.tahun !== editTarget.value.tahun;
+    return editForm.interval !== editTarget.value.interval || editForm.tahun !== editTarget.value.tahun || editForm.target_week !== (editTarget.value.target_week ?? 3);
 });
 </script>
 
@@ -102,7 +157,6 @@ const editWillRegenerate = computed(() => {
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'PM Schedule',href:'/jig/pm/schedule'}]">
         <div class="p-4 sm:p-6 space-y-5">
 
-            <!-- Header -->
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -115,20 +169,18 @@ const editWillRegenerate = computed(() => {
                         class="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl hover:shadow-lg transition-all font-semibold text-sm">
                         <Zap class="w-4 h-4" /> Generate Semua
                     </button>
-                    <button @click="showAddModal = true"
+                    <button @click="openAdd"
                         class="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-sm">
                         <Plus class="w-4 h-4" /> Tambah Manual
                     </button>
                 </div>
             </div>
 
-            <!-- Flash -->
             <div v-if="flash?.success" class="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-xl text-sm">
                 <CheckCircle2 class="w-5 h-5 text-green-600 flex-shrink-0" />
                 <p class="text-green-800 dark:text-green-200 font-medium">{{ flash.success }}</p>
             </div>
 
-            <!-- Filter -->
             <div class="flex flex-wrap items-center gap-2">
                 <select v-model="filterPic" class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none">
                     <option value="">Semua PIC</option>
@@ -144,7 +196,6 @@ const editWillRegenerate = computed(() => {
                 <span class="text-xs text-gray-400">{{ schedules.length }} schedule</span>
             </div>
 
-            <!-- Table -->
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -202,7 +253,6 @@ const editWillRegenerate = computed(() => {
             </div>
         </div>
 
-        <!-- ══ EDIT MODAL ══ -->
         <div v-if="showEditModal && editTarget" class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full shadow-2xl">
                 <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
@@ -213,14 +263,11 @@ const editWillRegenerate = computed(() => {
                     <button @click="closeEdit" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
                 </div>
                 <form @submit.prevent="submitEdit" class="p-5 space-y-4">
-                    <!-- JIG info (readonly) -->
                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
                         <p class="text-xs text-gray-500 font-semibold mb-1">JIG</p>
                         <p class="text-sm font-bold text-gray-900 dark:text-white">{{ editTarget.jig?.name }}</p>
                         <p class="text-xs text-gray-500 mt-0.5">{{ editTarget.jig?.line }} · PIC: {{ editTarget.jig?.pic?.name }}</p>
                     </div>
-
-                    <!-- Interval -->
                     <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">Interval</label>
                         <div class="flex gap-3">
@@ -239,23 +286,33 @@ const editWillRegenerate = computed(() => {
                         </div>
                         <p v-if="editForm.errors.interval" class="mt-1 text-xs text-red-500">{{ editForm.errors.interval }}</p>
                     </div>
-
-                    <!-- Tahun -->
                     <div>
                         <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">Tahun</label>
                         <input v-model="editForm.tahun" type="number" min="2020" max="2099" required
                             class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
                         <p v-if="editForm.errors.tahun" class="mt-1 text-xs text-red-500">{{ editForm.errors.tahun }}</p>
                     </div>
-
-                    <!-- Warning jika akan re-generate -->
+                    <div>
+                        <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">PM di Minggu ke-</label>
+                        <div class="flex gap-2">
+                            <button v-for="w in [1,2,3,4,5]" :key="w" type="button"
+                                @click="editForm.target_week = w"
+                                :class="['flex-1 py-2 rounded-xl font-bold text-sm transition-all border-2',
+                                    editForm.target_week === w
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                                        : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-300']">
+                                {{ w }}
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Minggu ke-{{ editForm.target_week }} di setiap bulan (Senin s/d Minggu)</p>
+                        <p v-if="editForm.errors.target_week" class="mt-1 text-xs text-red-500">{{ editForm.errors.target_week }}</p>
+                    </div>
                     <div v-if="editWillRegenerate" class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
                         <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                         <p class="text-xs text-amber-700 dark:text-amber-300">
                             Laporan PM <strong>pending</strong> untuk schedule ini akan dihapus dan di-generate ulang sesuai interval/tahun baru. Laporan yang sudah done/late tetap aman.
                         </p>
                     </div>
-
                     <div class="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
                         <button type="submit" :disabled="editForm.processing"
                             class="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 font-semibold text-sm">
@@ -270,7 +327,6 @@ const editWillRegenerate = computed(() => {
             </div>
         </div>
 
-        <!-- ══ BULK GENERATE MODAL ══ -->
         <div v-if="showBulkModal" class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
                 <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -352,37 +408,102 @@ const editWillRegenerate = computed(() => {
             </div>
         </div>
 
-        <!-- ══ ADD MANUAL MODAL ══ -->
         <div v-if="showAddModal" class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
             <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full shadow-2xl">
                 <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
                     <h2 class="text-lg font-bold text-gray-900 dark:text-white">Tambah Schedule Manual</h2>
-                    <button @click="showAddModal = false; form.reset()" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
+                    <button @click="closeAdd" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
                 </div>
                 <form @submit.prevent="submitAdd" class="p-5 space-y-4">
+
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">JIG <span class="text-red-500">*</span></label>
-                        <select v-model="form.jig_id" required class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none">
-                            <option :value="null" disabled>Pilih JIG</option>
-                            <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }} — {{ j.kategori === 'regular' ? 'Regular' : 'Slow Moving' }}</option>
-                        </select>
+                        <div class="relative">
+                            <div class="relative">
+                                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                <input
+                                    v-model="jigSearch"
+                                    type="text"
+                                    placeholder="Cari JIG..."
+                                    autocomplete="off"
+                                    @focus="jigOpen = true"
+                                    @blur="closeJigDropdown"
+                                    :class="['w-full pl-7 pr-7 py-2 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
+                                        selectedJig
+                                            ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
+                                            : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
+                                />
+                                <button v-if="selectedJig" type="button" @click="clearJig"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
+                                    <X class="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                            <div v-if="jigOpen"
+                                class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                                <div v-if="filteredJigs.length === 0"
+                                    class="px-3 py-3 text-xs text-gray-400 text-center">
+                                    Tidak ada JIG "{{ jigSearch }}"
+                                </div>
+                                <button
+                                    v-for="j in filteredJigs" :key="j.id"
+                                    type="button"
+                                    @mousedown.prevent="selectJig(j)"
+                                    :class="['w-full text-left px-3 py-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors',
+                                        selectedJig?.id === j.id ? 'bg-indigo-50 dark:bg-indigo-900/30' : '']">
+                                    <span class="block text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                        <template v-for="(part, pi) in highlightMatch(j.name, jigSearch)" :key="pi">
+                                            <mark v-if="part.match" class="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-white rounded px-0.5 not-italic">{{ part.text }}</mark>
+                                            <span v-else>{{ part.text }}</span>
+                                        </template>
+                                    </span>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        <span class="text-xs text-gray-400">{{ j.type }} — {{ j.line }}</span>
+                                        <span :class="['px-1.5 py-0.5 rounded text-xs font-bold',
+                                            j.kategori === 'regular' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700']">
+                                            {{ j.kategori === 'regular' ? '1 Bln' : '3 Bln' }}
+                                        </span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
                         <p v-if="form.errors.jig_id" class="mt-1 text-xs text-red-500">{{ form.errors.jig_id }}</p>
                     </div>
-                    <div v-if="form.jig_id" class="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3 border border-indigo-100 flex items-center justify-between text-xs">
-                        <div class="flex items-center gap-1.5"><User class="w-3.5 h-3.5 text-indigo-500" /><span class="text-indigo-700 font-medium">PIC: {{ jigs.find(j => j.id === form.jig_id)?.pic?.name ?? '-' }}</span></div>
+
+                    <div v-if="selectedJig" class="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3 border border-indigo-100 flex items-center justify-between text-xs">
+                        <div class="flex items-center gap-1.5"><User class="w-3.5 h-3.5 text-indigo-500" /><span class="text-indigo-700 font-medium">PIC: {{ selectedJig.pic?.name ?? '-' }}</span></div>
                         <span :class="['px-2 py-0.5 rounded-full font-bold', form.interval === '1_bulan' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700']">
                             {{ form.interval === '1_bulan' ? '1 Bulan' : '3 Bulan' }}
                         </span>
                     </div>
+
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Tahun <span class="text-red-500">*</span></label>
                         <input v-model="form.tahun" type="number" min="2020" max="2099" required class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-indigo-500 focus:outline-none" />
                     </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
+                            PM di Minggu ke- <span class="text-red-500">*</span>
+                        </label>
+                        <div class="flex gap-2">
+                            <button v-for="w in [1,2,3,4,5]" :key="w" type="button"
+                                @click="form.target_week = w"
+                                :class="['flex-1 py-2 rounded-xl font-bold text-sm transition-all border-2',
+                                    form.target_week === w
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                                        : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-300']">
+                                {{ w }}
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Minggu ke-{{ form.target_week }} di setiap bulan (Senin s/d Minggu)</p>
+                        <p v-if="form.errors.target_week" class="mt-1 text-xs text-red-500">{{ form.errors.target_week }}</p>
+                    </div>
+
                     <div class="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-                        <button type="submit" :disabled="form.processing" class="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 font-semibold text-sm">
+                        <button type="submit" :disabled="form.processing || !selectedJig" class="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 font-semibold text-sm">
                             {{ form.processing ? 'Menyimpan...' : 'Simpan & Generate' }}
                         </button>
-                        <button type="button" @click="showAddModal = false; form.reset()" class="px-5 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium text-sm">Batal</button>
+                        <button type="button" @click="closeAdd" class="px-5 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium text-sm">Batal</button>
                     </div>
                 </form>
             </div>

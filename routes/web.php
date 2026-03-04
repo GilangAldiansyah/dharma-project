@@ -297,6 +297,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // ── Master JIG ────────────────────────────────────────────────────────────────
     Route::middleware('permission:jig.view')->group(function () {
         Route::get('/jig', [JigController::class, 'index'])->name('jig.index');
+        Route::get('/jig/sparepart/history', [SparepartController::class, 'history'])->name('jig.sparepart.history');
     });
     Route::middleware('permission:jig.edit')->group(function () {
         Route::post('/jig', [JigController::class, 'store'])->name('jig.store');
@@ -313,6 +314,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/jig/sparepart/{sparepart}', [SparepartController::class, 'update'])->name('jig.sparepart.update');
         Route::delete('/jig/sparepart/{sparepart}', [SparepartController::class, 'destroy'])->name('jig.sparepart.destroy');
         Route::post('/jig/sparepart/{sparepart}/tambah-stok', [SparepartController::class, 'tambahStok'])->name('jig.sparepart.tambah-stok');
+        Route::post('/jig/sparepart/{sparepart}/kurangi-stok', [SparepartController::class, 'kurangiStok'])->name('jig.sparepart.kurangi-stok');
     });
 
     // ── PM Schedule ───────────────────────────────────────────────────────────────
@@ -334,6 +336,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/jig/pm/report/{pmReport}/submit', [PmReportController::class, 'submit'])
         ->middleware('permission:jig.pic')
         ->name('jig.pm.report.submit');
+    Route::post('/jig/pm/report/{pmReport}/close-nok', [PmReportController::class, 'closeNok'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.pm.report.close-nok');
 
     // ── CM Report ─────────────────────────────────────────────────────────────────
     Route::middleware('permission:jig.view')->group(function () {
@@ -347,7 +352,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('permission:jig.pic')
         ->name('jig.cm.update');
     Route::post('/jig/cm/{cmReport}/close', [CmReportController::class, 'close'])
-        ->middleware('permission:jig.leader')
+        ->middleware('permission:jig.pic')
         ->name('jig.cm.close');
 
     Route::post('/ai/chat', [AiChatController::class, 'chat']);
