@@ -4,7 +4,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref, watch, computed } from 'vue';
 import {
     Wrench, CheckCircle2, Clock, AlertCircle, X, Plus, Trash2,
-    Package, FileText, Upload, Loader2, Image as ImageIcon, Search
+    Package, FileText, Upload, Loader2, Image as ImageIcon, Search, Filter
 } from 'lucide-vue-next';
 
 interface Jig       { id: number; name: string; type: string; line: string; }
@@ -44,6 +44,7 @@ const flash = computed(() => (page.props as any).flash);
 
 const filterStatus = ref(props.filters.status ?? '');
 const filterJig    = ref(props.filters.jig_id  ?? '');
+const showFilterPanel = ref(false);
 
 watch([filterStatus, filterJig], () => {
     router.get('/jig/cm', {
@@ -215,98 +216,144 @@ const fmt = (d: string | null) => {
     return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-const statusCfg: Record<string, { label: string; badge: string; row: string; icon: any }> = {
-    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700',       row: '',                icon: AlertCircle },
-    in_progress: { label: 'In Progress', badge: 'bg-yellow-100 text-yellow-700', row: 'bg-yellow-50/20', icon: Clock },
-    closed:      { label: 'Closed',      badge: 'bg-green-100 text-green-700',   row: 'bg-green-50/20',  icon: CheckCircle2 },
+const statusCfg: Record<string, { label: string; badge: string; cardBorder: string; icon: any }> = {
+    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',         cardBorder: 'border-l-red-400',    icon: AlertCircle },
+    in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400', cardBorder: 'border-l-amber-400',  icon: Clock },
+    closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
 };
+
+const activeFilterCount = computed(() => {
+    let c = 0;
+    if (filterStatus.value) c++;
+    if (filterJig.value) c++;
+    return c;
+});
 </script>
 
 <template>
     <Head title="CM Report" />
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'CM Report',href:'/jig/cm'}]">
-        <div class="p-4 sm:p-6 space-y-5">
+        <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
-            <div class="flex items-start justify-between gap-4">
+            <div class="flex items-start justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Wrench class="w-6 h-6 text-orange-500" /> CM Report
+                    <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <span class="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-orange-500 rounded-xl flex-shrink-0">
+                            <Wrench class="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                        </span>
+                        CM Report
                     </h1>
-                    <p class="text-sm text-gray-500 mt-0.5">Laporan corrective maintenance JIG</p>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">Corrective Maintenance JIG</p>
                 </div>
                 <button @click="openAdd"
-                    class="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-semibold text-sm transition-colors shadow-sm">
-                    <Plus class="w-4 h-4" /> Buat Laporan CM
+                    class="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-sm flex-shrink-0">
+                    <Plus class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span class="hidden sm:inline">Buat Laporan CM</span>
+                    <span class="sm:hidden">Buat</span>
                 </button>
             </div>
 
             <div v-if="flash?.success"
-                class="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl text-sm">
-                <CheckCircle2 class="w-5 h-5 text-green-600 flex-shrink-0" />
-                <p class="text-green-800 dark:text-green-200 font-medium">{{ flash.success }}</p>
+                class="flex items-center gap-3 p-3 sm:p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                <CheckCircle2 class="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 flex-shrink-0" />
+                <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
-            <div class="grid grid-cols-3 gap-3">
-                <div class="text-center p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
+            <div class="grid grid-cols-3 gap-2 sm:gap-3">
+                <div class="text-center p-3 sm:p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                     <p class="text-xs text-red-500 font-semibold flex items-center justify-center gap-1">
-                        <AlertCircle class="w-3 h-3" /> Open
+                        <AlertCircle class="w-3 h-3" /><span class="hidden sm:inline">Open</span>
                     </p>
-                    <p class="text-3xl font-black text-red-600 mt-1">{{ summary.open }}</p>
+                    <p class="text-2xl sm:text-3xl font-black text-red-600 mt-0.5">{{ summary.open }}</p>
+                    <p class="text-xs text-red-500 sm:hidden font-semibold">Open</p>
                 </div>
-                <div class="text-center p-4 rounded-2xl bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-100 dark:border-yellow-800">
-                    <p class="text-xs text-yellow-600 font-semibold flex items-center justify-center gap-1">
-                        <Clock class="w-3 h-3" /> In Progress
+                <div class="text-center p-3 sm:p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800">
+                    <p class="text-xs text-amber-600 font-semibold flex items-center justify-center gap-1">
+                        <Clock class="w-3 h-3" /><span class="hidden sm:inline">In Progress</span>
                     </p>
-                    <p class="text-3xl font-black text-yellow-600 mt-1">{{ summary.in_progress }}</p>
+                    <p class="text-2xl sm:text-3xl font-black text-amber-600 mt-0.5">{{ summary.in_progress }}</p>
+                    <p class="text-xs text-amber-600 sm:hidden font-semibold">Progress</p>
                 </div>
-                <div class="text-center p-4 rounded-2xl bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800">
-                    <p class="text-xs text-green-600 font-semibold flex items-center justify-center gap-1">
-                        <CheckCircle2 class="w-3 h-3" /> Closed
+                <div class="text-center p-3 sm:p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800">
+                    <p class="text-xs text-emerald-600 font-semibold flex items-center justify-center gap-1">
+                        <CheckCircle2 class="w-3 h-3" /><span class="hidden sm:inline">Closed</span>
                     </p>
-                    <p class="text-3xl font-black text-green-600 mt-1">{{ summary.closed }}</p>
+                    <p class="text-2xl sm:text-3xl font-black text-emerald-600 mt-0.5">{{ summary.closed }}</p>
+                    <p class="text-xs text-emerald-600 sm:hidden font-semibold">Closed</p>
                 </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-                <select v-model="filterStatus"
-                    class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-orange-500 focus:outline-none">
-                    <option value="">Semua Status</option>
-                    <option value="open">Open</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="closed">Closed</option>
-                </select>
-                <select v-model="filterJig"
-                    class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-orange-500 focus:outline-none min-w-[160px]">
-                    <option value="">Semua JIG</option>
-                    <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }}</option>
-                </select>
-                <span class="text-xs text-gray-400">{{ reports.length }} laporan</span>
+            <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-2">
+                    <button @click="showFilterPanel = !showFilterPanel"
+                        :class="['relative flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-sm font-medium transition-colors',
+                            showFilterPanel || activeFilterCount > 0
+                                ? 'bg-orange-500 border-orange-500 text-white'
+                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-orange-400']">
+                        <Filter class="w-4 h-4" />
+                        <span>Filter</span>
+                        <span v-if="activeFilterCount > 0"
+                            class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                            {{ activeFilterCount }}
+                        </span>
+                    </button>
+                    <span class="text-xs text-gray-400">{{ reports.length }} laporan</span>
+                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; filterJig = ''" class="text-xs text-orange-500 font-semibold ml-auto">Reset filter</button>
+                </div>
+
+                <div v-if="showFilterPanel" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-3 shadow-sm">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Status</label>
+                        <div class="flex flex-wrap gap-2">
+                            <button v-for="opt in [{v:'',l:'Semua'},{v:'open',l:'Open'},{v:'in_progress',l:'In Progress'},{v:'closed',l:'Closed'}]"
+                                :key="opt.v"
+                                @click="filterStatus = opt.v"
+                                :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors active:scale-95',
+                                    filterStatus === opt.v
+                                        ? 'bg-orange-500 text-white'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200']">
+                                {{ opt.l }}
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">JIG</label>
+                        <select v-model="filterJig"
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none">
+                            <option value="">Semua JIG</option>
+                            <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }}</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
-            <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
                             <tr>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">JIG</th>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">PIC</th>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Tanggal</th>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Deskripsi</th>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Penyebab</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">SP</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Status</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Aksi</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">JIG</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">PIC</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Tanggal</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Deskripsi</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Penyebab</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">SP</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Aksi</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
                             <tr v-if="reports.length === 0">
-                                <td colspan="8" class="py-14 text-center text-gray-400 text-sm">Tidak ada laporan CM</td>
+                                <td colspan="8" class="py-16 text-center text-gray-400 text-sm">
+                                    <Wrench class="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                                    Tidak ada laporan CM
+                                </td>
                             </tr>
                             <tr v-for="r in reports" :key="r.id"
-                                :class="['hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors', statusCfg[r.status].row]">
+                                class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
                                 <td class="px-4 py-3">
                                     <p class="text-xs font-bold text-gray-900 dark:text-white">{{ r.jig?.name }}</p>
-                                    <p class="text-xs text-gray-400">{{ r.jig?.type }} — {{ r.jig?.line }}</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">{{ r.jig?.type }} — {{ r.jig?.line }}</p>
                                 </td>
                                 <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{{ r.pic?.name }}</td>
                                 <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{{ fmt(r.report_date) }}</td>
@@ -319,7 +366,7 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
                                 </td>
                                 <td class="px-4 py-3 text-center">
                                     <span v-if="r.spareparts?.length"
-                                        class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold">
+                                        class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
                                         <Package class="w-3 h-3" /> {{ r.spareparts.length }}
                                     </span>
                                     <span v-else class="text-xs text-gray-300">—</span>
@@ -337,7 +384,7 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
                                             <FileText class="w-3 h-3" /> Detail
                                         </button>
                                         <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openClose(r)"
-                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors">
+                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors">
                                             <CheckCircle2 class="w-3 h-3" /> Close
                                         </button>
                                     </div>
@@ -347,23 +394,87 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
                     </table>
                 </div>
             </div>
+
+            <div class="lg:hidden space-y-2.5">
+                <div v-if="reports.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
+                    <Wrench class="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                    <p class="text-gray-400 text-sm">Tidak ada laporan CM</p>
+                </div>
+                <div v-for="r in reports" :key="r.id"
+                    :class="['bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden border-l-4', statusCfg[r.status].cardBorder]">
+                    <div class="p-3.5">
+                        <div class="flex items-start justify-between gap-2 mb-2.5">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-bold text-gray-900 dark:text-white leading-tight">{{ r.jig?.name }}</p>
+                                <p class="text-xs text-gray-400 mt-0.5">{{ r.jig?.type }} — {{ r.jig?.line }}</p>
+                            </div>
+                            <div class="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+                                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold', statusCfg[r.status].badge]">
+                                    <component :is="statusCfg[r.status].icon" class="w-3 h-3" />
+                                    {{ statusCfg[r.status].label }}
+                                </span>
+                                <span v-if="r.spareparts?.length"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
+                                    <Package class="w-3 h-3" /> {{ r.spareparts.length }} SP
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-2.5">
+                            <div>
+                                <span class="text-gray-400">PIC</span>
+                                <p class="font-semibold text-gray-700 dark:text-gray-300">{{ r.pic?.name }}</p>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Tanggal</span>
+                                <p class="font-semibold text-gray-700 dark:text-gray-300">{{ fmt(r.report_date) }}</p>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-400">Deskripsi</span>
+                                <p class="font-semibold text-gray-700 dark:text-gray-300 line-clamp-2">{{ r.description }}</p>
+                            </div>
+                            <div v-if="r.penyebab" class="col-span-2">
+                                <span class="text-gray-400">Penyebab</span>
+                                <p class="font-semibold text-gray-700 dark:text-gray-300 line-clamp-1">{{ r.penyebab }}</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
+                            <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openClose(r)"
+                                class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition-all">
+                                <CheckCircle2 class="w-3.5 h-3.5" /> Close
+                            </button>
+                            <button @click="openDetail(r)"
+                                :class="['flex items-center justify-center gap-1.5 py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl text-xs font-bold hover:bg-gray-200 active:scale-95 transition-all',
+                                    (isLeader || r.pic_id === authId) && r.status !== 'closed' ? '' : 'flex-1']">
+                                <FileText class="w-3.5 h-3.5" /> Detail
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div v-if="showAddModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl">
-                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
-                    <h2 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Wrench class="w-5 h-5 text-orange-500" /> Buat Laporan CM
-                    </h2>
-                    <button @click="closeAdd" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-5 h-5" /></button>
+        <div v-if="showAddModal"
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                        <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <Wrench class="w-4 h-4 text-orange-500" /> Buat Laporan CM
+                        </h2>
+                        <button @click="closeAdd" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                            <X class="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
 
-                <form @submit.prevent="submitAdd" class="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-
+                <form @submit.prevent="submitAdd" class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 sm:py-5 space-y-4">
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">JIG <span class="text-red-500">*</span></label>
                         <select v-model="form.jig_id"
-                            class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none">
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none">
                             <option :value="null" disabled>Pilih JIG</option>
                             <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }} — {{ j.type }} ({{ j.line }})</option>
                         </select>
@@ -372,61 +483,63 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
 
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Deskripsi Kerusakan <span class="text-red-500">*</span></label>
-                        <textarea v-model="form.description" rows="2" placeholder="Jelaskan kerusakan yang terjadi..."
-                            class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none"></textarea>
+                        <textarea v-model="form.description" rows="3" placeholder="Jelaskan kerusakan yang terjadi..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
                         <p v-if="form.errors.description" class="mt-1 text-xs text-red-500">{{ form.errors.description }}</p>
                     </div>
 
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Penyebab</label>
                         <textarea v-model="form.penyebab" rows="2" placeholder="Root cause kerusakan..."
-                            class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none"></textarea>
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
                     </div>
 
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Tindakan Perbaikan</label>
                         <textarea v-model="form.perbaikan" rows="2" placeholder="Tindakan yang dilakukan untuk perbaikan..."
-                            class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none"></textarea>
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Foto Kerusakan</label>
-                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-4 transition-all',
-                                previewA ? 'border-orange-300 bg-orange-50 dark:bg-orange-900/20' : 'border-gray-200 hover:border-orange-300 bg-gray-50 dark:bg-gray-700/30']">
+                            <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">Foto Kerusakan</label>
+                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                previewA ? 'border-orange-300 bg-orange-50 dark:bg-orange-900/20 p-0 overflow-hidden' : 'border-gray-200 hover:border-orange-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
                                 <div v-if="!previewA && !isCompressingA" class="text-center">
-                                    <Upload class="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                                    <p class="text-xs text-gray-500">Upload foto</p>
+                                    <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
+                                    <p class="text-xs text-gray-500 font-medium">Upload foto</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">Tap untuk pilih</p>
                                 </div>
-                                <Loader2 v-else-if="isCompressingA" class="w-6 h-6 text-orange-400 animate-spin" />
-                                <img v-else-if="previewA" :src="previewA" class="w-full max-h-28 object-cover rounded-lg" />
-                                <input type="file" accept="image/*" @change="e => handlePhoto(e, 'photo')" class="hidden" />
+                                <Loader2 v-else-if="isCompressingA" class="w-7 h-7 text-orange-400 animate-spin" />
+                                <img v-else-if="previewA" :src="previewA" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo')" class="hidden" />
                             </label>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Foto Perbaikan</label>
-                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-4 transition-all',
-                                previewB ? 'border-green-300 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 hover:border-green-300 bg-gray-50 dark:bg-gray-700/30']">
+                            <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">Foto Perbaikan</label>
+                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                previewB ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 p-0 overflow-hidden' : 'border-gray-200 hover:border-emerald-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
                                 <div v-if="!previewB && !isCompressingB" class="text-center">
-                                    <Upload class="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                                    <p class="text-xs text-gray-500">Upload foto</p>
+                                    <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
+                                    <p class="text-xs text-gray-500 font-medium">Upload foto</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">Tap untuk pilih</p>
                                 </div>
-                                <Loader2 v-else-if="isCompressingB" class="w-6 h-6 text-green-400 animate-spin" />
-                                <img v-else-if="previewB" :src="previewB" class="w-full max-h-28 object-cover rounded-lg" />
-                                <input type="file" accept="image/*" @change="e => handlePhoto(e, 'photo_perbaikan')" class="hidden" />
+                                <Loader2 v-else-if="isCompressingB" class="w-7 h-7 text-emerald-400 animate-spin" />
+                                <img v-else-if="previewB" :src="previewB" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo_perbaikan')" class="hidden" />
                             </label>
                         </div>
                     </div>
 
                     <div>
-                        <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center justify-between mb-2.5">
                             <label class="text-sm font-semibold text-gray-700 dark:text-gray-300">Sparepart Diganti</label>
                             <button type="button" @click="addSp"
-                                class="flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-100 text-indigo-700 rounded-lg font-semibold hover:bg-indigo-200">
+                                class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 rounded-lg font-semibold hover:bg-indigo-200 active:scale-95 transition-all">
                                 <Plus class="w-3 h-3" /> Tambah
                             </button>
                         </div>
-                        <div v-for="(sp, i) in form.spareparts" :key="i" class="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2">
+                        <div v-for="(sp, i) in form.spareparts" :key="i" class="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2.5">
                             <div class="flex gap-2">
                                 <div class="relative flex-1">
                                     <div class="relative">
@@ -438,21 +551,20 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
                                             autocomplete="off"
                                             @focus="openSpDropdown(i)"
                                             @blur="closeSpDropdown(i)"
-                                            :class="['w-full pl-7 pr-7 py-2 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                            :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
                                                 sp.sparepart_id
                                                     ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
                                                     : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
                                         />
                                         <button v-if="sp.sparepart_id" type="button"
                                             @click="clearSpSelection(i)"
-                                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
+                                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors p-0.5">
                                             <X class="w-3 h-3" />
                                         </button>
                                     </div>
                                     <div v-if="spOpen[i]"
                                         class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                                        <div v-if="filteredSp(i).length === 0"
-                                            class="px-3 py-3 text-xs text-gray-400 text-center">
+                                        <div v-if="filteredSp(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
                                             Tidak ada hasil untuk "{{ spSearch[i] }}"
                                         </div>
                                         <button
@@ -471,117 +583,136 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
                                         </button>
                                     </div>
                                 </div>
-                                <input v-model="sp.qty" type="number" step="1" min="1" placeholder="Qty"
-                                    class="w-20 px-2 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none" />
-                                <button type="button" @click="removeSp(i)" class="p-2 text-red-500 hover:bg-red-50 rounded-lg">
-                                    <Trash2 class="w-3.5 h-3.5" />
+                                <input v-model="sp.qty" type="number" inputmode="numeric" step="1" min="1" placeholder="Qty"
+                                    class="w-16 sm:w-20 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
+                                <button type="button" @click="removeSp(i)"
+                                    class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
+                                    <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
                             <input v-model="sp.notes" type="text" placeholder="Keterangan penggantian (opsional)"
-                                class="w-full px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none" />
+                                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none transition-colors" />
                             <p v-if="sp.sparepart_id && selectedSpItem(sp.sparepart_id) && parseInt(sp.qty) > selectedSpItem(sp.sparepart_id)!.stok"
-                                class="text-xs text-red-500">
-                                ⚠ Stok tidak cukup (tersedia: {{ Math.floor(selectedSpItem(sp.sparepart_id)!.stok) }})
+                                class="text-xs text-red-500 flex items-center gap-1">
+                                <AlertCircle class="w-3 h-3" />
+                                Stok tidak cukup (tersedia: {{ Math.floor(selectedSpItem(sp.sparepart_id)!.stok) }})
                             </p>
                         </div>
                     </div>
 
-                    <div class="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-                        <button type="submit" :disabled="form.processing"
-                            class="flex-1 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 disabled:opacity-50 font-semibold text-sm">
-                            {{ form.processing ? 'Menyimpan...' : 'Buat Laporan' }}
-                        </button>
-                        <button type="button" @click="closeAdd"
-                            class="px-5 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium text-sm">
-                            Batal
-                        </button>
+                    <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-safe border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
+                        <div class="flex gap-3">
+                            <button type="button" @click="closeAdd"
+                                class="px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-semibold text-sm active:scale-95 transition-all">
+                                Batal
+                            </button>
+                            <button type="submit" :disabled="form.processing"
+                                class="flex-1 py-3 bg-orange-500 text-white rounded-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm active:scale-95 transition-all">
+                                {{ form.processing ? 'Menyimpan...' : 'Buat Laporan' }}
+                            </button>
+                        </div>
                     </div>
                 </form>
             </div>
         </div>
 
         <div v-if="showDetailModal && selectedReport"
-            class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-                <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                    <h2 class="text-lg font-bold text-gray-900 dark:text-white">Detail CM Report</h2>
-                    <button @click="showDetailModal = false" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+                <div class="sticky top-0 bg-white dark:bg-gray-800 z-10">
+                    <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                        <h2 class="text-base font-bold text-gray-900 dark:text-white">Detail CM Report</h2>
+                        <button @click="showDetailModal = false" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                            <X class="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
-                <div class="p-5 space-y-4">
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 space-y-2 text-xs">
-                        <div class="flex justify-between"><span class="text-gray-500">JIG</span><span class="font-bold text-gray-900 dark:text-white text-right max-w-[55%]">{{ selectedReport.jig?.name }}</span></div>
-                        <div class="flex justify-between"><span class="text-gray-500">PIC</span><span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.pic?.name }}</span></div>
-                        <div class="flex justify-between"><span class="text-gray-500">Tanggal</span><span class="font-bold text-gray-900 dark:text-white">{{ fmt(selectedReport.report_date) }}</span></div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-gray-500">Status</span>
-                            <span :class="['px-2 py-0.5 rounded-full font-bold', statusCfg[selectedReport.status].badge]">
+                <div class="p-4 sm:p-5 space-y-3.5">
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 space-y-2.5 text-xs">
+                        <div class="flex justify-between gap-2">
+                            <span class="text-gray-400 shrink-0">JIG</span>
+                            <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.jig?.name }}</span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-gray-400 shrink-0">PIC</span>
+                            <span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.pic?.name }}</span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-gray-400 shrink-0">Tanggal</span>
+                            <span class="font-bold text-gray-900 dark:text-white">{{ fmt(selectedReport.report_date) }}</span>
+                        </div>
+                        <div class="flex justify-between items-center gap-2">
+                            <span class="text-gray-400 shrink-0">Status</span>
+                            <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold', statusCfg[selectedReport.status].badge]">
+                                <component :is="statusCfg[selectedReport.status].icon" class="w-3 h-3" />
                                 {{ statusCfg[selectedReport.status].label }}
                             </span>
                         </div>
-                        <div v-if="selectedReport.closed_by" class="flex justify-between">
-                            <span class="text-gray-500">Ditutup oleh</span>
-                            <span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.closed_by.name }} · {{ fmt(selectedReport.closed_at) }}</span>
+                        <div v-if="selectedReport.closed_by" class="flex justify-between gap-2">
+                            <span class="text-gray-400 shrink-0">Ditutup oleh</span>
+                            <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.closed_by.name }} · {{ fmt(selectedReport.closed_at) }}</span>
                         </div>
                     </div>
 
-                    <div class="text-xs bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
-                        <p class="text-gray-500 font-semibold mb-1">Deskripsi Kerusakan</p>
-                        <p class="text-gray-700 dark:text-gray-300">{{ selectedReport.description }}</p>
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5">
+                        <p class="text-xs text-gray-400 font-semibold uppercase mb-1.5">Deskripsi Kerusakan</p>
+                        <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.description }}</p>
                     </div>
 
-                    <div v-if="selectedReport.penyebab" class="text-xs bg-red-50 dark:bg-red-900/20 rounded-xl p-3 border border-red-100 dark:border-red-800">
-                        <p class="text-red-500 font-semibold mb-1">Penyebab</p>
-                        <p class="text-gray-700 dark:text-gray-300">{{ selectedReport.penyebab }}</p>
+                    <div v-if="selectedReport.penyebab" class="bg-red-50 dark:bg-red-900/20 rounded-xl p-3.5 border border-red-100 dark:border-red-800">
+                        <p class="text-xs text-red-500 font-semibold uppercase mb-1.5">Penyebab</p>
+                        <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.penyebab }}</p>
                     </div>
 
-                    <div v-if="selectedReport.perbaikan" class="text-xs bg-green-50 dark:bg-green-900/20 rounded-xl p-3 border border-green-100 dark:border-green-800">
-                        <p class="text-green-600 font-semibold mb-1">Tindakan Perbaikan</p>
-                        <p class="text-gray-700 dark:text-gray-300">{{ selectedReport.perbaikan }}</p>
+                    <div v-if="selectedReport.perbaikan" class="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3.5 border border-emerald-100 dark:border-emerald-800">
+                        <p class="text-xs text-emerald-600 font-semibold uppercase mb-1.5">Tindakan Perbaikan</p>
+                        <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.perbaikan }}</p>
                     </div>
 
-                    <div v-if="selectedReport.action" class="text-xs bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3 border border-indigo-100 dark:border-indigo-800">
-                        <p class="text-indigo-600 font-semibold mb-1">Action (Leader)</p>
-                        <p class="text-gray-700 dark:text-gray-300">{{ selectedReport.action }}</p>
+                    <div v-if="selectedReport.action" class="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3.5 border border-indigo-100 dark:border-indigo-800">
+                        <p class="text-xs text-indigo-600 font-semibold uppercase mb-1.5">Action (Leader)</p>
+                        <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.action }}</p>
                     </div>
 
                     <div v-if="selectedReport.photo || selectedReport.photo_perbaikan" class="grid grid-cols-2 gap-3">
                         <div v-if="selectedReport.photo">
-                            <p class="text-xs font-semibold text-gray-500 uppercase mb-1.5 flex items-center gap-1">
+                            <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
                                 <ImageIcon class="w-3 h-3" /> Foto Kerusakan
                             </p>
                             <img :src="`/storage/${selectedReport.photo}`"
                                 @click="openImage(selectedReport.photo!)"
-                                class="w-full rounded-xl cursor-pointer hover:opacity-90 max-h-40 object-cover shadow-sm" />
+                                class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                         <div v-if="selectedReport.photo_perbaikan">
-                            <p class="text-xs font-semibold text-gray-500 uppercase mb-1.5 flex items-center gap-1">
+                            <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
                                 <ImageIcon class="w-3 h-3" /> Foto Perbaikan
                             </p>
                             <img :src="`/storage/${selectedReport.photo_perbaikan}`"
                                 @click="openImage(selectedReport.photo_perbaikan!)"
-                                class="w-full rounded-xl cursor-pointer hover:opacity-90 max-h-40 object-cover shadow-sm" />
+                                class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                     </div>
 
                     <div v-if="selectedReport.spareparts?.length">
-                        <p class="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                        <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1.5">
                             <Package class="w-3.5 h-3.5" /> Sparepart Diganti
                         </p>
-                        <div class="space-y-1.5">
+                        <div class="space-y-2">
                             <div v-for="sp in selectedReport.spareparts" :key="sp.sparepart?.id"
-                                class="px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                class="px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                                 <div class="flex justify-between text-xs">
                                     <span class="font-semibold text-gray-900 dark:text-white">{{ sp.sparepart?.name }}</span>
-                                    <span class="text-gray-500">{{ sp.qty }} {{ sp.sparepart?.satuan }}</span>
+                                    <span class="text-gray-500 font-medium">{{ sp.qty }} {{ sp.sparepart?.satuan }}</span>
                                 </div>
                                 <p v-if="sp.notes" class="text-xs text-gray-400 mt-0.5">{{ sp.notes }}</p>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="p-5 border-t border-gray-100 dark:border-gray-700">
+                <div class="sticky bottom-0 bg-white dark:bg-gray-800 p-4 border-t border-gray-100 dark:border-gray-700">
                     <button @click="showDetailModal = false"
-                        class="w-full py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium hover:bg-gray-200">
+                        class="w-full py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-semibold hover:bg-gray-200 active:scale-95 transition-all">
                         Tutup
                     </button>
                 </div>
@@ -589,42 +720,50 @@ const statusCfg: Record<string, { label: string; badge: string; row: string; ico
         </div>
 
         <div v-if="showCloseModal && selectedReport"
-            class="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-50 p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full shadow-2xl">
-                <div class="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-                    <h2 class="text-lg font-bold text-gray-900 dark:text-white">Tutup Laporan CM</h2>
-                    <button @click="showCloseModal = false" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X class="w-4 h-4" /></button>
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
+                <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                    <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <CheckCircle2 class="w-5 h-5 text-emerald-600" /> Tutup Laporan CM
+                    </h2>
+                    <button @click="showCloseModal = false" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        <X class="w-4 h-4" />
+                    </button>
                 </div>
-                <form @submit.prevent="submitClose" class="p-5 space-y-4">
-                    <div class="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3 border border-orange-100 text-xs">
-                        <p class="font-bold text-gray-900 dark:text-white">{{ selectedReport.jig?.name }}</p>
-                        <p class="text-gray-500 mt-0.5">{{ selectedReport.description }}</p>
+                <form @submit.prevent="submitClose" class="p-4 sm:p-5 space-y-4">
+                    <div class="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3.5 border border-orange-100 dark:border-orange-800">
+                        <p class="text-sm font-bold text-gray-900 dark:text-white">{{ selectedReport.jig?.name }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{{ selectedReport.description }}</p>
                     </div>
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
                             Action / Kesimpulan <span class="text-red-500">*</span>
                         </label>
-                        <textarea v-model="closeForm.action" rows="3" placeholder="Tuliskan action/kesimpulan penutupan..."
-                            class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-green-500 focus:outline-none resize-none"></textarea>
+                        <textarea v-model="closeForm.action" rows="4" placeholder="Tuliskan action/kesimpulan penutupan..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-emerald-500 focus:outline-none resize-none transition-colors"></textarea>
                         <p v-if="closeForm.errors.action" class="mt-1 text-xs text-red-500">{{ closeForm.errors.action }}</p>
                     </div>
-                    <div class="flex gap-3">
-                        <button type="submit" :disabled="closeForm.processing"
-                            class="flex-1 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 font-semibold text-sm">
-                            {{ closeForm.processing ? 'Menyimpan...' : 'Tutup Laporan' }}
-                        </button>
+                    <div class="flex gap-3 pb-safe">
                         <button type="button" @click="showCloseModal = false"
-                            class="px-5 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium text-sm">
+                            class="px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-semibold text-sm active:scale-95 transition-all">
                             Batal
+                        </button>
+                        <button type="submit" :disabled="closeForm.processing"
+                            class="flex-1 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50 font-bold text-sm active:scale-95 transition-all">
+                            {{ closeForm.processing ? 'Menyimpan...' : 'Tutup Laporan' }}
                         </button>
                     </div>
                 </form>
             </div>
         </div>
 
-        <div v-if="showImageModal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+        <div v-if="showImageModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
             @click="showImageModal = false">
-            <img :src="imageSrc" class="max-w-full max-h-full rounded-2xl object-contain" />
+            <button class="absolute top-4 right-4 p-2 bg-white/10 rounded-xl text-white hover:bg-white/20 transition-colors">
+                <X class="w-5 h-5" />
+            </button>
+            <img :src="imageSrc" class="max-w-full max-h-full rounded-xl object-contain" />
         </div>
 
     </AppLayout>

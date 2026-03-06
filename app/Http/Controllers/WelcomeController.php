@@ -107,7 +107,7 @@ class WelcomeController extends Controller
         ],
         [
             'id'          => 'jig-monitoring',
-            'title'       => 'JIG Monitoring',
+            'title'       => 'PE Jig Perfomance',
             'description' => 'Sistem monitoring preventive & corrective maintenance JIG',
             'icon'        => 'Wrench',
             'color'       => 'indigo',

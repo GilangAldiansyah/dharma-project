@@ -32,7 +32,8 @@ class PmReportController extends Controller
           ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
           ->whereYear('planned_week_start', $tahun)
           ->when($request->status, fn($q) => $q->where('status', $request->status))
-          ->orderBy('planned_week_start');
+          ->orderBy('planned_week_start')
+          ->orderBy('created_at');
 
         $reports = $query->get();
 
