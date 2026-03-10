@@ -5,8 +5,9 @@ import { ref, watch, computed } from 'vue';
 import {
     ClipboardList, CheckCircle2, Clock, AlertTriangle, X,
     Plus, Trash2, Package, FileText, Upload, Loader2, ShieldCheck, Search,
-    Filter
+    Filter, Download
 } from 'lucide-vue-next';
+import * as XLSX from 'xlsx';
 
 interface Sparepart { id: number; name: string; satuan: string; stok: number; }
 interface ReportSp  { sparepart: Sparepart; qty: number; notes: string | null; }
@@ -33,7 +34,7 @@ interface Props {
     spareparts: Sparepart[];
     summary:    { total: number; done: number; late: number; pending: number };
     isLeader:   boolean;
-    filters:    { bulan?: any; tahun?: any; status?: string };
+    filters:    { bulan?: any; tahun?: any; status?: string; minggu?: any };
 }
 
 const props = defineProps<Props>();
@@ -43,15 +44,98 @@ const flash = computed(() => (page.props as any).flash);
 const filterBulan  = ref(props.filters.bulan  ?? new Date().getMonth() + 1);
 const filterTahun  = ref(props.filters.tahun  ?? new Date().getFullYear());
 const filterStatus = ref(props.filters.status ?? '');
+const filterMinggu = ref(props.filters.minggu ?? '');
 const showFilterPanel = ref(false);
 
-watch([filterBulan, filterTahun, filterStatus], () => {
+watch([filterBulan, filterTahun, filterStatus, filterMinggu], () => {
     router.get('/jig/pm/report', {
         bulan:  filterBulan.value,
         tahun:  filterTahun.value,
         status: filterStatus.value,
+        minggu: filterMinggu.value,
     }, { preserveState: true, preserveScroll: true });
 });
+
+const BULAN_LABEL: Record<number | string, string> = {
+    1:'Januari',2:'Februari',3:'Maret',4:'April',5:'Mei',6:'Juni',
+    7:'Juli',8:'Agustus',9:'September',10:'Oktober',11:'November',12:'Desember',
+    all:'Semua Bulan',
+};
+
+const MINGGU_LIST = [1,2,3,4,5].map(w => ({ val: w, label: `Week ${w}` }));
+
+const periodeLabel = computed(() => {
+    const bulanStr = filterBulan.value === 'all'
+        ? `Tahun ${filterTahun.value}`
+        : `${BULAN_LABEL[filterBulan.value]} ${filterTahun.value}`;
+    return filterMinggu.value ? `${bulanStr} — Week ${filterMinggu.value}` : bulanStr;
+});
+
+const exportPm = () => {
+    const wb = XLSX.utils.book_new();
+
+    const detailHeader = [
+        'No', 'JIG', 'Tipe', 'Line', 'PIC',
+        'Planned Week Start', 'Planned Week End', 'Actual Date',
+        'Status', 'Kondisi',
+        'NOK Closed By', 'NOK Closed At',
+        'Catatan', 'Sparepart',
+        'Foto Checksheet', 'Foto Sparepart',
+    ];
+
+    const detailRows = filteredReports.value.map((r, i) => [
+        i + 1,
+        r.pm_schedule?.jig?.name        ?? '-',
+        r.pm_schedule?.jig?.type        ?? '-',
+        r.pm_schedule?.jig?.line        ?? '-',
+        r.pic?.name                     ?? '-',
+        r.planned_week_start            ?? '-',
+        r.planned_week_end              ?? '-',
+        r.actual_date                   ?? '-',
+        r.status === 'done' ? 'Selesai' : r.status === 'late' ? 'Terlambat' : 'Pending',
+        r.condition ? r.condition.toUpperCase() : '-',
+        r.nok_closed_by_user?.name      ?? '-',
+        r.nok_closed_at                 ?? '-',
+        r.notes                         ?? '-',
+        r.spareparts?.length
+            ? r.spareparts.map(s => `${s.sparepart?.name} (${s.qty} ${s.sparepart?.satuan})${s.notes ? ' — ' + s.notes : ''}`).join('; ')
+            : '-',
+        r.photo           ? `${window.location.origin}/storage/${r.photo}`           : '-',
+        r.photo_sparepart ? `${window.location.origin}/storage/${r.photo_sparepart}` : '-',
+    ]);
+
+    const wsDetail = XLSX.utils.aoa_to_sheet([detailHeader, ...detailRows]);
+    wsDetail['!cols'] = [
+        { wch: 4  }, { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 18 },
+        { wch: 20 }, { wch: 20 }, { wch: 14 },
+        { wch: 12 }, { wch: 10 },
+        { wch: 18 }, { wch: 16 },
+        { wch: 32 }, { wch: 48 },
+        { wch: 50 }, { wch: 50 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail');
+
+    const summaryRows = [
+        ['Laporan Preventive Maintenance'],
+        ['Periode', periodeLabel.value],
+        [],
+        ['RINGKASAN'],
+        ['Total', 'Selesai', 'Pending', 'Terlambat', 'Completion Rate'],
+        [
+            props.summary.total,
+            props.summary.done,
+            props.summary.pending,
+            props.summary.late,
+            props.summary.total > 0 ? `${Math.round((props.summary.done / props.summary.total) * 100)}%` : '0%',
+        ],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(summaryRows);
+    ws['!cols'] = [{ wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Summary');
+
+    XLSX.writeFile(wb, `PM_Report_${periodeLabel.value.replace(/\s+/g, '_')}.xlsx`);
+};
 
 const showSubmitModal   = ref(false);
 const showDetailModal   = ref(false);
@@ -278,9 +362,9 @@ const BULAN_LIST = [
 ];
 
 const statusCfg: Record<string, { label: string; badge: string; cardBorder: string; icon: any }> = {
-    pending: { label: 'Pending',   badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',   cardBorder: 'border-l-amber-400',   icon: Clock },
+    pending: { label: 'Pending',   badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',        cardBorder: 'border-l-amber-400',   icon: Clock },
     done:    { label: 'Selesai',   badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
-    late:    { label: 'Terlambat', badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',           cardBorder: 'border-l-red-400',     icon: AlertTriangle },
+    late:    { label: 'Terlambat', badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',                cardBorder: 'border-l-red-400',     icon: AlertTriangle },
 };
 
 const doneRate    = computed(() => props.summary.total > 0 ? (props.summary.done    / props.summary.total) * 100 : 0);
@@ -290,11 +374,11 @@ const pendingRate = computed(() => props.summary.total > 0 ? (props.summary.pend
 const activeFilterCount = computed(() => {
     let c = 0;
     if (filterStatus.value) c++;
-    if (selectedJig.value) c++;
+    if (selectedJig.value)  c++;
+    if (filterMinggu.value) c++;
     return c;
 });
 </script>
-
 <template>
     <Head title="PM Report" />
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'PM Report',href:'/jig/pm/report'}]">
@@ -310,6 +394,12 @@ const activeFilterCount = computed(() => {
                     </h1>
                     <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">Preventive Maintenance JIG</p>
                 </div>
+                <button @click="exportPm"
+                    class="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-sm flex-shrink-0">
+                    <Download class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span class="hidden sm:inline">Export Excel</span>
+                    <span class="sm:hidden">Export</span>
+                </button>
             </div>
 
             <div v-if="flash?.success"
@@ -357,11 +447,31 @@ const activeFilterCount = computed(() => {
 
             <div class="space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
-                    <select v-model="filterBulan" class="px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none w-full sm:w-auto">
+                    <select v-model="filterBulan"
+                        class="px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none w-full sm:w-auto">
                         <option v-for="b in BULAN_LIST" :key="b.val" :value="b.val">{{ b.label }}</option>
                     </select>
                     <input v-model="filterTahun" type="number" min="2020"
                         class="w-full sm:w-24 px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none" />
+
+                    <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-xl p-1 w-full sm:w-auto">
+                        <button @click="filterMinggu = ''"
+                            :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
+                                filterMinggu === ''
+                                    ? 'bg-white dark:bg-gray-600 text-indigo-600 shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300']">
+                            Semua
+                        </button>
+                        <button v-for="w in MINGGU_LIST" :key="w.val"
+                            @click="filterMinggu = w.val"
+                            :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
+                                filterMinggu == w.val
+                                    ? 'bg-white dark:bg-gray-600 text-indigo-600 shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300']">
+                            {{ w.label }}
+                        </button>
+                    </div>
+
                     <button @click="showFilterPanel = !showFilterPanel"
                         :class="['relative flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-sm font-medium transition-colors whitespace-nowrap w-full sm:w-auto justify-center sm:justify-start',
                             showFilterPanel || activeFilterCount > 0
@@ -416,9 +526,7 @@ const activeFilterCount = computed(() => {
                                 <div v-if="filteredJigs.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
                                     Tidak ada JIG "{{ jigSearch }}"
                                 </div>
-                                <button
-                                    v-for="j in filteredJigs" :key="j.name"
-                                    type="button"
+                                <button v-for="j in filteredJigs" :key="j.name" type="button"
                                     @mousedown.prevent="selectJig(j)"
                                     :class="['w-full text-left px-3 py-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors',
                                         selectedJig?.name === j.name ? 'bg-indigo-50 dark:bg-indigo-900/30' : '']">
@@ -437,7 +545,7 @@ const activeFilterCount = computed(() => {
 
                 <div class="flex items-center justify-between text-xs text-gray-400">
                     <span>{{ filteredReports.length }} laporan ditemukan</span>
-                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; clearJig()" class="text-indigo-600 font-semibold">Reset filter</button>
+                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; filterMinggu = ''; clearJig()" class="text-indigo-600 font-semibold">Reset filter</button>
                 </div>
             </div>
 
@@ -753,40 +861,23 @@ const activeFilterCount = computed(() => {
                                 <Plus class="w-3 h-3" /> Tambah
                             </button>
                         </div>
-
-                        <div v-for="(sp, i) in form.spareparts" :key="i"
-                            class="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2.5">
+                        <div v-for="(sp, i) in form.spareparts" :key="i" class="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2.5">
                             <div class="flex gap-2">
                                 <div class="relative flex-1">
                                     <div class="relative">
                                         <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-                                        <input
-                                            v-model="spSearch[i]"
-                                            type="text"
-                                            placeholder="Cari sparepart..."
-                                            autocomplete="off"
-                                            @focus="openSpDropdown(i)"
-                                            @blur="closeSpDropdown(i)"
+                                        <input v-model="spSearch[i]" type="text" placeholder="Cari sparepart..." autocomplete="off"
+                                            @focus="openSpDropdown(i)" @blur="closeSpDropdown(i)"
                                             :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
-                                                sp.sparepart_id
-                                                    ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
-                                                    : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
-                                        />
-                                        <button v-if="sp.sparepart_id" type="button"
-                                            @click="clearSpSelection(i)"
+                                                sp.sparepart_id ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
+                                        <button v-if="sp.sparepart_id" type="button" @click="clearSpSelection(i)"
                                             class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors p-0.5">
                                             <X class="w-3 h-3" />
                                         </button>
                                     </div>
-                                    <div v-if="spOpen[i]"
-                                        class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                                        <div v-if="filteredSp(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
-                                            Tidak ada hasil untuk "{{ spSearch[i] }}"
-                                        </div>
-                                        <button
-                                            v-for="s in filteredSp(i)" :key="s.id"
-                                            type="button"
-                                            @mousedown.prevent="selectSp(i, s)"
+                                    <div v-if="spOpen[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                        <div v-if="filteredSp(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil untuk "{{ spSearch[i] }}"</div>
+                                        <button v-for="s in filteredSp(i)" :key="s.id" type="button" @mousedown.prevent="selectSp(i, s)"
                                             :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-between gap-2',
                                                 sp.sparepart_id === s.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
                                             <span>
@@ -801,15 +892,12 @@ const activeFilterCount = computed(() => {
                                 </div>
                                 <input v-model="sp.qty" type="number" inputmode="numeric" step="1" min="1" placeholder="Qty"
                                     class="w-16 sm:w-20 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
-                                <button type="button" @click="removeSp(i)"
-                                    class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
+                                <button type="button" @click="removeSp(i)" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
                                     <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
-
                             <input v-model="sp.notes" type="text" placeholder="Keterangan penggantian (opsional)"
                                 class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none transition-colors" />
-
                             <p v-if="sp.sparepart_id && selectedSpItem(sp.sparepart_id) && parseInt(sp.qty) > selectedSpItem(sp.sparepart_id)!.stok"
                                 class="text-xs text-red-500 flex items-center gap-1">
                                 <AlertTriangle class="w-3 h-3" />

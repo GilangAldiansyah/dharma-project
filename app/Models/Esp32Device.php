@@ -35,6 +35,7 @@ class Esp32Device extends Model
         'schedule_start_time',
         'schedule_end_time',
         'schedule_breaks',
+        'schedules',
     ];
 
     protected $casts = [
@@ -58,6 +59,7 @@ class Esp32Device extends Model
         'max_stroke'          => 'integer',
         'loading_time'        => 'integer',
         'schedule_breaks'     => 'array',
+        'schedules'           => 'array'
     ];
 
     protected $appends = [
@@ -66,7 +68,7 @@ class Esp32Device extends Model
         'delay_seconds',
         'is_delayed',
         'is_completed',
-        'has_counter_b'
+        'has_counter_b',
     ];
 
     public function line(): BelongsTo
@@ -172,6 +174,45 @@ class Esp32Device extends Model
     {
         return $this->schedule_breaks ?? [];
     }
+
+public function getActiveSchedule(): array
+{
+    $schedules = $this->schedules;
+
+    if (empty($schedules)) {
+        return [
+            'shift'  => null,
+            'start'  => $this->schedule_start_time ? substr($this->schedule_start_time, 0, 5) : '07:00',
+            'end'    => $this->schedule_end_time ? substr($this->schedule_end_time, 0, 5) : '16:00',
+            'breaks' => $this->schedule_breaks ?? [],
+        ];
+    }
+
+    $referenceTime = $this->production_started_at
+        ? Carbon::parse($this->production_started_at)
+        : Carbon::parse($this->last_update);
+
+    $referenceMinutes = ($referenceTime->hour * 60) + $referenceTime->minute;
+
+    foreach ($schedules as $schedule) {
+        $startParts   = explode(':', $schedule['start']);
+        $endParts     = explode(':', $schedule['end']);
+        $startMinutes = ((int)$startParts[0] * 60) + (int)$startParts[1];
+        $endMinutes   = ((int)$endParts[0] * 60) + (int)$endParts[1];
+
+        if ($endMinutes <= $startMinutes) {
+            if ($referenceMinutes >= $startMinutes || $referenceMinutes < $endMinutes) {
+                return $schedule;
+            }
+        } else {
+            if ($referenceMinutes >= $startMinutes && $referenceMinutes < $endMinutes) {
+                return $schedule;
+            }
+        }
+    }
+
+    return $schedules[0];
+}
 
     public function autoStartLineOperation(): ?LineOperation
     {

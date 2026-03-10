@@ -18,15 +18,17 @@ class JigDashboardController extends Controller
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
         $isPic    = !$isLeader && $user->hasRole('pic_jig');
 
-        $bulan = $request->filled('bulan') ? $request->bulan : now()->month;
-        $tahun = $request->filled('tahun') ? (int) $request->tahun : now()->year;
-        $picId = $request->filled('pic_id') ? (int) $request->pic_id : null;
+        $bulan  = $request->filled('bulan') ? $request->bulan : now()->month;
+        $tahun  = $request->filled('tahun') ? (int) $request->tahun : now()->year;
+        $picId  = $request->filled('pic_id') ? (int) $request->pic_id : null;
+        $minggu = $request->filled('minggu') ? (int) $request->minggu : null;
 
         $pmBase = PmReport::query()
             ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
             ->when($picId && !$isPic, fn($q) => $q->where('pic_id', $picId))
             ->whereYear('planned_week_start', $tahun)
-            ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan));
+            ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
+            ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]));
 
         $cmBase = CmReport::query()
             ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
@@ -54,6 +56,7 @@ class JigDashboardController extends Controller
         $pmTrendRaw = PmReport::query()
             ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
             ->when($picId && !$isPic, fn($q) => $q->where('pic_id', $picId))
+            ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]))
             ->whereYear('planned_week_start', $tahun)
             ->select(
                 DB::raw('MONTH(planned_week_start) as bulan'),
@@ -124,6 +127,7 @@ class JigDashboardController extends Controller
             $pmPicRaw = PmReport::whereIn('pic_id', $picIds)
                 ->whereYear('planned_week_start', $tahun)
                 ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
+                ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]))
                 ->select(
                     'pic_id',
                     DB::raw('COUNT(*) as total'),
@@ -152,6 +156,7 @@ class JigDashboardController extends Controller
 
             $pmMonthlyRaw = PmReport::whereIn('pic_id', $picIds)
                 ->whereYear('planned_week_start', $tahun)
+                ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]))
                 ->select(
                     'pic_id',
                     DB::raw('MONTH(planned_week_start) as bulan'),
@@ -210,7 +215,12 @@ class JigDashboardController extends Controller
             'bulan'          => $bulan,
             'tahun'          => $tahun,
             'isPic'          => $isPic,
-            'filters'        => ['bulan' => $bulan, 'tahun' => $tahun, 'pic_id' => $picId],
+            'filters'        => [
+                'bulan'  => $bulan,
+                'tahun'  => $tahun,
+                'pic_id' => $picId,
+                'minggu' => $minggu,
+            ],
         ]);
     }
 }

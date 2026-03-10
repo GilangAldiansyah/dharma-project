@@ -14,7 +14,7 @@ class CmReport extends Model
     ];
 
     protected $casts = [
-        'report_date' => 'date',
+        'report_date' => 'datetime',
         'closed_at'   => 'datetime',
     ];
 
@@ -22,4 +22,17 @@ class CmReport extends Model
     public function pic()        { return $this->belongsTo(User::class, 'pic_id'); }
     public function closedBy()   { return $this->belongsTo(User::class, 'closed_by'); }
     public function spareparts() { return $this->hasMany(ReportSparepart::class, 'report_id')->where('report_type', 'cm'); }
+
+    public function getRepairDurationAttribute(): ?string
+    {
+        if (!$this->closed_at || !$this->report_date) return null;
+
+        $minutes = (int) $this->report_date->diffInMinutes($this->closed_at);
+        $hours   = intdiv($minutes, 60);
+        $mins    = $minutes % 60;
+
+        if ($hours > 0 && $mins > 0) return "{$hours}j {$mins}m";
+        if ($hours > 0)              return "{$hours}j";
+        return "{$mins}m";
+    }
 }

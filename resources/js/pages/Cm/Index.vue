@@ -4,8 +4,9 @@ import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref, watch, computed } from 'vue';
 import {
     Wrench, CheckCircle2, Clock, AlertCircle, X, Plus, Trash2,
-    Package, FileText, Upload, Loader2, Image as ImageIcon, Search, Filter
+    Package, FileText, Upload, Loader2, Image as ImageIcon, Search, Filter, Download, Timer
 } from 'lucide-vue-next';
+import * as XLSX from 'xlsx';
 
 interface Jig       { id: number; name: string; type: string; line: string; }
 interface Sparepart { id: number; name: string; satuan: string; stok: number; }
@@ -14,7 +15,7 @@ interface CmReport  {
     id:               number;
     pic_id:           number;
     report_date:      string;
-    description:      string;
+    description:      string | null;
     penyebab:         string | null;
     perbaikan:        string | null;
     photo:            string | null;
@@ -22,6 +23,7 @@ interface CmReport  {
     status:           'open' | 'in_progress' | 'closed';
     action:           string | null;
     closed_at:        string | null;
+    repair_duration:  string | null;
     jig:              Jig;
     pic:              { name: string };
     closed_by:        { name: string } | null;
@@ -42,8 +44,8 @@ const props = defineProps<Props>();
 const page  = usePage();
 const flash = computed(() => (page.props as any).flash);
 
-const filterStatus = ref(props.filters.status ?? '');
-const filterJig    = ref(props.filters.jig_id  ?? '');
+const filterStatus    = ref(props.filters.status ?? '');
+const filterJig       = ref(props.filters.jig_id  ?? '');
 const showFilterPanel = ref(false);
 
 watch([filterStatus, filterJig], () => {
@@ -53,7 +55,69 @@ watch([filterStatus, filterJig], () => {
     }, { preserveState: true, preserveScroll: true });
 });
 
+const exportCm = () => {
+    const wb    = XLSX.utils.book_new();
+    const total = props.summary.open + props.summary.in_progress + props.summary.closed;
+
+    const detailHeader = [
+        'No', 'JIG', 'Tipe', 'Line', 'PIC',
+        'Waktu Laporan', 'Status', 'Deskripsi',
+        'Penyebab', 'Perbaikan', 'Action',
+        'Ditutup Oleh', 'Tanggal Tutup', 'Durasi Repair', 'Sparepart',
+        'Foto Kerusakan', 'Foto Perbaikan',
+    ];
+
+    const detailRows = props.reports.map((r, i) => [
+        i + 1,
+        r.jig?.name        ?? '-',
+        r.jig?.type        ?? '-',
+        r.jig?.line        ?? '-',
+        r.pic?.name        ?? '-',
+        r.report_date      ?? '-',
+        r.status === 'open' ? 'Open' : r.status === 'in_progress' ? 'In Progress' : 'Closed',
+        r.description      ?? '-',
+        r.penyebab         ?? '-',
+        r.perbaikan        ?? '-',
+        r.action           ?? '-',
+        r.closed_by?.name  ?? '-',
+        r.closed_at        ?? '-',
+        r.repair_duration  ?? '-',
+        r.spareparts?.length
+            ? r.spareparts.map(s => `${s.sparepart?.name} (${s.qty} ${s.sparepart?.satuan})`).join(', ')
+            : '-',
+        r.photo           ? `${window.location.origin}/storage/${r.photo}`           : '-',
+        r.photo_perbaikan ? `${window.location.origin}/storage/${r.photo_perbaikan}` : '-',
+    ]);
+
+    const wsDetail = XLSX.utils.aoa_to_sheet([detailHeader, ...detailRows]);
+    wsDetail['!cols'] = [
+        { wch: 4  }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
+        { wch: 20 }, { wch: 12 }, { wch: 30 },
+        { wch: 24 }, { wch: 24 }, { wch: 24 },
+        { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 40 },
+        { wch: 50 }, { wch: 50 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail');
+
+    const summaryRows = [
+        ['Laporan Corrective Maintenance'],
+        [],
+        ['RINGKASAN'],
+        ['Open', 'In Progress', 'Closed', 'Total'],
+        [props.summary.open, props.summary.in_progress, props.summary.closed, total],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(summaryRows);
+    ws['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Summary');
+
+    const label = filterStatus.value
+        ? filterStatus.value === 'in_progress' ? 'In_Progress' : filterStatus.value.charAt(0).toUpperCase() + filterStatus.value.slice(1)
+        : 'Semua';
+    XLSX.writeFile(wb, `CM_Report_${label}.xlsx`);
+};
+
 const showAddModal    = ref(false);
+const showEditModal   = ref(false);
 const showDetailModal = ref(false);
 const showCloseModal  = ref(false);
 const showImageModal  = ref(false);
@@ -62,9 +126,39 @@ const selectedReport  = ref<CmReport | null>(null);
 
 const isCompressingA = ref(false);
 const isCompressingB = ref(false);
+const isCompressingC = ref(false);
+const isCompressingD = ref(false);
 const previewA       = ref<string | null>(null);
 const previewB       = ref<string | null>(null);
+const previewC       = ref<string | null>(null);
+const previewD       = ref<string | null>(null);
 
+const compressImage = (file: File): Promise<File> =>
+    new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let w = img.width, h = img.height;
+                const max = 1920;
+                if (w > max || h > max) {
+                    if (w > h) { h = (h / w) * max; w = max; }
+                    else       { w = (w / h) * max; h = max; }
+                }
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+                canvas.toBlob(
+                    blob => resolve(new File([blob!], 'photo.jpg', { type: 'image/jpeg' })),
+                    'image/jpeg', 0.8
+                );
+            };
+            img.src = e.target?.result as string;
+        };
+        reader.readAsDataURL(file);
+    });
+
+// ── ADD FORM ─────────────────────────────────────────────────────────────────
 const form = useForm({
     jig_id:          null as number | null,
     description:     '',
@@ -83,13 +177,11 @@ const filteredSp = (i: number) => {
     if (!q) return props.spareparts;
     return props.spareparts.filter(s => s.name.toLowerCase().includes(q));
 };
-
 const selectSp = (i: number, s: Sparepart) => {
     form.spareparts[i].sparepart_id = s.id;
     spSearch.value[i] = s.name;
     spOpen.value[i]   = false;
 };
-
 const openSpDropdown = (i: number) => {
     const existing = form.spareparts[i]?.sparepart_id;
     if (existing) {
@@ -98,65 +190,122 @@ const openSpDropdown = (i: number) => {
     }
     spOpen.value[i] = true;
 };
+const closeSpDropdown  = (i: number) => { setTimeout(() => { spOpen.value[i] = false; }, 180); };
+const clearSpSelection = (i: number) => { form.spareparts[i].sparepart_id = null; spSearch.value[i] = ''; spOpen.value[i] = true; };
+const selectedSpItem   = (id: number | null) => props.spareparts.find(s => s.id === id);
 
-const closeSpDropdown = (i: number) => {
-    setTimeout(() => { spOpen.value[i] = false; }, 180);
-};
-
-const clearSpSelection = (i: number) => {
-    form.spareparts[i].sparepart_id = null;
-    spSearch.value[i] = '';
-    spOpen.value[i]   = true;
-};
-
-const highlightMatch = (name: string, query: string): { text: string; match: boolean }[] => {
-    if (!query.trim()) return [{ text: name, match: false }];
-    const idx = name.toLowerCase().indexOf(query.toLowerCase().trim());
-    if (idx === -1) return [{ text: name, match: false }];
-    return [
-        { text: name.slice(0, idx),                          match: false },
-        { text: name.slice(idx, idx + query.trim().length),  match: true  },
-        { text: name.slice(idx + query.trim().length),       match: false },
-    ].filter(p => p.text !== '');
-};
-
-const selectedSpItem = (id: number | null) => props.spareparts.find(s => s.id === id);
+const addSp    = () => { form.spareparts.push({ sparepart_id: null, qty: '', notes: '' }); spSearch.value.push(''); spOpen.value.push(false); };
+const removeSp = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); };
 
 const openAdd = () => {
-    form.reset();
-    form.spareparts  = [];
-    spSearch.value   = [];
-    spOpen.value     = [];
-    previewA.value   = null;
-    previewB.value   = null;
+    form.reset(); form.spareparts = []; spSearch.value = []; spOpen.value = [];
+    previewA.value = null; previewB.value = null;
     showAddModal.value = true;
 };
 const closeAdd = () => {
-    showAddModal.value = false;
-    previewA.value     = null;
-    previewB.value     = null;
-    spSearch.value     = [];
-    spOpen.value       = [];
-    form.reset();
+    showAddModal.value = false; previewA.value = null; previewB.value = null;
+    spSearch.value = []; spOpen.value = []; form.reset();
 };
 
-const addSp = () => {
-    form.spareparts.push({ sparepart_id: null, qty: '', notes: '' });
-    spSearch.value.push('');
-    spOpen.value.push(false);
-};
-const removeSp = (i: number) => {
-    form.spareparts.splice(i, 1);
-    spSearch.value.splice(i, 1);
-    spOpen.value.splice(i, 1);
+const handlePhoto = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    if (field === 'photo') {
+        isCompressingA.value = true;
+        form.photo = await compressImage(file);
+        const r = new FileReader(); r.onload = ev => { previewA.value = ev.target?.result as string; }; r.readAsDataURL(form.photo);
+        isCompressingA.value = false;
+    } else {
+        isCompressingB.value = true;
+        form.photo_perbaikan = await compressImage(file);
+        const r = new FileReader(); r.onload = ev => { previewB.value = ev.target?.result as string; }; r.readAsDataURL(form.photo_perbaikan);
+        isCompressingB.value = false;
+    }
 };
 
 const submitAdd = () => form.post('/jig/cm', { onSuccess: closeAdd });
 
-const closeForm = useForm({ action: '' });
-const openClose = (r: CmReport) => {
-    selectedReport.value = r; closeForm.reset(); showCloseModal.value = true;
+// ── EDIT FORM ─────────────────────────────────────────────────────────────────
+const editForm = useForm({
+    _method:         'PUT',
+    description:     '',
+    penyebab:        '',
+    perbaikan:       '',
+    photo:           null as File | null,
+    photo_perbaikan: null as File | null,
+    spareparts:      [] as { sparepart_id: number | null; qty: string; notes: string }[],
+});
+
+const spSearchE = ref<string[]>([]);
+const spOpenE   = ref<boolean[]>([]);
+
+const filteredSpE = (i: number) => {
+    const q = (spSearchE.value[i] ?? '').toLowerCase().trim();
+    if (!q) return props.spareparts;
+    return props.spareparts.filter(s => s.name.toLowerCase().includes(q));
 };
+const selectSpE = (i: number, s: Sparepart) => {
+    editForm.spareparts[i].sparepart_id = s.id;
+    spSearchE.value[i] = s.name;
+    spOpenE.value[i]   = false;
+};
+const openSpDropdownE  = (i: number) => {
+    const existing = editForm.spareparts[i]?.sparepart_id;
+    if (existing) {
+        const sp = props.spareparts.find(s => s.id === existing);
+        if (sp && !spSearchE.value[i]) spSearchE.value[i] = sp.name;
+    }
+    spOpenE.value[i] = true;
+};
+const closeSpDropdownE  = (i: number) => { setTimeout(() => { spOpenE.value[i] = false; }, 180); };
+const clearSpSelectionE = (i: number) => { editForm.spareparts[i].sparepart_id = null; spSearchE.value[i] = ''; spOpenE.value[i] = true; };
+const selectedSpItemE   = (id: number | null) => props.spareparts.find(s => s.id === id);
+
+const addSpE    = () => { editForm.spareparts.push({ sparepart_id: null, qty: '', notes: '' }); spSearchE.value.push(''); spOpenE.value.push(false); };
+const removeSpE = (i: number) => { editForm.spareparts.splice(i, 1); spSearchE.value.splice(i, 1); spOpenE.value.splice(i, 1); };
+
+const openEdit = (r: CmReport) => {
+    selectedReport.value    = r;
+    previewC.value          = null;
+    previewD.value          = null;
+    spSearchE.value         = [];
+    spOpenE.value           = [];
+    editForm.reset();
+    editForm.description    = r.description ?? '';
+    editForm.penyebab       = r.penyebab    ?? '';
+    editForm.perbaikan      = r.perbaikan   ?? '';
+    editForm.spareparts     = [];
+    showEditModal.value     = true;
+};
+const closeEdit = () => {
+    showEditModal.value = false; previewC.value = null; previewD.value = null;
+    spSearchE.value = []; spOpenE.value = []; editForm.reset();
+};
+
+const handlePhotoEdit = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    if (field === 'photo') {
+        isCompressingC.value = true;
+        editForm.photo = await compressImage(file);
+        const r = new FileReader(); r.onload = ev => { previewC.value = ev.target?.result as string; }; r.readAsDataURL(editForm.photo);
+        isCompressingC.value = false;
+    } else {
+        isCompressingD.value = true;
+        editForm.photo_perbaikan = await compressImage(file);
+        const r = new FileReader(); r.onload = ev => { previewD.value = ev.target?.result as string; }; r.readAsDataURL(editForm.photo_perbaikan);
+        isCompressingD.value = false;
+    }
+};
+
+const submitEdit = () => {
+    if (!selectedReport.value) return;
+    editForm.post(`/jig/cm/${selectedReport.value.id}`, { onSuccess: closeEdit });
+};
+
+// ── CLOSE FORM ────────────────────────────────────────────────────────────────
+const closeForm = useForm({ action: '' });
+const openClose = (r: CmReport) => { selectedReport.value = r; closeForm.reset(); showCloseModal.value = true; };
 const submitClose = () => {
     if (!selectedReport.value) return;
     closeForm.post(`/jig/cm/${selectedReport.value.id}/close`, {
@@ -167,65 +316,32 @@ const submitClose = () => {
 const openDetail = (r: CmReport) => { selectedReport.value = r; showDetailModal.value = true; };
 const openImage  = (path: string) => { imageSrc.value = `/storage/${path}`; showImageModal.value = true; };
 
-const compressImage = (file: File): Promise<File> =>
-    new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = e => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let w = img.width, h = img.height; const max = 1920;
-                if (w > max || h > max) {
-                    if (w > h) { h = (h / w) * max; w = max; }
-                    else       { w = (w / h) * max; h = max; }
-                }
-                canvas.width = w; canvas.height = h;
-                canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-                canvas.toBlob(
-                    blob => resolve(new File([blob!], 'photo.jpg', { type: 'image/jpeg' })),
-                    'image/jpeg', 0.8
-                );
-            };
-            img.src = e.target?.result as string;
-        };
-        reader.readAsDataURL(file);
-    });
-
-const handlePhoto = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
-    if (field === 'photo') {
-        isCompressingA.value = true;
-        form.photo = await compressImage(file);
-        const r = new FileReader();
-        r.onload = ev => { previewA.value = ev.target?.result as string; };
-        r.readAsDataURL(form.photo);
-        isCompressingA.value = false;
-    } else {
-        isCompressingB.value = true;
-        form.photo_perbaikan = await compressImage(file);
-        const r = new FileReader();
-        r.onload = ev => { previewB.value = ev.target?.result as string; };
-        r.readAsDataURL(form.photo_perbaikan);
-        isCompressingB.value = false;
-    }
+const highlightMatch = (name: string, query: string): { text: string; match: boolean }[] => {
+    if (!query.trim()) return [{ text: name, match: false }];
+    const idx = name.toLowerCase().indexOf(query.toLowerCase().trim());
+    if (idx === -1) return [{ text: name, match: false }];
+    return [
+        { text: name.slice(0, idx),                         match: false },
+        { text: name.slice(idx, idx + query.trim().length), match: true  },
+        { text: name.slice(idx + query.trim().length),      match: false },
+    ].filter(p => p.text !== '');
 };
 
-const fmt = (d: string | null) => {
+const fmtDatetime = (d: string | null) => {
     if (!d) return '-';
-    return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    return new Date(d).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const statusCfg: Record<string, { label: string; badge: string; cardBorder: string; icon: any }> = {
-    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',         cardBorder: 'border-l-red-400',    icon: AlertCircle },
-    in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400', cardBorder: 'border-l-amber-400',  icon: Clock },
-    closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
+    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',                                     cardBorder: 'border-l-red-400',     icon: AlertCircle  },
+    in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',                             cardBorder: 'border-l-amber-400',   icon: Clock        },
+    closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',                     cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
 };
 
 const activeFilterCount = computed(() => {
     let c = 0;
     if (filterStatus.value) c++;
-    if (filterJig.value) c++;
+    if (filterJig.value)    c++;
     return c;
 });
 </script>
@@ -235,6 +351,7 @@ const activeFilterCount = computed(() => {
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'CM Report',href:'/jig/cm'}]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
+            <!-- HEADER -->
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -245,20 +362,30 @@ const activeFilterCount = computed(() => {
                     </h1>
                     <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">Corrective Maintenance JIG</p>
                 </div>
-                <button @click="openAdd"
-                    class="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-sm flex-shrink-0">
-                    <Plus class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span class="hidden sm:inline">Buat Laporan CM</span>
-                    <span class="sm:hidden">Buat</span>
-                </button>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <button @click="exportCm"
+                        class="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-sm">
+                        <Download class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span class="hidden sm:inline">Export Excel</span>
+                        <span class="sm:hidden">Export</span>
+                    </button>
+                    <button @click="openAdd"
+                        class="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-sm">
+                        <Plus class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span class="hidden sm:inline">Buat Laporan CM</span>
+                        <span class="sm:hidden">Buat</span>
+                    </button>
+                </div>
             </div>
 
+            <!-- FLASH -->
             <div v-if="flash?.success"
                 class="flex items-center gap-3 p-3 sm:p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 flex-shrink-0" />
                 <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
+            <!-- SUMMARY -->
             <div class="grid grid-cols-3 gap-2 sm:gap-3">
                 <div class="text-center p-3 sm:p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                     <p class="text-xs text-red-500 font-semibold flex items-center justify-center gap-1">
@@ -283,6 +410,7 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
+            <!-- FILTER -->
             <div class="space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
                     <button @click="showFilterPanel = !showFilterPanel"
@@ -298,20 +426,17 @@ const activeFilterCount = computed(() => {
                         </span>
                     </button>
                     <span class="text-xs text-gray-400">{{ reports.length }} laporan</span>
-                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; filterJig = ''" class="text-xs text-orange-500 font-semibold ml-auto">Reset filter</button>
+                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; filterJig = ''"
+                        class="text-xs text-orange-500 font-semibold ml-auto">Reset filter</button>
                 </div>
-
                 <div v-if="showFilterPanel" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-3 shadow-sm">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Status</label>
                         <div class="flex flex-wrap gap-2">
                             <button v-for="opt in [{v:'',l:'Semua'},{v:'open',l:'Open'},{v:'in_progress',l:'In Progress'},{v:'closed',l:'Closed'}]"
-                                :key="opt.v"
-                                @click="filterStatus = opt.v"
+                                :key="opt.v" @click="filterStatus = opt.v"
                                 :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors active:scale-95',
-                                    filterStatus === opt.v
-                                        ? 'bg-orange-500 text-white'
-                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200']">
+                                    filterStatus === opt.v ? 'bg-orange-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200']">
                                 {{ opt.l }}
                             </button>
                         </div>
@@ -327,6 +452,7 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
+            <!-- TABLE DESKTOP -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -334,31 +460,32 @@ const activeFilterCount = computed(() => {
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">JIG</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">PIC</th>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Tanggal</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Waktu Laporan</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Deskripsi</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Penyebab</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">SP</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Durasi</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Aksi</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
                             <tr v-if="reports.length === 0">
-                                <td colspan="8" class="py-16 text-center text-gray-400 text-sm">
+                                <td colspan="9" class="py-16 text-center text-gray-400 text-sm">
                                     <Wrench class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                                     Tidak ada laporan CM
                                 </td>
                             </tr>
-                            <tr v-for="r in reports" :key="r.id"
-                                class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
+                            <tr v-for="r in reports" :key="r.id" class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
                                 <td class="px-4 py-3">
                                     <p class="text-xs font-bold text-gray-900 dark:text-white">{{ r.jig?.name }}</p>
                                     <p class="text-xs text-gray-400 mt-0.5">{{ r.jig?.type }} — {{ r.jig?.line }}</p>
                                 </td>
                                 <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{{ r.pic?.name }}</td>
-                                <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{{ fmt(r.report_date) }}</td>
+                                <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{{ fmtDatetime(r.report_date) }}</td>
                                 <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 max-w-[180px]">
-                                    <p class="line-clamp-2">{{ r.description }}</p>
+                                    <p v-if="r.description" class="line-clamp-2">{{ r.description }}</p>
+                                    <span v-else class="text-gray-300 italic">Belum diisi</span>
                                 </td>
                                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">
                                     <p v-if="r.penyebab" class="line-clamp-2">{{ r.penyebab }}</p>
@@ -368,6 +495,13 @@ const activeFilterCount = computed(() => {
                                     <span v-if="r.spareparts?.length"
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
                                         <Package class="w-3 h-3" /> {{ r.spareparts.length }}
+                                    </span>
+                                    <span v-else class="text-xs text-gray-300">—</span>
+                                </td>
+                                <td class="px-4 py-3 text-center">
+                                    <span v-if="r.repair_duration"
+                                        class="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 rounded-full text-xs font-bold">
+                                        <Timer class="w-3 h-3" /> {{ r.repair_duration }}
                                     </span>
                                     <span v-else class="text-xs text-gray-300">—</span>
                                 </td>
@@ -383,6 +517,10 @@ const activeFilterCount = computed(() => {
                                             class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-xs font-semibold hover:bg-gray-200 transition-colors">
                                             <FileText class="w-3 h-3" /> Detail
                                         </button>
+                                        <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openEdit(r)"
+                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg text-xs font-semibold hover:bg-amber-200 transition-colors">
+                                            <Wrench class="w-3 h-3" /> Edit
+                                        </button>
                                         <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openClose(r)"
                                             class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors">
                                             <CheckCircle2 class="w-3 h-3" /> Close
@@ -395,6 +533,7 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
+            <!-- CARD MOBILE -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="reports.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <Wrench class="w-10 h-10 mx-auto mb-2 text-gray-300" />
@@ -413,6 +552,10 @@ const activeFilterCount = computed(() => {
                                     <component :is="statusCfg[r.status].icon" class="w-3 h-3" />
                                     {{ statusCfg[r.status].label }}
                                 </span>
+                                <span v-if="r.repair_duration"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 rounded-full text-xs font-bold">
+                                    <Timer class="w-3 h-3" /> {{ r.repair_duration }}
+                                </span>
                                 <span v-if="r.spareparts?.length"
                                     class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
                                     <Package class="w-3 h-3" /> {{ r.spareparts.length }} SP
@@ -426,12 +569,13 @@ const activeFilterCount = computed(() => {
                                 <p class="font-semibold text-gray-700 dark:text-gray-300">{{ r.pic?.name }}</p>
                             </div>
                             <div>
-                                <span class="text-gray-400">Tanggal</span>
-                                <p class="font-semibold text-gray-700 dark:text-gray-300">{{ fmt(r.report_date) }}</p>
+                                <span class="text-gray-400">Waktu Laporan</span>
+                                <p class="font-semibold text-gray-700 dark:text-gray-300">{{ fmtDatetime(r.report_date) }}</p>
                             </div>
                             <div class="col-span-2">
                                 <span class="text-gray-400">Deskripsi</span>
-                                <p class="font-semibold text-gray-700 dark:text-gray-300 line-clamp-2">{{ r.description }}</p>
+                                <p v-if="r.description" class="font-semibold text-gray-700 dark:text-gray-300 line-clamp-2">{{ r.description }}</p>
+                                <p v-else class="italic text-gray-300 text-xs">Belum diisi</p>
                             </div>
                             <div v-if="r.penyebab" class="col-span-2">
                                 <span class="text-gray-400">Penyebab</span>
@@ -444,6 +588,10 @@ const activeFilterCount = computed(() => {
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition-all">
                                 <CheckCircle2 class="w-3.5 h-3.5" /> Close
                             </button>
+                            <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openEdit(r)"
+                                class="flex items-center justify-center gap-1.5 py-2 px-4 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-xl text-xs font-bold hover:bg-amber-200 active:scale-95 transition-all">
+                                <Wrench class="w-3.5 h-3.5" /> Edit
+                            </button>
                             <button @click="openDetail(r)"
                                 :class="['flex items-center justify-center gap-1.5 py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl text-xs font-bold hover:bg-gray-200 active:scale-95 transition-all',
                                     (isLeader || r.pic_id === authId) && r.status !== 'closed' ? '' : 'flex-1']">
@@ -455,6 +603,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- MODAL ADD -->
         <div v-if="showAddModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
@@ -469,7 +618,6 @@ const activeFilterCount = computed(() => {
                         </button>
                     </div>
                 </div>
-
                 <form @submit.prevent="submitAdd" class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 sm:py-5 space-y-4">
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">JIG <span class="text-red-500">*</span></label>
@@ -480,26 +628,27 @@ const activeFilterCount = computed(() => {
                         </select>
                         <p v-if="form.errors.jig_id" class="mt-1 text-xs text-red-500">{{ form.errors.jig_id }}</p>
                     </div>
-
                     <div>
-                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Deskripsi Kerusakan <span class="text-red-500">*</span></label>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
+                            Deskripsi Kerusakan <span class="text-gray-400 font-normal text-xs ml-1">(opsional, bisa diisi nanti)</span>
+                        </label>
                         <textarea v-model="form.description" rows="3" placeholder="Jelaskan kerusakan yang terjadi..."
                             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
-                        <p v-if="form.errors.description" class="mt-1 text-xs text-red-500">{{ form.errors.description }}</p>
                     </div>
-
                     <div>
-                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Penyebab</label>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
+                            Penyebab <span class="text-gray-400 font-normal text-xs ml-1">(opsional)</span>
+                        </label>
                         <textarea v-model="form.penyebab" rows="2" placeholder="Root cause kerusakan..."
                             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
                     </div>
-
                     <div>
-                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Tindakan Perbaikan</label>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
+                            Tindakan Perbaikan <span class="text-gray-400 font-normal text-xs ml-1">(opsional)</span>
+                        </label>
                         <textarea v-model="form.perbaikan" rows="2" placeholder="Tindakan yang dilakukan untuk perbaikan..."
                             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
                     </div>
-
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">Foto Kerusakan</label>
@@ -530,7 +679,6 @@ const activeFilterCount = computed(() => {
                             </label>
                         </div>
                     </div>
-
                     <div>
                         <div class="flex items-center justify-between mb-2.5">
                             <label class="text-sm font-semibold text-gray-700 dark:text-gray-300">Sparepart Diganti</label>
@@ -544,33 +692,18 @@ const activeFilterCount = computed(() => {
                                 <div class="relative flex-1">
                                     <div class="relative">
                                         <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-                                        <input
-                                            v-model="spSearch[i]"
-                                            type="text"
-                                            placeholder="Cari sparepart..."
-                                            autocomplete="off"
-                                            @focus="openSpDropdown(i)"
-                                            @blur="closeSpDropdown(i)"
+                                        <input v-model="spSearch[i]" type="text" placeholder="Cari sparepart..." autocomplete="off"
+                                            @focus="openSpDropdown(i)" @blur="closeSpDropdown(i)"
                                             :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
-                                                sp.sparepart_id
-                                                    ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
-                                                    : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
-                                        />
-                                        <button v-if="sp.sparepart_id" type="button"
-                                            @click="clearSpSelection(i)"
+                                                sp.sparepart_id ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
+                                        <button v-if="sp.sparepart_id" type="button" @click="clearSpSelection(i)"
                                             class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors p-0.5">
                                             <X class="w-3 h-3" />
                                         </button>
                                     </div>
-                                    <div v-if="spOpen[i]"
-                                        class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                                        <div v-if="filteredSp(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
-                                            Tidak ada hasil untuk "{{ spSearch[i] }}"
-                                        </div>
-                                        <button
-                                            v-for="s in filteredSp(i)" :key="s.id"
-                                            type="button"
-                                            @mousedown.prevent="selectSp(i, s)"
+                                    <div v-if="spOpen[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                        <div v-if="filteredSp(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil untuk "{{ spSearch[i] }}"</div>
+                                        <button v-for="s in filteredSp(i)" :key="s.id" type="button" @mousedown.prevent="selectSp(i, s)"
                                             :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-between gap-2',
                                                 sp.sparepart_id === s.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
                                             <span>
@@ -599,7 +732,6 @@ const activeFilterCount = computed(() => {
                             </p>
                         </div>
                     </div>
-
                     <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-safe border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
                         <div class="flex gap-3">
                             <button type="button" @click="closeAdd"
@@ -616,6 +748,157 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- MODAL EDIT -->
+        <div v-if="showEditModal && selectedReport"
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                        <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <Wrench class="w-4 h-4 text-amber-500" /> Edit Laporan CM
+                        </h2>
+                        <button @click="closeEdit" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                            <X class="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+                <form @submit.prevent="submitEdit" class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+                    <div class="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 border border-amber-100 dark:border-amber-800">
+                        <p class="text-xs font-bold text-gray-900 dark:text-white">{{ selectedReport.jig?.name }}</p>
+                        <p class="text-xs text-gray-500 mt-0.5">Mulai: {{ fmtDatetime(selectedReport.report_date) }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Deskripsi Kerusakan</label>
+                        <textarea v-model="editForm.description" rows="3" placeholder="Jelaskan kerusakan yang terjadi..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none resize-none transition-colors"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Penyebab</label>
+                        <textarea v-model="editForm.penyebab" rows="2" placeholder="Root cause kerusakan..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none resize-none transition-colors"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Tindakan Perbaikan</label>
+                        <textarea v-model="editForm.perbaikan" rows="2" placeholder="Tindakan yang dilakukan..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none resize-none transition-colors"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                                Foto Kerusakan
+                                <span v-if="selectedReport.photo" class="text-emerald-500 font-normal ml-1">✓ Ada</span>
+                            </label>
+                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                previewC ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 p-0 overflow-hidden' : 'border-gray-200 hover:border-amber-300 bg-gray-50 dark:bg-gray-700/30 p-0 overflow-hidden']">
+                                <Loader2 v-if="isCompressingC" class="w-7 h-7 text-amber-400 animate-spin" />
+                                <img v-else-if="previewC" :src="previewC" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <img v-else-if="selectedReport.photo" :src="`/storage/${selectedReport.photo}`" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <div v-else class="text-center p-3">
+                                    <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
+                                    <p class="text-xs text-gray-500 font-medium">Upload foto</p>
+                                </div>
+                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhotoEdit(e, 'photo')" class="hidden" />
+                            </label>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                                Foto Perbaikan
+                                <span v-if="selectedReport.photo_perbaikan" class="text-emerald-500 font-normal ml-1">✓ Ada</span>
+                            </label>
+                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                previewD ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 p-0 overflow-hidden' : 'border-gray-200 hover:border-emerald-300 bg-gray-50 dark:bg-gray-700/30 p-0 overflow-hidden']">
+                                <Loader2 v-if="isCompressingD" class="w-7 h-7 text-emerald-400 animate-spin" />
+                                <img v-else-if="previewD" :src="previewD" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <img v-else-if="selectedReport.photo_perbaikan" :src="`/storage/${selectedReport.photo_perbaikan}`" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <div v-else class="text-center p-3">
+                                    <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
+                                    <p class="text-xs text-gray-500 font-medium">Upload foto</p>
+                                </div>
+                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhotoEdit(e, 'photo_perbaikan')" class="hidden" />
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex items-center justify-between mb-2.5">
+                            <label class="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                Sparepart Diganti
+                                <span v-if="selectedReport.spareparts?.length" class="text-xs text-gray-400 font-normal ml-1">({{ selectedReport.spareparts.length }} sudah tercatat)</span>
+                            </label>
+                            <button type="button" @click="addSpE"
+                                class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 rounded-lg font-semibold hover:bg-indigo-200 active:scale-95 transition-all">
+                                <Plus class="w-3 h-3" /> Tambah
+                            </button>
+                        </div>
+                        <div v-if="selectedReport.spareparts?.length" class="mb-3 space-y-1.5">
+                            <div v-for="sp in selectedReport.spareparts" :key="sp.sparepart?.id"
+                                class="flex justify-between items-center px-3 py-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg text-xs">
+                                <span class="font-semibold text-indigo-700 dark:text-indigo-300">{{ sp.sparepart?.name }}</span>
+                                <span class="text-gray-500">{{ sp.qty }} {{ sp.sparepart?.satuan }}</span>
+                            </div>
+                        </div>
+                        <div v-for="(sp, i) in editForm.spareparts" :key="i" class="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2.5">
+                            <div class="flex gap-2">
+                                <div class="relative flex-1">
+                                    <div class="relative">
+                                        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                        <input v-model="spSearchE[i]" type="text" placeholder="Cari sparepart..." autocomplete="off"
+                                            @focus="openSpDropdownE(i)" @blur="closeSpDropdownE(i)"
+                                            :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                                sp.sparepart_id ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
+                                        <button v-if="sp.sparepart_id" type="button" @click="clearSpSelectionE(i)"
+                                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors p-0.5">
+                                            <X class="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                    <div v-if="spOpenE[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                        <div v-if="filteredSpE(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil</div>
+                                        <button v-for="s in filteredSpE(i)" :key="s.id" type="button" @mousedown.prevent="selectSpE(i, s)"
+                                            :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-between gap-2',
+                                                sp.sparepart_id === s.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
+                                            <span>
+                                                <template v-for="(part, pi) in highlightMatch(s.name, spSearchE[i])" :key="pi">
+                                                    <mark v-if="part.match" class="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-white rounded px-0.5 not-italic">{{ part.text }}</mark>
+                                                    <span v-else>{{ part.text }}</span>
+                                                </template>
+                                            </span>
+                                            <span class="text-gray-400 whitespace-nowrap shrink-0">{{ Math.floor(s.stok) }} {{ s.satuan }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <input v-model="sp.qty" type="number" inputmode="numeric" step="1" min="1" placeholder="Qty"
+                                    class="w-16 sm:w-20 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
+                                <button type="button" @click="removeSpE(i)"
+                                    class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
+                                    <Trash2 class="w-4 h-4" />
+                                </button>
+                            </div>
+                            <input v-model="sp.notes" type="text" placeholder="Keterangan penggantian (opsional)"
+                                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none transition-colors" />
+                            <p v-if="sp.sparepart_id && selectedSpItemE(sp.sparepart_id) && parseInt(sp.qty) > selectedSpItemE(sp.sparepart_id)!.stok"
+                                class="text-xs text-red-500 flex items-center gap-1">
+                                <AlertCircle class="w-3 h-3" />
+                                Stok tidak cukup (tersedia: {{ Math.floor(selectedSpItemE(sp.sparepart_id)!.stok) }})
+                            </p>
+                        </div>
+                    </div>
+                    <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-safe border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
+                        <div class="flex gap-3">
+                            <button type="button" @click="closeEdit"
+                                class="px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-semibold text-sm active:scale-95 transition-all">
+                                Batal
+                            </button>
+                            <button type="submit" :disabled="editForm.processing"
+                                class="flex-1 py-3 bg-amber-500 text-white rounded-xl hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm active:scale-95 transition-all">
+                                {{ editForm.processing ? 'Menyimpan...' : 'Simpan Perubahan' }}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- MODAL DETAIL -->
         <div v-if="showDetailModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -639,8 +922,8 @@ const activeFilterCount = computed(() => {
                             <span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.pic?.name }}</span>
                         </div>
                         <div class="flex justify-between gap-2">
-                            <span class="text-gray-400 shrink-0">Tanggal</span>
-                            <span class="font-bold text-gray-900 dark:text-white">{{ fmt(selectedReport.report_date) }}</span>
+                            <span class="text-gray-400 shrink-0">Waktu Laporan</span>
+                            <span class="font-bold text-gray-900 dark:text-white">{{ fmtDatetime(selectedReport.report_date) }}</span>
                         </div>
                         <div class="flex justify-between items-center gap-2">
                             <span class="text-gray-400 shrink-0">Status</span>
@@ -651,49 +934,48 @@ const activeFilterCount = computed(() => {
                         </div>
                         <div v-if="selectedReport.closed_by" class="flex justify-between gap-2">
                             <span class="text-gray-400 shrink-0">Ditutup oleh</span>
-                            <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.closed_by.name }} · {{ fmt(selectedReport.closed_at) }}</span>
+                            <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.closed_by.name }} · {{ fmtDatetime(selectedReport.closed_at) }}</span>
+                        </div>
+                        <div v-if="selectedReport.repair_duration" class="flex justify-between gap-2 pt-1 border-t border-gray-200 dark:border-gray-600">
+                            <span class="text-gray-400 shrink-0 flex items-center gap-1">
+                                <Timer class="w-3 h-3" /> Durasi Repair
+                            </span>
+                            <span class="font-black text-violet-600 dark:text-violet-400">{{ selectedReport.repair_duration }}</span>
                         </div>
                     </div>
-
                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5">
                         <p class="text-xs text-gray-400 font-semibold uppercase mb-1.5">Deskripsi Kerusakan</p>
-                        <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.description }}</p>
+                        <p v-if="selectedReport.description" class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.description }}</p>
+                        <p v-else class="text-xs text-gray-400 italic">Belum diisi</p>
                     </div>
-
                     <div v-if="selectedReport.penyebab" class="bg-red-50 dark:bg-red-900/20 rounded-xl p-3.5 border border-red-100 dark:border-red-800">
                         <p class="text-xs text-red-500 font-semibold uppercase mb-1.5">Penyebab</p>
                         <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.penyebab }}</p>
                     </div>
-
                     <div v-if="selectedReport.perbaikan" class="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3.5 border border-emerald-100 dark:border-emerald-800">
                         <p class="text-xs text-emerald-600 font-semibold uppercase mb-1.5">Tindakan Perbaikan</p>
                         <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.perbaikan }}</p>
                     </div>
-
                     <div v-if="selectedReport.action" class="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3.5 border border-indigo-100 dark:border-indigo-800">
                         <p class="text-xs text-indigo-600 font-semibold uppercase mb-1.5">Action (Leader)</p>
                         <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{{ selectedReport.action }}</p>
                     </div>
-
                     <div v-if="selectedReport.photo || selectedReport.photo_perbaikan" class="grid grid-cols-2 gap-3">
                         <div v-if="selectedReport.photo">
                             <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
                                 <ImageIcon class="w-3 h-3" /> Foto Kerusakan
                             </p>
-                            <img :src="`/storage/${selectedReport.photo}`"
-                                @click="openImage(selectedReport.photo!)"
+                            <img :src="`/storage/${selectedReport.photo}`" @click="openImage(selectedReport.photo!)"
                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                         <div v-if="selectedReport.photo_perbaikan">
                             <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
                                 <ImageIcon class="w-3 h-3" /> Foto Perbaikan
                             </p>
-                            <img :src="`/storage/${selectedReport.photo_perbaikan}`"
-                                @click="openImage(selectedReport.photo_perbaikan!)"
+                            <img :src="`/storage/${selectedReport.photo_perbaikan}`" @click="openImage(selectedReport.photo_perbaikan!)"
                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                     </div>
-
                     <div v-if="selectedReport.spareparts?.length">
                         <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1.5">
                             <Package class="w-3.5 h-3.5" /> Sparepart Diganti
@@ -719,6 +1001,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- MODAL CLOSE -->
         <div v-if="showCloseModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -734,7 +1017,7 @@ const activeFilterCount = computed(() => {
                 <form @submit.prevent="submitClose" class="p-4 sm:p-5 space-y-4">
                     <div class="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3.5 border border-orange-100 dark:border-orange-800">
                         <p class="text-sm font-bold text-gray-900 dark:text-white">{{ selectedReport.jig?.name }}</p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{{ selectedReport.description }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Mulai: {{ fmtDatetime(selectedReport.report_date) }}</p>
                     </div>
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
@@ -758,6 +1041,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- MODAL IMAGE -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
             @click="showImageModal = false">
             <button class="absolute top-4 right-4 p-2 bg-white/10 rounded-xl text-white hover:bg-white/20 transition-colors">

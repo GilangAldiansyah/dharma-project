@@ -20,26 +20,30 @@ class PmReportController extends Controller
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
         $isPic    = !$isLeader && $user->hasRole('pic_jig');
 
-        $bulan = $request->filled('bulan') ? $request->bulan : now()->month;
-        $tahun = $request->filled('tahun') ? $request->tahun : now()->year;
+        $bulan  = $request->filled('bulan')  ? $request->bulan          : now()->month;
+        $tahun  = $request->filled('tahun')  ? $request->tahun          : now()->year;
+        $minggu = $request->filled('minggu') ? (int) $request->minggu   : null;
 
         $query = PmReport::with([
             'pmSchedule.jig:id,name,type,line',
             'pic:id,name',
             'nokClosedBy:id,name',
             'spareparts.sparepart:id,name,satuan',
-        ])->when($isPic, fn($q) => $q->where('pic_id', $user->id))
-          ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
-          ->whereYear('planned_week_start', $tahun)
-          ->when($request->status, fn($q) => $q->where('status', $request->status))
-          ->orderBy('planned_week_start')
-          ->orderBy('created_at');
+        ])
+            ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
+            ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
+            ->whereYear('planned_week_start', $tahun)
+            ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]))
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->orderBy('planned_week_start')
+            ->orderBy('created_at');
 
         $reports = $query->get();
 
         $baseQuery = PmReport::when($isPic, fn($q) => $q->where('pic_id', $user->id))
             ->whereYear('planned_week_start', $tahun)
-            ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan));
+            ->when($bulan !== 'all', fn($q) => $q->whereMonth('planned_week_start', $bulan))
+            ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]));
 
         $summary = [
             'total'   => (clone $baseQuery)->count(),
@@ -57,6 +61,7 @@ class PmReportController extends Controller
                 'bulan'  => $bulan,
                 'tahun'  => $tahun,
                 'status' => $request->status ?? '',
+                'minggu' => $minggu,
             ],
         ]);
     }

@@ -31,6 +31,18 @@ interface Device {
     schedule_start_time: string;
     schedule_end_time: string;
     schedule_breaks: Array<{ start: string; end: string }>;
+    schedules: Array<{
+        shift: number;
+        start: string;
+        end: string;
+        breaks: Array<{ start: string; end: string }>;
+    }>;
+    active_schedule: {
+        shift: number | null;
+        start: string;
+        end: string;
+        breaks: Array<{ start: string; end: string }>;
+    };
 }
 
 interface Log {
@@ -115,11 +127,27 @@ const currentRefreshInterval = ref(5000);
 const noChangeCount = ref(0);
 const lastActivityTime = ref(Date.now());
 
-const scheduleStartTime = ref(props.device.schedule_start_time.substring(0, 5));
-const scheduleEndTime = ref(props.device.schedule_end_time.substring(0, 5));
-const breaks = ref<Array<{ start: string; end: string }>>(props.device.schedule_breaks || []);
+const schedules = ref<Array<{
+    shift: number;
+    start: string;
+    end: string;
+    breaks: Array<{ start: string; end: string }>;
+}>>(
+    props.device.schedules && props.device.schedules.length > 0
+        ? props.device.schedules.map(s => ({ ...s, breaks: s.breaks ?? [] }))
+        : [{
+            shift: 1,
+            start: props.device.schedule_start_time.substring(0, 5),
+            end: props.device.schedule_end_time.substring(0, 5),
+            breaks: props.device.schedule_breaks ?? [],
+        }]
+);
+
 const newBreakStart = ref('');
 const newBreakEnd = ref('');
+const newShiftStart = ref('');
+const newShiftEnd = ref('');
+const expandedShift = ref<number | null>(0);
 
 const activeHistoryTab = ref<'history' | 'logs'>('history');
 const historyDate = ref(props.filters?.history_date || '');
@@ -153,12 +181,23 @@ const parseTimeToDate = (timeStr: string, baseDate: Date = new Date()) => {
 const getTimelineData = computed(() => {
     if (!props.device.production_started_at) return null;
 
+    const activeSchedule = props.device.active_schedule;
+    if (!activeSchedule) return null;
+
     const actualStartTime = new Date(props.device.production_started_at);
     const baseDate = new Date(actualStartTime);
     baseDate.setHours(0, 0, 0, 0);
 
-    const scheduleStart = parseTimeToDate(scheduleStartTime.value, baseDate);
-    const scheduleEnd = parseTimeToDate(scheduleEndTime.value, baseDate);
+    const clampPct = (val: number) => Math.max(0, Math.min(val, 100));
+
+    let scheduleStart = parseTimeToDate(activeSchedule.start, baseDate);
+    let scheduleEnd = parseTimeToDate(activeSchedule.end, baseDate);
+
+    if (scheduleEnd <= scheduleStart) {
+        scheduleEnd = new Date(scheduleEnd.getTime() + 24 * 60 * 60 * 1000);
+    }
+
+    const totalDuration = scheduleEnd.getTime() - scheduleStart.getTime();
     const currentTime = new Date();
     const lastUpdateTime = new Date(props.device.last_update);
     const isActive = isDeviceActive.value;
@@ -167,32 +206,27 @@ const getTimelineData = computed(() => {
     const netElapsed = actualElapsed - getCurrentTotalPauseSeconds.value;
     const expectedDuration = props.device.loading_time;
 
-    const productionStartPercentage = Math.max(0, Math.min(
-        ((actualStartTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
-    const currentPercentage = Math.max(0, Math.min(
-        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
-    const lastActivityPercentage = Math.max(0, Math.min(
-        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
+    const productionStartPercentage = clampPct(
+        ((actualStartTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
+    const currentPercentage = clampPct(
+        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
+    const lastActivityPercentage = clampPct(
+        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
     const barWidth = currentPercentage - productionStartPercentage;
 
-    const processedBreaks = breaks.value.map(brk => {
+    const processedBreaks = (activeSchedule.breaks ?? []).map(brk => {
         const breakStart = parseTimeToDate(brk.start, baseDate);
-        const breakEnd = parseTimeToDate(brk.end, baseDate);
-        const breakStartPercentage = Math.max(0, Math.min(
-            ((breakStart.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-        ));
-        const breakEndPercentage = Math.max(0, Math.min(
-            ((breakEnd.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-        ));
+        let breakEnd = parseTimeToDate(brk.end, baseDate);
+        if (breakEnd <= breakStart) breakEnd = new Date(breakEnd.getTime() + 24 * 60 * 60 * 1000);
         return {
-            startPercentage: breakStartPercentage,
-            endPercentage: breakEndPercentage,
-            width: breakEndPercentage - breakStartPercentage,
+            startPercentage: clampPct(((breakStart.getTime() - scheduleStart.getTime()) / totalDuration) * 100),
+            endPercentage: clampPct(((breakEnd.getTime() - scheduleStart.getTime()) / totalDuration) * 100),
+            width: clampPct(((breakEnd.getTime() - breakStart.getTime()) / totalDuration) * 100),
             startTime: breakStart,
-            endTime: breakEnd
+            endTime: breakEnd,
         };
     });
 
@@ -201,8 +235,15 @@ const getTimelineData = computed(() => {
         actualElapsed, netElapsed, productionStartPercentage, currentPercentage,
         lastActivityPercentage, barWidth, expectedDuration,
         breaks: processedBreaks,
-        isOvertime: netElapsed > expectedDuration
+        isOvertime: netElapsed > expectedDuration,
+        activeShift: activeSchedule.shift,
     };
+});
+
+const usedShiftNumbers = computed(() => schedules.value.map(s => s.shift));
+
+const availableShiftsToAdd = computed(() => {
+    return [1, 2, 3].filter(n => !usedShiftNumbers.value.includes(n));
 });
 
 const formatTimeOnly = (date: Date) => date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -214,6 +255,11 @@ const getShiftBadgeColor = (shift: number) => {
         case 3: return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
         default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
+};
+
+const getShiftLabel = (shift: number | null) => {
+    if (!shift) return 'Shift';
+    return `Shift ${shift}`;
 };
 
 const refreshData = () => {
@@ -325,22 +371,37 @@ const openScheduleModal = () => { showScheduleModal.value = true; };
 const saveSchedule = () => {
     router.post('/esp32/monitor/update-schedule', {
         device_id: props.device.device_id,
-        schedule_start_time: scheduleStartTime.value,
-        schedule_end_time: scheduleEndTime.value,
-        schedule_breaks: breaks.value
+        schedules: schedules.value,
     }, { preserveState: false, preserveScroll: true, onSuccess: () => { showScheduleModal.value = false; } });
 };
 
-const addBreak = () => {
+const addShift = () => {
+    if (availableShiftsToAdd.value.length === 0) return;
+    const nextShift = availableShiftsToAdd.value[0];
+    schedules.value.push({ shift: nextShift, start: '', end: '', breaks: [] });
+    schedules.value.sort((a, b) => a.shift - b.shift);
+    expandedShift.value = schedules.value.findIndex(s => s.shift === nextShift);
+};
+
+const removeShift = (index: number) => {
+    schedules.value.splice(index, 1);
+    if (expandedShift.value !== null && expandedShift.value >= schedules.value.length) {
+        expandedShift.value = schedules.value.length - 1;
+    }
+};
+
+const addBreak = (shiftIndex: number) => {
     if (newBreakStart.value && newBreakEnd.value) {
-        breaks.value.push({ start: newBreakStart.value, end: newBreakEnd.value });
-        breaks.value.sort((a, b) => a.start.localeCompare(b.start));
+        schedules.value[shiftIndex].breaks.push({ start: newBreakStart.value, end: newBreakEnd.value });
+        schedules.value[shiftIndex].breaks.sort((a, b) => a.start.localeCompare(b.start));
         newBreakStart.value = '';
         newBreakEnd.value = '';
     }
 };
 
-const removeBreak = (index: number) => { breaks.value.splice(index, 1); };
+const removeBreak = (shiftIndex: number, breakIndex: number) => {
+    schedules.value[shiftIndex].breaks.splice(breakIndex, 1);
+};
 
 const openEditNg = (history: ProductionHistory) => {
     editingHistory.value = history;
@@ -464,6 +525,7 @@ onUnmounted(() => {
     window.removeEventListener('click', resetActivity);
 });
 </script>
+
 <template>
     <Head :title="`Detail - ${device.device_id}`" />
     <AppLayout :breadcrumbs="[
@@ -538,7 +600,12 @@ onUnmounted(() => {
 
                     <div v-if="getTimelineData">
                         <div class="flex justify-between text-sm mb-2">
-                            <span class="font-semibold text-gray-700 dark:text-gray-300">Production Timeline</span>
+                            <div class="flex items-center gap-2">
+                                <span class="font-semibold text-gray-700 dark:text-gray-300">Production Timeline</span>
+                                <span v-if="getTimelineData.activeShift" :class="['px-2 py-0.5 rounded-full text-xs font-bold', getShiftBadgeColor(getTimelineData.activeShift)]">
+                                    {{ getShiftLabel(getTimelineData.activeShift) }}
+                                </span>
+                            </div>
                             <span :class="['font-bold text-sm', Math.abs(device.delay_seconds) <= device.cycle_time ? 'text-green-600' : device.is_completed ? (device.delay_seconds > 0 ? 'text-red-600' : 'text-blue-600') : (device.delay_seconds > 0 ? 'text-orange-600' : 'text-blue-600')]">
                                 {{ formatDelayTime(device.delay_seconds, device.is_completed, device.cycle_time) }}
                             </span>
@@ -738,6 +805,7 @@ onUnmounted(() => {
                         </button>
                     </div>
                 </div>
+
                 <div v-show="activeHistoryTab === 'logs'" class="p-6">
                     <div class="overflow-x-auto">
                         <table class="w-full">
@@ -838,73 +906,112 @@ onUnmounted(() => {
                         @keyup.enter="saveEditNg" autofocus />
                 </div>
                 <div class="flex gap-2">
-                    <button @click="saveEditNg"
-                        class="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
-                        Simpan
-                    </button>
-                    <button @click="showEditNgModal = false"
-                        class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">
-                        Batal
-                    </button>
+                    <button @click="saveEditNg" class="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Simpan</button>
+                    <button @click="showEditNgModal = false" class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Batal</button>
                 </div>
             </div>
         </div>
 
         <div v-if="showScheduleModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showScheduleModal = false">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-[600px] shadow-2xl max-h-[90vh] overflow-y-auto">
-                <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Production Schedule - {{ device.device_id }}</h3>
-                <div class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-                    <p class="text-sm text-green-800 dark:text-green-300">Set jadwal produksi dan waktu break. Timeline akan menampilkan garis di setiap waktu yang Anda tentukan.</p>
+            <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-[640px] shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-5">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white">Production Schedule — {{ device.device_id }}</h3>
+                    <button v-if="availableShiftsToAdd.length > 0" @click="addShift"
+                        class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold flex items-center gap-2 hover:shadow-lg transition-all text-sm">
+                        <Plus class="w-4 h-4" /> Tambah Shift {{ availableShiftsToAdd[0] }}
+                    </button>
                 </div>
-                <div class="space-y-4 mb-6">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Start Time</label>
-                            <input v-model="scheduleStartTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">End Time</label>
-                            <input v-model="scheduleEndTime" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
-                        </div>
-                    </div>
+
+                <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                    <p class="text-sm text-blue-800 dark:text-blue-300">Set jadwal per shift. Timeline akan otomatis menyesuaikan shift yang aktif berdasarkan waktu mulai produksi.</p>
                 </div>
-                <div class="mb-6">
-                    <h4 class="font-bold text-gray-900 dark:text-white mb-3">Break Times</h4>
-                    <div class="space-y-3 mb-4">
-                        <div class="flex gap-2">
-                            <div class="flex-1">
-                                <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Break Start</label>
-                                <input v-model="newBreakStart" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+
+                <div class="space-y-4">
+                    <div v-for="(schedule, shiftIndex) in schedules" :key="schedule.shift" class="border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden">
+                        <div class="flex items-center justify-between px-4 py-3 cursor-pointer"
+                            :class="[
+                                schedule.shift === 1 ? 'bg-blue-50 dark:bg-blue-900/20' :
+                                schedule.shift === 2 ? 'bg-purple-50 dark:bg-purple-900/20' :
+                                'bg-orange-50 dark:bg-orange-900/20'
+                            ]"
+                            @click="expandedShift = expandedShift === shiftIndex ? null : shiftIndex">
+                            <div class="flex items-center gap-3">
+                                <span :class="['px-3 py-1 rounded-full text-sm font-bold', getShiftBadgeColor(schedule.shift)]">
+                                    Shift {{ schedule.shift }}
+                                </span>
+                                <span v-if="schedule.start && schedule.end" class="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                    {{ schedule.start }} — {{ schedule.end }}
+                                    <span v-if="schedule.breaks.length > 0" class="ml-2 text-xs text-orange-500">({{ schedule.breaks.length }} break)</span>
+                                </span>
+                                <span v-else class="text-sm text-gray-400 italic">Belum diset</span>
                             </div>
-                            <div class="flex-1">
-                                <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Break End</label>
-                                <input v-model="newBreakEnd" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
-                            </div>
-                            <div class="flex items-end">
-                                <button @click="addBreak" class="px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold flex items-center gap-2">
-                                    <Plus class="w-4 h-4" /> Add
+                            <div class="flex items-center gap-2">
+                                <button v-if="schedules.length > 1" @click.stop="removeShift(shiftIndex)"
+                                    class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
+                                    <Trash2 class="w-4 h-4" />
                                 </button>
+                                <span class="text-gray-400 text-sm">{{ expandedShift === shiftIndex ? '▲' : '▼' }}</span>
                             </div>
                         </div>
-                    </div>
-                    <div class="space-y-2">
-                        <div v-for="(brk, index) in breaks" :key="index" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl">
-                            <div class="flex items-center gap-3 flex-1">
-                                <div class="flex items-center justify-center w-8 h-8 bg-orange-600 text-white rounded-full font-bold text-sm">{{ index + 1 }}</div>
-                                <div class="font-semibold text-gray-900 dark:text-white">{{ brk.start }} - {{ brk.end }}</div>
+
+                        <div v-show="expandedShift === shiftIndex" class="p-4 space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Start Time</label>
+                                    <input v-model="schedule.start" type="time"
+                                        class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">End Time</label>
+                                    <input v-model="schedule.end" type="time"
+                                        class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                                </div>
                             </div>
-                            <button @click="removeBreak(index)" class="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
-                                <Trash2 class="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div v-if="breaks.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400">
-                            Belum ada break time. Tambahkan waktu istirahat untuk menandai di timeline.
+
+                            <div>
+                                <h5 class="font-semibold text-gray-700 dark:text-gray-300 mb-2 text-sm">Break Times</h5>
+                                <div class="flex gap-2 mb-3">
+                                    <div class="flex-1">
+                                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-400">Break Start</label>
+                                        <input v-model="newBreakStart" type="time"
+                                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-400">Break End</label>
+                                        <input v-model="newBreakEnd" type="time"
+                                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
+                                    </div>
+                                    <div class="flex items-end">
+                                        <button @click="addBreak(shiftIndex)"
+                                            class="px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold flex items-center gap-1 text-sm">
+                                            <Plus class="w-3.5 h-3.5" /> Add
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="space-y-2">
+                                    <div v-for="(brk, brkIdx) in schedule.breaks" :key="brkIdx"
+                                        class="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700 rounded-xl">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ brkIdx + 1 }}</div>
+                                            <span class="font-semibold text-sm text-gray-900 dark:text-white">{{ brk.start }} — {{ brk.end }}</span>
+                                        </div>
+                                        <button @click="removeBreak(shiftIndex, brkIdx)"
+                                            class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
+                                            <Trash2 class="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                    <div v-if="schedule.breaks.length === 0" class="text-center py-4 text-sm text-gray-400">
+                                        Belum ada break time
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="flex gap-2">
-                    <button @click="saveSchedule" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Save Schedule</button>
-                    <button @click="showScheduleModal = false" class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Cancel</button>
+
+                <div class="flex gap-2 mt-6">
+                    <button @click="saveSchedule" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Simpan Schedule</button>
+                    <button @click="showScheduleModal = false" class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Batal</button>
                 </div>
             </div>
         </div>

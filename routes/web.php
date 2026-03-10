@@ -344,6 +344,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('permission:jig.view')->group(function () {
         Route::get('/jig/cm', [CmReportController::class, 'index'])->name('jig.cm.index');
         Route::get('/jig/cm/{cmReport}', [CmReportController::class, 'show'])->name('jig.cm.show');
+        Route::put('/jig/cm/{cmReport}', [CmReportController::class, 'update']);
     });
     Route::post('/jig/cm', [CmReportController::class, 'store'])
         ->middleware('permission:jig.pic')

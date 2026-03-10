@@ -18,7 +18,7 @@ class CmReportController extends Controller
         $user     = User::with('roles')->find(Auth::id());
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
 
-        $query = CmReport::with([
+        $reports = CmReport::with([
             'jig:id,name,type,line',
             'pic:id,name',
             'closedBy:id,name',
@@ -26,9 +26,11 @@ class CmReportController extends Controller
         ])
         ->when($request->status, fn($q) => $q->where('status', $request->status))
         ->when($request->jig_id, fn($q) => $q->where('jig_id', $request->jig_id))
-        ->latest('report_date');
-
-        $reports = $query->get();
+        ->latest('report_date')
+        ->get()
+        ->map(fn($r) => array_merge($r->toArray(), [
+            'repair_duration' => $r->repair_duration,
+        ]));
 
         $summary = [
             'open'        => CmReport::where('status', 'open')->count(),
@@ -57,7 +59,7 @@ class CmReportController extends Controller
     {
         $request->validate([
             'jig_id'                    => 'required|exists:jigs,id',
-            'description'               => 'required|string',
+            'description'               => 'nullable|string',
             'penyebab'                  => 'nullable|string',
             'perbaikan'                 => 'nullable|string',
             'photo'                     => 'nullable|image|max:5120',
@@ -75,7 +77,7 @@ class CmReportController extends Controller
             $cm = CmReport::create([
                 'jig_id'          => $request->jig_id,
                 'pic_id'          => Auth::id(),
-                'report_date'     => now()->toDateString(),
+                'report_date'     => now(),
                 'description'     => $request->description,
                 'penyebab'        => $request->penyebab,
                 'perbaikan'       => $request->perbaikan,
@@ -104,22 +106,61 @@ class CmReportController extends Controller
 
     public function update(Request $request, CmReport $cmReport)
     {
-        $request->validate([
-            'penyebab'        => 'nullable|string',
-            'perbaikan'       => 'nullable|string',
-            'photo_perbaikan' => 'nullable|image|max:5120',
-        ]);
+        $user     = User::with('roles')->find(Auth::id());
+        $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
+        $isPic    = $cmReport->pic_id === Auth::id();
 
-        $data = ['status' => 'in_progress'];
-
-        if ($request->penyebab)  $data['penyebab']   = $request->penyebab;
-        if ($request->perbaikan) $data['perbaikan']   = $request->perbaikan;
-        if ($request->hasFile('photo_perbaikan')) {
-            $data['photo_perbaikan'] = $request->file('photo_perbaikan')->store('cm-reports', 'public');
+        if (!$isLeader && !$isPic) {
+            abort(403, 'Unauthorized');
         }
 
-        $cmReport->update($data);
-        return back()->with('success', 'Laporan CM diperbarui.');
+        $request->validate([
+            'description'               => 'nullable|string',
+            'penyebab'                  => 'nullable|string',
+            'perbaikan'                 => 'nullable|string',
+            'photo'                     => 'nullable|image|max:5120',
+            'photo_perbaikan'           => 'nullable|image|max:5120',
+            'spareparts'                => 'nullable|array',
+            'spareparts.*.sparepart_id' => 'required|exists:spareparts,id',
+            'spareparts.*.qty'          => 'required|numeric|min:0.01',
+            'spareparts.*.notes'        => 'nullable|string',
+        ]);
+
+        DB::transaction(function () use ($request, $cmReport) {
+            $data = ['status' => 'in_progress'];
+
+            if ($request->filled('description')) $data['description'] = $request->description;
+            if ($request->filled('penyebab'))    $data['penyebab']    = $request->penyebab;
+            if ($request->filled('perbaikan'))   $data['perbaikan']   = $request->perbaikan;
+
+            if ($request->hasFile('photo')) {
+                $data['photo'] = $request->file('photo')->store('cm-reports', 'public');
+            }
+            if ($request->hasFile('photo_perbaikan')) {
+                $data['photo_perbaikan'] = $request->file('photo_perbaikan')->store('cm-reports', 'public');
+            }
+
+            $cmReport->update($data);
+
+            if ($request->spareparts) {
+                foreach ($request->spareparts as $sp) {
+                    $existing = $cmReport->spareparts()->where('sparepart_id', $sp['sparepart_id'])->first();
+                    if (!$existing) {
+                        ReportSparepart::create([
+                            'report_type'  => 'cm',
+                            'report_id'    => $cmReport->id,
+                            'sparepart_id' => $sp['sparepart_id'],
+                            'qty'          => $sp['qty'],
+                            'notes'        => $sp['notes'] ?? null,
+                        ]);
+                        Sparepart::find($sp['sparepart_id'])
+                            ?->kurangiStok($sp['qty'], 'cm', $cmReport->id, $sp['notes'] ?? null);
+                    }
+                }
+            }
+        });
+
+        return back()->with('success', 'Laporan CM berhasil diperbarui.');
     }
 
     public function close(Request $request, CmReport $cmReport)

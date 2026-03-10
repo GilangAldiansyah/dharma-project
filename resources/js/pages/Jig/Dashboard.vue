@@ -2,8 +2,9 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { Wrench, AlertTriangle, CheckCircle2, Clock, ChevronRight, Calendar, User, Activity, ChevronUp, ChevronDown } from 'lucide-vue-next';
+import { Wrench, AlertTriangle, CheckCircle2, Clock, ChevronRight, Calendar, User, Activity, ChevronUp, ChevronDown, Download, X } from 'lucide-vue-next';
 import Chart from 'chart.js/auto';
+import * as XLSX from 'xlsx';
 
 interface PicPerf {
     id: number; name: string; total: number; done: number; late: number;
@@ -21,22 +22,24 @@ interface Props {
     pmTrend:        TrendItem[]; cmTrend: CmTrendItem[];
     bulan: any; tahun: number; isPic: boolean;
     pics: { id: number; name: string }[];
-    filters: { bulan?: any; tahun?: any; pic_id?: any };
+    filters: { bulan?: any; tahun?: any; pic_id?: any; minggu?: any };
 }
 
 const props = defineProps<Props>();
-const activeTab   = ref<'pm' | 'cm' | 'performance'>('pm');
-const filterBulan = ref(props.filters.bulan  ?? props.bulan);
-const filterTahun = ref(props.filters.tahun  ?? props.tahun);
-const filterPic   = ref(props.filters.pic_id ?? '');
+const activeTab    = ref<'pm' | 'cm' | 'performance'>('pm');
+const filterBulan  = ref(props.filters.bulan  ?? props.bulan);
+const filterTahun  = ref(props.filters.tahun  ?? props.tahun);
+const filterPic    = ref(props.filters.pic_id ?? '');
+const filterMinggu = ref(props.filters.minggu ?? '');
 
 const navigate = () => {
     router.visit('/jig/dashboard', {
         method: 'get',
         data: {
-            bulan: filterBulan.value,
-            tahun: filterTahun.value,
+            bulan:  filterBulan.value,
+            tahun:  filterTahun.value,
             pic_id: filterPic.value,
+            minggu: filterMinggu.value,
         },
         only: ['pmSummary', 'cmSummary', 'completionRate', 'picPerformance', 'pmTrend', 'cmTrend', 'upcomingPm', 'recentCm', 'filters'],
         preserveState: true,
@@ -47,7 +50,12 @@ const navigate = () => {
 
 const BULAN = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 const BULAN_LIST = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'].map((l,i) => ({ val: i+1, label: l }));
-const periodeLabel = computed(() => filterBulan.value === 'all' ? `Tahun ${filterTahun.value}` : `${BULAN[filterBulan.value]} ${filterTahun.value}`);
+const MINGGU_LIST = [1,2,3,4,5].map(w => ({ val: w, label: `W${w}` }));
+
+const periodeLabel = computed(() => {
+    const bulanStr = filterBulan.value === 'all' ? `Tahun ${filterTahun.value}` : `${BULAN[filterBulan.value]} ${filterTahun.value}`;
+    return filterMinggu.value ? `${bulanStr} — Week ${filterMinggu.value}` : bulanStr;
+});
 
 const formatDate = (d: string|null) => {
     if (!d) return '-';
@@ -66,6 +74,84 @@ const cmStatusColor: Record<string,string> = {
 };
 const cmStatusLabel: Record<string,string> = { open:'Open', in_progress:'In Progress', closed:'Closed' };
 const rateColor = (r: number) => r >= 80 ? 'text-green-600' : r >= 50 ? 'text-yellow-600' : 'text-red-600';
+
+const showExportModal = ref(false);
+const exportType = ref<'pm' | 'cm' | 'both'>('both');
+
+const exportToExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const periode = periodeLabel.value;
+    const picLabel = filterPic.value
+        ? (props.pics.find(p => p.id == filterPic.value)?.name ?? '')
+        : 'Semua PIC';
+
+    if (exportType.value === 'pm' || exportType.value === 'both') {
+        const summaryRows = [
+            ['Laporan Preventive Maintenance'],
+            ['Periode', periode],
+            ['PIC', picLabel],
+            [],
+            ['RINGKASAN'],
+            ['Total Jadwal', 'Selesai', 'Pending', 'Terlambat', 'Completion Rate'],
+            [
+                props.pmSummary.total,
+                props.pmSummary.done,
+                props.pmSummary.pending,
+                props.pmSummary.late,
+                `${props.completionRate}%`,
+            ],
+            [],
+            ['TREND BULANAN'],
+            ['Bulan', 'Total', 'Selesai', 'Terlambat', 'Pending'],
+            ...props.pmTrend.map(t => [t.label, t.total, t.done, t.late, t.pending]),
+        ];
+
+        if (!props.isPic && props.picPerformance.length > 0) {
+            summaryRows.push(
+                [],
+                ['PERFORMA PER PIC'],
+                ['Nama PIC', 'Total', 'Selesai', 'Terlambat', 'Pending', 'Completion Rate', 'Total CM'],
+                ...props.picPerformance.map(p => [
+                    p.name, p.total, p.done, p.late, p.pending,
+                    `${p.completion_rate}%`, p.cm_total,
+                ])
+            );
+        }
+
+        const wsPm = XLSX.utils.aoa_to_sheet(summaryRows);
+        wsPm['!cols'] = [
+            { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 14 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsPm, 'Preventive');
+    }
+
+    if (exportType.value === 'cm' || exportType.value === 'both') {
+        const cmTotal = props.cmSummary.open + props.cmSummary.in_progress + props.cmSummary.closed;
+        const cmRows = [
+            ['Laporan Corrective Maintenance'],
+            ['Periode', periode],
+            ['PIC', picLabel],
+            [],
+            ['RINGKASAN'],
+            ['Open', 'In Progress', 'Closed', 'Total'],
+            [props.cmSummary.open, props.cmSummary.in_progress, props.cmSummary.closed, cmTotal],
+            [],
+            ['TREND BULANAN'],
+            ['Bulan', 'Total', 'Open', 'In Progress', 'Closed'],
+            ...props.cmTrend.map(t => [t.label, t.total, t.open, t.in_progress, t.closed]),
+        ];
+
+        const wsCm = XLSX.utils.aoa_to_sheet(cmRows);
+        wsCm['!cols'] = [
+            { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsCm, 'Corrective');
+    }
+
+    const filename = `Laporan_JIG_${periode.replace(/\s+/g, '_')}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    showExportModal.value = false;
+};
 
 const donutCanvas   = ref<HTMLCanvasElement|null>(null);
 const pmBarCanvas   = ref<HTMLCanvasElement|null>(null);
@@ -237,64 +323,179 @@ onUnmounted(() => {
 const incrementTahun = () => { filterTahun.value = Number(filterTahun.value) + 1; navigate(); };
 const decrementTahun = () => { filterTahun.value = Number(filterTahun.value) - 1; navigate(); };
 </script>
-
 <template>
     <Head title="Dashboard JIG" />
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'Dashboard',href:'/jig/dashboard'}]">
         <div class="p-4 sm:p-6 space-y-5">
 
-            <div class="bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 rounded-2xl shadow-xl overflow-hidden">
-                <div class="px-6 pt-5 pb-4 flex items-center gap-3">
-                    <div class="bg-white/15 p-2.5 rounded-xl backdrop-blur-sm">
-                        <Wrench class="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-white tracking-tight">Dashboard JIG</h1>
-                        <p class="text-white/60 text-xs mt-0.5">Monitoring preventive &amp; corrective — {{ periodeLabel }}</p>
-                    </div>
-                </div>
-
-                <div class="px-4 pb-4 flex flex-wrap items-center gap-2">
-                    <div class="flex items-center bg-white/10 backdrop-blur-sm rounded-xl p-1 gap-0.5 flex-wrap flex-1 min-w-0">
-                        <button @click="filterBulan = 'all'; navigate()"
-                            :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
-                                filterBulan === 'all'
-                                    ? 'bg-white text-violet-700 shadow-sm'
-                                    : 'text-white/80 hover:text-white hover:bg-white/10']">
-                            Semua
-                        </button>
-                        <button v-for="b in BULAN_LIST" :key="b.val" @click="filterBulan = b.val; navigate()"
-                            :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
-                                filterBulan == b.val
-                                    ? 'bg-white text-violet-700 shadow-sm'
-                                    : 'text-white/80 hover:text-white hover:bg-white/10']">
-                            {{ b.label }}
-                        </button>
-                    </div>
-
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                        <div class="flex items-center bg-white/15 backdrop-blur-sm rounded-xl overflow-hidden border border-white/20">
-                            <span class="text-white font-bold text-sm px-3 py-2 tabular-nums select-none">{{ filterTahun }}</span>
-                            <div class="flex flex-col border-l border-white/20">
-                                <button @click="incrementTahun"
-                                    class="px-2 py-1 hover:bg-white/20 transition-colors duration-150 flex items-center justify-center">
-                                    <ChevronUp class="w-3 h-3 text-white" />
-                                </button>
-                                <button @click="decrementTahun"
-                                    class="px-2 py-1 hover:bg-white/20 transition-colors duration-150 flex items-center justify-center border-t border-white/20">
-                                    <ChevronDown class="w-3 h-3 text-white" />
-                                </button>
-                            </div>
-                        </div>
-
-                        <select v-if="!isPic && pics.length" v-model="filterPic" @change="navigate()"
-                            class="bg-white/15 backdrop-blur-sm text-white text-xs font-semibold rounded-xl px-3 py-2 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/30 cursor-pointer appearance-none">
-                            <option value="" class="text-gray-900 bg-white">Semua PIC</option>
-                            <option v-for="p in pics" :key="p.id" :value="p.id" class="text-gray-900 bg-white">{{ p.name }}</option>
-                        </select>
-                    </div>
-                </div>
+<div class="bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 rounded-2xl shadow-xl overflow-hidden">
+    <div class="px-6 pt-5 pb-4 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+            <div class="bg-white/15 p-2.5 rounded-xl backdrop-blur-sm">
+                <Wrench class="w-5 h-5 text-white" />
             </div>
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-tight">Dashboard JIG</h1>
+                <p class="text-white/60 text-xs mt-0.5">Monitoring preventive &amp; corrective — {{ periodeLabel }}</p>
+            </div>
+        </div>
+        <button @click="showExportModal = true"
+            class="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white text-xs font-semibold px-3 py-2 rounded-xl border border-white/20 transition-all duration-200 flex-shrink-0">
+            <Download class="w-3.5 h-3.5" /> Export
+        </button>
+    </div>
+
+    <div class="px-4 pb-4 flex items-center gap-2">
+    <div class="flex items-center gap-1.5 flex-1 min-w-0 flex-wrap">
+        <div class="flex items-center bg-white/10 backdrop-blur-sm rounded-xl p-1 gap-0.5 flex-wrap">
+            <button @click="filterBulan = 'all'; navigate()"
+                :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
+                    filterBulan === 'all'
+                        ? 'bg-white text-violet-700 shadow-sm'
+                        : 'text-white/80 hover:text-white hover:bg-white/10']">
+                Semua
+            </button>
+            <button v-for="b in BULAN_LIST" :key="b.val" @click="filterBulan = b.val; navigate()"
+                :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
+                    filterBulan == b.val
+                        ? 'bg-white text-violet-700 shadow-sm'
+                        : 'text-white/80 hover:text-white hover:bg-white/10']">
+                {{ b.label }}
+            </button>
+        </div>
+
+        <div class="flex items-center bg-black/20 backdrop-blur-sm rounded-xl p-1 gap-0.5 flex-shrink-0">
+    <button @click="filterMinggu = ''; navigate()"
+        :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
+            filterMinggu === ''
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/70 hover:text-white hover:bg-white/10']">
+        W•All
+    </button>
+    <button v-for="w in MINGGU_LIST" :key="w.val" @click="filterMinggu = w.val; navigate()"
+        :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 whitespace-nowrap',
+            filterMinggu == w.val
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/70 hover:text-white hover:bg-white/10']">
+        {{ w.label }}
+    </button>
+</div>
+    </div>
+
+    <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="flex items-center bg-white/15 backdrop-blur-sm rounded-xl overflow-hidden border border-white/20">
+            <span class="text-white font-bold text-sm px-3 py-2 tabular-nums select-none">{{ filterTahun }}</span>
+            <div class="flex flex-col border-l border-white/20">
+                <button @click="incrementTahun"
+                    class="px-2 py-1 hover:bg-white/20 transition-colors duration-150 flex items-center justify-center">
+                    <ChevronUp class="w-3 h-3 text-white" />
+                </button>
+                <button @click="decrementTahun"
+                    class="px-2 py-1 hover:bg-white/20 transition-colors duration-150 flex items-center justify-center border-t border-white/20">
+                    <ChevronDown class="w-3 h-3 text-white" />
+                </button>
+            </div>
+        </div>
+
+        <select v-if="!isPic && pics.length" v-model="filterPic" @change="navigate()"
+            class="bg-white/15 backdrop-blur-sm text-white text-xs font-semibold rounded-xl px-3 py-2 border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/30 cursor-pointer appearance-none">
+            <option value="" class="text-gray-900 bg-white">Semua PIC</option>
+            <option v-for="p in pics" :key="p.id" :value="p.id" class="text-gray-900 bg-white">{{ p.name }}</option>
+        </select>
+    </div>
+</div>
+</div>
+
+            <Teleport to="body">
+                <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0" enter-to-class="opacity-100"
+                    leave-active-class="transition duration-150 ease-in" leave-from-class="opacity-100" leave-to-class="opacity-0">
+                    <div v-if="showExportModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @click.self="showExportModal = false">
+                        <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100"
+                            leave-active-class="transition duration-150 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
+                            <div v-if="showExportModal" class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-100 dark:border-gray-700">
+                                <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-7 h-7 bg-violet-100 dark:bg-violet-900/30 rounded-lg flex items-center justify-center">
+                                            <Download class="w-3.5 h-3.5 text-violet-600" />
+                                        </div>
+                                        <h3 class="font-bold text-sm text-gray-900 dark:text-white">Export Excel</h3>
+                                    </div>
+                                    <button @click="showExportModal = false" class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                        <X class="w-4 h-4 text-gray-400" />
+                                    </button>
+                                </div>
+
+                                <div class="p-5 space-y-4">
+                                    <div>
+                                        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2.5">Pilih Data</p>
+                                        <div class="grid grid-cols-3 gap-2">
+                                            <button @click="exportType = 'pm'"
+                                                :class="['flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-semibold transition-all',
+                                                    exportType === 'pm'
+                                                        ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400'
+                                                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-gray-300']">
+                                                <Calendar class="w-4 h-4" />
+                                                Preventive
+                                            </button>
+                                            <button @click="exportType = 'cm'"
+                                                :class="['flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-semibold transition-all',
+                                                    exportType === 'cm'
+                                                        ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                                                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-gray-300']">
+                                                <AlertTriangle class="w-4 h-4" />
+                                                Corrective
+                                            </button>
+                                            <button @click="exportType = 'both'"
+                                                :class="['flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-semibold transition-all',
+                                                    exportType === 'both'
+                                                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400'
+                                                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-gray-300']">
+                                                <Activity class="w-4 h-4" />
+                                                Keduanya
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5 space-y-1.5">
+                                        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Ringkasan Export</p>
+                                        <div class="flex items-center justify-between text-xs">
+                                            <span class="text-gray-500 dark:text-gray-400">Periode</span>
+                                            <span class="font-semibold text-gray-800 dark:text-gray-200">{{ periodeLabel }}</span>
+                                        </div>
+                                        <div class="flex items-center justify-between text-xs">
+                                            <span class="text-gray-500 dark:text-gray-400">PIC</span>
+                                            <span class="font-semibold text-gray-800 dark:text-gray-200">
+                                                {{ filterPic ? (pics.find(p => p.id == filterPic)?.name ?? '-') : 'Semua PIC' }}
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center justify-between text-xs">
+                                            <span class="text-gray-500 dark:text-gray-400">Sheet</span>
+                                            <span class="font-semibold text-gray-800 dark:text-gray-200">
+                                                {{ exportType === 'pm' ? 'Preventive' : exportType === 'cm' ? 'Corrective' : 'Preventive + Corrective' }}
+                                            </span>
+                                        </div>
+                                        <div v-if="exportType === 'pm' || exportType === 'both'" class="flex items-center justify-between text-xs">
+                                            <span class="text-gray-500 dark:text-gray-400">PM Completion</span>
+                                            <span class="font-bold" :class="rateColor(completionRate)">{{ completionRate }}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="px-5 pb-5 flex gap-2">
+                                    <button @click="showExportModal = false"
+                                        class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                        Batal
+                                    </button>
+                                    <button @click="exportToExcel"
+                                        class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white text-sm font-semibold hover:from-violet-700 hover:to-purple-700 transition-all shadow-sm">
+                                        <Download class="w-4 h-4" /> Download
+                                    </button>
+                                </div>
+                            </div>
+                        </Transition>
+                    </div>
+                </Transition>
+            </Teleport>
 
             <div class="flex bg-gray-100 dark:bg-gray-800 rounded-xl p-1 gap-1 w-fit">
                 <button @click="activeTab = 'pm'" :class="['flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all', activeTab==='pm' ? 'bg-white dark:bg-gray-700 text-violet-600 shadow' : 'text-gray-500 hover:text-gray-700']">
@@ -310,7 +511,6 @@ const decrementTahun = () => { filterTahun.value = Number(filterTahun.value) - 1
 
             <div v-show="activeTab === 'pm'" class="space-y-5">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
                     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-5">
                         <p class="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-5">PM Completion Rate</p>
                         <div class="flex items-center gap-5">
@@ -501,11 +701,12 @@ const decrementTahun = () => { filterTahun.value = Number(filterTahun.value) - 1
 
                 <template v-else>
                     <div class="flex items-center justify-between">
-                        <div>
-                            <h3 class="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                                <Activity class="w-4 h-4 text-violet-500" /> Performa PIC
-                            </h3>
-                        </div>
+                        <h3 class="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                            <Activity class="w-4 h-4 text-violet-500" /> Performa PIC
+                            <span v-if="filterMinggu" class="text-xs font-normal bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 px-2 py-0.5 rounded-full">
+                                Week {{ filterMinggu }}
+                            </span>
+                        </h3>
                         <div class="flex items-center gap-3 text-xs text-gray-500">
                             <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>Selesai</span>
                             <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span>Pending</span>

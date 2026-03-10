@@ -31,6 +31,18 @@ interface Device {
     schedule_start_time: string;
     schedule_end_time: string;
     schedule_breaks: Array<{ start: string; end: string }>;
+    schedules: Array<{
+        shift: number;
+        start: string;
+        end: string;
+        breaks: Array<{ start: string; end: string }>;
+    }>;
+    active_schedule: {
+        shift: number | null;
+        start: string;
+        end: string;
+        breaks: Array<{ start: string; end: string }>;
+    };
     area?: {
         id: number;
         name: string;
@@ -111,67 +123,81 @@ const getDeviceStatus = (device: Device): { label: string; class: string } => {
     return { label: 'Idle', class: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400' };
 };
 
-const parseTimeToDate = (timeStr: string, baseDate: Date = new Date()) => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    const date = new Date(baseDate);
-    date.setHours(hours, minutes, 0, 0);
-    return date;
-};
-
 const getTimelineData = (device: Device) => {
     if (!device.production_started_at) return null;
+
+    const activeSchedule = device.active_schedule;
+    if (!activeSchedule) return null;
 
     const actualStartTime = new Date(device.production_started_at);
     const baseDate = new Date(actualStartTime);
     baseDate.setHours(0, 0, 0, 0);
 
-    const scheduleStart = parseTimeToDate(device.schedule_start_time.substring(0, 5), baseDate);
-    const scheduleEnd = parseTimeToDate(device.schedule_end_time.substring(0, 5), baseDate);
+    const parseTime = (timeStr: string, base: Date) => {
+        const [h, m] = timeStr.split(':').map(Number);
+        const d = new Date(base);
+        d.setHours(h, m, 0, 0);
+        return d;
+    };
+
+    const clampPct = (val: number) => Math.max(0, Math.min(val, 100));
+
+    let scheduleStart = parseTime(activeSchedule.start, baseDate);
+    let scheduleEnd = parseTime(activeSchedule.end, baseDate);
+
+    if (scheduleEnd <= scheduleStart) {
+        scheduleEnd = new Date(scheduleEnd.getTime() + 24 * 60 * 60 * 1000);
+    }
+
+    const totalDuration = scheduleEnd.getTime() - scheduleStart.getTime();
     const lastUpdateTime = new Date(device.last_update);
     const isActive = isDeviceActive(device);
     const effectiveCurrentTime = lastUpdateTime;
 
-    const productionStartPercentage = Math.max(0, Math.min(
-        ((actualStartTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
-
-    const currentPercentage = Math.max(0, Math.min(
-        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
-
-    const lastActivityPercentage = Math.max(0, Math.min(
-        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-    ));
-
+    const productionStartPercentage = clampPct(
+        ((actualStartTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
+    const currentPercentage = clampPct(
+        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
+    const lastActivityPercentage = clampPct(
+        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
+    );
     const barWidth = currentPercentage - productionStartPercentage;
 
-    const breaks = (device.schedule_breaks || []).map(brk => {
-        const breakStart = parseTimeToDate(brk.start, baseDate);
-        const breakEnd = parseTimeToDate(brk.end, baseDate);
-        const breakStartPercentage = Math.max(0, Math.min(
-            ((breakStart.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-        ));
-        const breakEndPercentage = Math.max(0, Math.min(
-            ((breakEnd.getTime() - scheduleStart.getTime()) / (scheduleEnd.getTime() - scheduleStart.getTime())) * 100, 100
-        ));
+    const breaks = (activeSchedule.breaks ?? []).map(brk => {
+        const breakStart = parseTime(brk.start, baseDate);
+        let breakEnd = parseTime(brk.end, baseDate);
+        if (breakEnd <= breakStart) breakEnd = new Date(breakEnd.getTime() + 24 * 60 * 60 * 1000);
         return {
-            startPercentage: breakStartPercentage,
-            endPercentage: breakEndPercentage,
-            width: breakEndPercentage - breakStartPercentage,
+            startPercentage: clampPct(((breakStart.getTime() - scheduleStart.getTime()) / totalDuration) * 100),
+            endPercentage: clampPct(((breakEnd.getTime() - scheduleStart.getTime()) / totalDuration) * 100),
+            width: clampPct(((breakEnd.getTime() - breakStart.getTime()) / totalDuration) * 100),
             startTime: breakStart,
-            endTime: breakEnd
+            endTime: breakEnd,
         };
     });
 
     return {
         scheduleStart, scheduleEnd, actualStartTime, lastUpdateTime, isActive,
         productionStartPercentage, currentPercentage, lastActivityPercentage,
-        barWidth, breaks, isOvertime: device.delay_seconds > 0
+        barWidth, breaks,
+        isOvertime: device.delay_seconds > 0,
+        activeShift: activeSchedule.shift,
     };
 };
 
 const formatTimeOnly = (date: Date) => {
     return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+};
+
+const getShiftBadgeColor = (shift: number | null) => {
+    switch (shift) {
+        case 1: return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        case 2: return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+        case 3: return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+        default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
 };
 
 const search = () => {
@@ -356,6 +382,7 @@ const toggleAutoRefresh = () => {
     }
 };
 </script>
+
 <template>
     <Head title="Robot Monitor" />
     <AppLayout v-if="!isFullscreen" :breadcrumbs="[{ title: 'Robot Monitor', href: '/esp32/monitor' }]">
@@ -456,6 +483,9 @@ const toggleAutoRefresh = () => {
                             <h3 class="text-xl font-bold text-gray-900 dark:text-white">{{ device.device_id }}</h3>
                             <div class="flex items-center gap-2 mt-1">
                                 <p v-if="device.area" class="text-xs text-blue-600 dark:text-blue-400 font-semibold">{{ device.area.name }}</p>
+                                <span v-if="getTimelineData(device)?.activeShift" :class="['px-2 py-0.5 rounded-full text-xs font-bold', getShiftBadgeColor(getTimelineData(device)!.activeShift)]">
+                                    Shift {{ getTimelineData(device)!.activeShift }}
+                                </span>
                             </div>
                             <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                 <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
@@ -608,6 +638,7 @@ const toggleAutoRefresh = () => {
             </div>
         </div>
     </AppLayout>
+
     <div v-else :class="['fixed inset-0 overflow-auto', fullscreenDarkMode ? 'bg-gray-900' : 'bg-gray-50']">
         <div class="min-h-screen p-8">
             <div class="flex justify-between items-center mb-8">
@@ -637,11 +668,15 @@ const toggleAutoRefresh = () => {
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 items-stretch">
                 <div v-for="device in devices" :key="device.id" :class="['rounded-2xl p-5 shadow-2xl flex flex-col gap-3', fullscreenDarkMode ? 'bg-gray-800' : 'bg-white']">
-
                     <div class="flex justify-between items-start gap-2">
                         <div class="min-w-0 flex-1">
                             <h3 :class="['font-bold leading-tight truncate', fullscreenDarkMode ? 'text-white' : 'text-gray-900']" style="font-size: clamp(0.85rem, 1.2vw, 1.2rem)">{{ device.device_id }}</h3>
-                            <p v-if="device.area" :class="['text-xs font-semibold mt-0.5 truncate', fullscreenDarkMode ? 'text-blue-400' : 'text-blue-600']">{{ device.area.name }}</p>
+                            <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <p v-if="device.area" :class="['text-xs font-semibold truncate', fullscreenDarkMode ? 'text-blue-400' : 'text-blue-600']">{{ device.area.name }}</p>
+                                <span v-if="getTimelineData(device)?.activeShift" :class="['px-1.5 py-0.5 rounded-full text-[10px] font-bold', getShiftBadgeColor(getTimelineData(device)!.activeShift)]">
+                                    S{{ getTimelineData(device)!.activeShift }}
+                                </span>
+                            </div>
                             <p :class="['text-xs mt-0.5', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">{{ formatLastUpdate(device.last_update) }}</p>
                         </div>
                         <div :class="['px-2.5 py-1 rounded-lg text-xs font-bold shrink-0', device.counter_a > device.max_count ? 'bg-red-500 text-white' : device.error_b ? 'bg-red-500 text-white' : isDeviceActive(device) ? 'bg-green-500 text-white' : 'bg-gray-500 text-white']">
@@ -762,7 +797,6 @@ const toggleAutoRefresh = () => {
                             <span v-else>—</span>
                         </div>
                     </div>
-
                 </div>
             </div>
         </div>

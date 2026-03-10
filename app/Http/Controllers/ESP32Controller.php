@@ -12,225 +12,252 @@ use Inertia\Inertia;
 
 class ESP32Controller extends Controller
 {
-public function monitor(Request $request)
-{
-    $search = $request->input('search');
-    $areaId = $request->input('area');
+    public function monitor(Request $request)
+    {
+        $search = $request->input('search');
+        $areaId = $request->input('area');
 
-    $devices = Esp32Device::query()
-        ->with(['area', 'line'])
-        ->when($search, function ($query, $search) {
-            $query->where('device_id', 'like', "%{$search}%");
-        })
-        ->when($areaId, function ($query, $areaId) {
-            $query->where('area_id', $areaId);
-        })
-        ->orderBy('device_id', 'asc')
-        ->get();
+        $devices = Esp32Device::query()
+            ->with(['area', 'line'])
+            ->when($search, function ($query, $search) {
+                $query->where('device_id', 'like', "%{$search}%");
+            })
+            ->when($areaId, function ($query, $areaId) {
+                $query->where('area_id', $areaId);
+            })
+            ->orderBy('device_id', 'asc')
+            ->get()
+            ->map(function ($device) {
+                $device->active_schedule = $device->getActiveSchedule();
+                return $device;
+            });
 
-    $areas = Area::orderBy('name', 'asc')->get();
-    $lines = Line::where('is_archived', false)
-        ->orderBy('line_code', 'asc')
-        ->get(['id', 'line_code', 'line_name']);
+        $areas = Area::orderBy('name', 'asc')->get();
+        $lines = Line::where('is_archived', false)
+            ->orderBy('line_code', 'asc')
+            ->get(['id', 'line_code', 'line_name']);
 
-    return Inertia::render('ESP32/Monitor', [
-        'devices' => $devices,
-        'areas' => $areas,
-        'lines' => $lines,
-        'filters' => [
-            'search' => $search,
-            'area' => $areaId,
-        ],
-    ]);
-}
-
-public function detail($deviceId, Request $request)
-{
-    $device = Esp32Device::where('device_id', $deviceId)
-        ->with(['area', 'line'])
-        ->firstOrFail();
-
-    $logs = Esp32Log::where('device_id', $deviceId)
-        ->orderBy('logged_at', 'desc')
-        ->paginate(100);
-
-    $historyQuery = Esp32ProductionHistory::where('device_id', $deviceId);
-
-    if ($request->filled('history_date')) {
-        $historyQuery->whereDate('production_started_at', $request->input('history_date'));
+        return Inertia::render('ESP32/Monitor', [
+            'devices' => $devices,
+            'areas'   => $areas,
+            'lines'   => $lines,
+            'filters' => [
+                'search' => $search,
+                'area'   => $areaId,
+            ],
+        ]);
     }
 
-    if ($request->filled('history_shift')) {
-        $historyQuery->where('shift', $request->input('history_shift'));
-    }
+    public function detail($deviceId, Request $request)
+    {
+        $device = Esp32Device::where('device_id', $deviceId)
+            ->with(['area', 'line'])
+            ->firstOrFail();
 
-    $productionHistories = $historyQuery
-        ->orderBy('production_finished_at', 'desc')
-        ->paginate(10, ['*'], 'history_page');
+        $device->active_schedule = $device->getActiveSchedule();
 
-    return Inertia::render('ESP32/Detail', [
-        'device' => $device,
-        'logs' => $logs,
-        'productionHistories' => $productionHistories,
-        'shifts' => \App\Helpers\DateHelper::getAllShifts(),
-        'filters' => [
-            'history_date' => $request->input('history_date'),
-            'history_shift' => $request->input('history_shift'),
-        ],
-    ]);
-}
+        $logs = Esp32Log::where('device_id', $deviceId)
+            ->orderBy('logged_at', 'desc')
+            ->paginate(100);
 
-public function updateSettings(Request $request)
-{
-    $validated = $request->validate([
-        'device_id' => 'required|string|exists:esp32_devices,device_id',
-        'max_count' => 'required|integer|min:0',
-        'max_stroke' => 'nullable|integer|min:0',
-        'reject' => 'required|integer|min:0',
-        'cycle_time' => 'required|integer|min:0',
-        'area_id' => 'nullable|integer|exists:areas,id',
-        'line_id' => 'nullable|integer|exists:lines,id',
-        'new_area_name' => 'nullable|string|max:255',
-        'reset_counter' => 'nullable|boolean',
-    ]);
+        $historyQuery = Esp32ProductionHistory::where('device_id', $deviceId);
 
-    $device = Esp32Device::where('device_id', $validated['device_id'])->first();
-
-    $areaId = null;
-    if (isset($validated['new_area_name']) && $validated['new_area_name']) {
-        $area = Area::firstOrCreate(['name' => $validated['new_area_name']]);
-        $areaId = $area->id;
-    } elseif (isset($validated['area_id'])) {
-        $areaId = $validated['area_id'];
-    }
-
-    $lineId = $validated['line_id'] ?? null;
-
-    if ($validated['reset_counter'] ?? false) {
-        if ($device->counter_a > 0) {
-            $this->saveProductionHistory($device);
+        if ($request->filled('history_date')) {
+            $historyQuery->whereDate('production_started_at', $request->input('history_date'));
         }
 
-        if ($device->line_id) {
-            $device->autoStopLineOperation();
+        if ($request->filled('history_shift')) {
+            $historyQuery->where('shift', $request->input('history_shift'));
         }
 
-        $device->update([
-            'counter_a' => 0,
-            'counter_b' => 0,
-            'reject' => 0,
-            'area_id' => $areaId,
-            'line_id' => $lineId,
-            'production_started_at' => null,
-            'is_paused' => false,
-            'paused_at' => null,
-            'total_pause_seconds' => 0,
-            'reset_requested' => true,
+        $productionHistories = $historyQuery
+            ->orderBy('production_finished_at', 'desc')
+            ->paginate(10, ['*'], 'history_page');
+
+        return Inertia::render('ESP32/Detail', [
+            'device'              => $device,
+            'logs'                => $logs,
+            'productionHistories' => $productionHistories,
+            'shifts'              => \App\Helpers\DateHelper::getAllShifts(),
+            'filters'             => [
+                'history_date'  => $request->input('history_date'),
+                'history_shift' => $request->input('history_shift'),
+            ],
+        ]);
+    }
+
+    public function updateSettings(Request $request)
+    {
+        $validated = $request->validate([
+            'device_id'    => 'required|string|exists:esp32_devices,device_id',
+            'max_count'    => 'required|integer|min:0',
+            'max_stroke'   => 'nullable|integer|min:0',
+            'reject'       => 'required|integer|min:0',
+            'cycle_time'   => 'required|integer|min:0',
+            'area_id'      => 'nullable|integer|exists:areas,id',
+            'line_id'      => 'nullable|integer|exists:lines,id',
+            'new_area_name' => 'nullable|string|max:255',
+            'reset_counter' => 'nullable|boolean',
         ]);
 
-        return back()->with('success', 'Counter berhasil direset ke 0');
+        $device = Esp32Device::where('device_id', $validated['device_id'])->first();
+
+        $areaId = null;
+        if (isset($validated['new_area_name']) && $validated['new_area_name']) {
+            $area   = Area::firstOrCreate(['name' => $validated['new_area_name']]);
+            $areaId = $area->id;
+        } elseif (isset($validated['area_id'])) {
+            $areaId = $validated['area_id'];
+        }
+
+        $lineId = $validated['line_id'] ?? null;
+
+        if ($validated['reset_counter'] ?? false) {
+            if ($device->counter_a > 0) {
+                $this->saveProductionHistory($device);
+            }
+
+            if ($device->line_id) {
+                $device->autoStopLineOperation();
+            }
+
+            $device->update([
+                'counter_a'            => 0,
+                'counter_b'            => 0,
+                'reject'               => 0,
+                'area_id'              => $areaId,
+                'line_id'              => $lineId,
+                'production_started_at' => null,
+                'is_paused'            => false,
+                'paused_at'            => null,
+                'total_pause_seconds'  => 0,
+                'reset_requested'      => true,
+            ]);
+
+            return back()->with('success', 'Counter berhasil direset ke 0');
+        }
+
+        $loadingTime = $validated['max_count'] * $validated['cycle_time'];
+
+        $productionStartedAt = $device->production_started_at;
+        if ($device->counter_a > 0) {
+            $netElapsedSeconds   = $device->counter_a * $validated['cycle_time'];
+            $productionStartedAt = now()->subSeconds($netElapsedSeconds + $device->total_pause_seconds);
+        } elseif (!$productionStartedAt) {
+            $productionStartedAt = now();
+        }
+
+        $updateData = [
+            'max_count'            => $validated['max_count'],
+            'reject'               => $validated['reject'],
+            'cycle_time'           => $validated['cycle_time'],
+            'loading_time'         => $loadingTime,
+            'area_id'              => $areaId,
+            'line_id'              => $lineId,
+            'production_started_at' => $productionStartedAt,
+        ];
+
+        if (isset($validated['max_stroke'])) {
+            $updateData['max_stroke'] = $validated['max_stroke'];
+        }
+
+        $device->update($updateData);
+
+        return back()->with('success', 'Settings berhasil diupdate');
     }
 
-    $loadingTime = $validated['max_count'] * $validated['cycle_time'];
+    public function updateHistoryNg(Request $request)
+    {
+        $validated = $request->validate([
+            'id'           => 'required|integer|exists:esp32_production_histories,id',
+            'total_reject' => 'required|integer|min:0',
+        ]);
 
-    $productionStartedAt = $device->production_started_at;
-    if ($device->counter_a > 0) {
-        $netElapsedSeconds = $device->counter_a * $validated['cycle_time'];
-        $productionStartedAt = now()->subSeconds($netElapsedSeconds + $device->total_pause_seconds);
-    } elseif (!$productionStartedAt) {
-        $productionStartedAt = now();
+        Esp32ProductionHistory::findOrFail($validated['id'])->update([
+            'total_reject' => $validated['total_reject'],
+        ]);
+
+        return back()->with('success', 'NG berhasil diupdate');
     }
 
-    $updateData = [
-        'max_count' => $validated['max_count'],
-        'reject' => $validated['reject'],
-        'cycle_time' => $validated['cycle_time'],
-        'loading_time' => $loadingTime,
-        'area_id' => $areaId,
-        'line_id' => $lineId,
-        'production_started_at' => $productionStartedAt,
-    ];
+    public function updateSchedule(Request $request)
+    {
+        $validated = $request->validate([
+            'device_id'                   => 'required|string|exists:esp32_devices,device_id',
+            'schedules'                   => 'nullable|array',
+            'schedules.*.shift'           => 'required_with:schedules|integer|min:1|max:3',
+            'schedules.*.start'           => 'required_with:schedules|date_format:H:i',
+            'schedules.*.end'             => 'required_with:schedules|date_format:H:i',
+            'schedules.*.breaks'          => 'nullable|array',
+            'schedules.*.breaks.*.start'  => 'required_with:schedules.*.breaks|date_format:H:i',
+            'schedules.*.breaks.*.end'    => 'required_with:schedules.*.breaks|date_format:H:i',
+            'schedule_start_time'         => 'nullable|date_format:H:i',
+            'schedule_end_time'           => 'nullable|date_format:H:i',
+            'schedule_breaks'             => 'nullable|array',
+        ]);
 
-    if (isset($validated['max_stroke'])) {
-        $updateData['max_stroke'] = $validated['max_stroke'];
+        $device = Esp32Device::where('device_id', $validated['device_id'])->firstOrFail();
+
+        $updateData = [
+            'schedules' => $validated['schedules'] ?? [],
+        ];
+
+        if (!empty($validated['schedules'])) {
+            $firstShift = collect($validated['schedules'])->sortBy('shift')->first();
+            $lastShift  = collect($validated['schedules'])->sortBy('shift')->last();
+            $updateData['schedule_start_time'] = $firstShift['start'] . ':00';
+            $updateData['schedule_end_time']   = $lastShift['end'] . ':00';
+            $updateData['schedule_breaks']     = collect($validated['schedules'])
+                ->flatMap(fn($s) => $s['breaks'] ?? [])
+                ->values()
+                ->toArray();
+        } elseif (isset($validated['schedule_start_time'])) {
+            $updateData['schedule_start_time'] = $validated['schedule_start_time'] . ':00';
+            $updateData['schedule_end_time']   = $validated['schedule_end_time'] . ':00';
+            $updateData['schedule_breaks']     = $validated['schedule_breaks'] ?? [];
+        }
+
+        $device->update($updateData);
+
+        return back()->with('success', 'Schedule berhasil diupdate');
     }
 
-    $device->update($updateData);
+    private function saveProductionHistory($device)
+    {
+        if (!$device->production_started_at || $device->counter_a == 0) {
+            return;
+        }
 
-    return back()->with('success', 'Settings berhasil diupdate');
-}
+        $productionStarted  = \Carbon\Carbon::parse($device->production_started_at);
+        $productionFinished = now();
 
-public function updateHistoryNg(Request $request)
-{
-    $validated = $request->validate([
-        'id' => 'required|integer|exists:esp32_production_histories,id',
-        'total_reject' => 'required|integer|min:0',
-    ]);
+        $actualTimeSeconds   = $productionFinished->timestamp - $productionStarted->timestamp;
+        $netTimeSeconds      = $actualTimeSeconds - $device->total_pause_seconds;
+        $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
+        $delaySeconds        = $netTimeSeconds - $expectedTimeSeconds;
 
-    Esp32ProductionHistory::findOrFail($validated['id'])->update([
-        'total_reject' => $validated['total_reject'],
-    ]);
+        if (abs($delaySeconds) <= $device->cycle_time) {
+            $completionStatus = 'on_time';
+        } elseif ($delaySeconds > 0) {
+            $completionStatus = 'delayed';
+        } else {
+            $completionStatus = 'ahead';
+        }
 
-    return back()->with('success', 'NG berhasil diupdate');
-}
-public function updateSchedule(Request $request)
-{
-    $validated = $request->validate([
-        'device_id' => 'required|string|exists:esp32_devices,device_id',
-        'schedule_start_time' => 'required|date_format:H:i',
-        'schedule_end_time' => 'required|date_format:H:i',
-        'schedule_breaks' => 'nullable|array',
-        'schedule_breaks.*.start' => 'required_with:schedule_breaks|date_format:H:i',
-        'schedule_breaks.*.end' => 'required_with:schedule_breaks|date_format:H:i',
-    ]);
-
-    $device = Esp32Device::where('device_id', $validated['device_id'])->firstOrFail();
-
-    $device->update([
-        'schedule_start_time' => $validated['schedule_start_time'] . ':00',
-        'schedule_end_time' => $validated['schedule_end_time'] . ':00',
-        'schedule_breaks' => $validated['schedule_breaks'] ?? [],
-    ]);
-
-    return back()->with('success', 'Schedule berhasil diupdate');
-}
-
-private function saveProductionHistory($device)
-{
-    if (!$device->production_started_at || $device->counter_a == 0) {
-        return;
+        Esp32ProductionHistory::create([
+            'device_id'              => $device->device_id,
+            'total_counter_a'        => $device->counter_a,
+            'total_counter_b'        => $device->counter_b,
+            'total_reject'           => $device->reject,
+            'cycle_time'             => $device->cycle_time,
+            'max_count'              => $device->max_count,
+            'max_stroke'             => $device->max_stroke,
+            'expected_time_seconds'  => $expectedTimeSeconds,
+            'actual_time_seconds'    => $netTimeSeconds,
+            'delay_seconds'          => $delaySeconds,
+            'production_started_at'  => $productionStarted,
+            'production_finished_at' => $productionFinished,
+            'completion_status'      => $completionStatus,
+        ]);
     }
-
-    $productionStarted = \Carbon\Carbon::parse($device->production_started_at);
-    $productionFinished = now();
-
-    $actualTimeSeconds = $productionFinished->timestamp - $productionStarted->timestamp;
-    $netTimeSeconds = $actualTimeSeconds - $device->total_pause_seconds;
-    $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
-    $delaySeconds = $netTimeSeconds - $expectedTimeSeconds;
-
-    if (abs($delaySeconds) <= $device->cycle_time) {
-        $completionStatus = 'on_time';
-    } elseif ($delaySeconds > 0) {
-        $completionStatus = 'delayed';
-    } else {
-        $completionStatus = 'ahead';
-    }
-
-    Esp32ProductionHistory::create([
-        'device_id' => $device->device_id,
-        'total_counter_a' => $device->counter_a,
-        'total_counter_b' => $device->counter_b,
-        'total_reject' => $device->reject,
-        'cycle_time' => $device->cycle_time,
-        'max_count' => $device->max_count,
-        'max_stroke' => $device->max_stroke,
-        'expected_time_seconds' => $expectedTimeSeconds,
-        'actual_time_seconds' => $netTimeSeconds,
-        'delay_seconds' => $delaySeconds,
-        'production_started_at' => $productionStarted,
-        'production_finished_at' => $productionFinished,
-        'completion_status' => $completionStatus,
-    ]);
-}
 }
