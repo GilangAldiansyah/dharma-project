@@ -48,12 +48,46 @@ const filterStatus    = ref(props.filters.status ?? '');
 const filterJig       = ref(props.filters.jig_id  ?? '');
 const showFilterPanel = ref(false);
 
+const jigSearch      = ref('');
+const jigOpen        = ref(false);
+const selectedJigObj = computed(() => props.jigs.find(j => j.id == filterJig.value) ?? null);
+
+const filteredJigs = computed(() => {
+    const q = jigSearch.value.toLowerCase().trim();
+    if (!q) return props.jigs;
+    return props.jigs.filter(j =>
+        j.name.toLowerCase().includes(q) ||
+        j.type.toLowerCase().includes(q) ||
+        j.line.toLowerCase().includes(q)
+    );
+});
+
+const selectJig = (j: Jig) => {
+    filterJig.value = j.id;
+    jigSearch.value = j.name;
+    jigOpen.value   = false;
+};
+
+const clearJig = () => {
+    filterJig.value = '';
+    jigSearch.value = '';
+    jigOpen.value   = true;
+};
+
+const closeJigDropdown = () => { setTimeout(() => { jigOpen.value = false; }, 180); };
+
 watch([filterStatus, filterJig], () => {
     router.get('/jig/cm', {
         status: filterStatus.value,
         jig_id: filterJig.value,
     }, { preserveState: true, preserveScroll: true });
 });
+
+watch(filterJig, (val) => {
+    if (!val) { jigSearch.value = ''; return; }
+    const found = props.jigs.find(j => j.id == val);
+    if (found) jigSearch.value = found.name;
+}, { immediate: true });
 
 const exportCm = () => {
     const wb    = XLSX.utils.book_new();
@@ -158,7 +192,6 @@ const compressImage = (file: File): Promise<File> =>
         reader.readAsDataURL(file);
     });
 
-// ── ADD FORM ─────────────────────────────────────────────────────────────────
 const form = useForm({
     jig_id:          null as number | null,
     description:     '',
@@ -168,6 +201,33 @@ const form = useForm({
     photo_perbaikan: null as File | null,
     spareparts:      [] as { sparepart_id: number | null; qty: string; notes: string }[],
 });
+
+const formJigSearch = ref('');
+const formJigOpen   = ref(false);
+
+const filteredFormJigs = computed(() => {
+    const q = formJigSearch.value.toLowerCase().trim();
+    if (!q) return props.jigs;
+    return props.jigs.filter(j =>
+        j.name.toLowerCase().includes(q) ||
+        j.type.toLowerCase().includes(q) ||
+        j.line.toLowerCase().includes(q)
+    );
+});
+
+const selectFormJig = (j: Jig) => {
+    form.jig_id         = j.id;
+    formJigSearch.value = j.name;
+    formJigOpen.value   = false;
+};
+
+const clearFormJig = () => {
+    form.jig_id         = null;
+    formJigSearch.value = '';
+    formJigOpen.value   = true;
+};
+
+const closeFormJigDropdown = () => { setTimeout(() => { formJigOpen.value = false; }, 180); };
 
 const spSearch = ref<string[]>([]);
 const spOpen   = ref<boolean[]>([]);
@@ -198,13 +258,26 @@ const addSp    = () => { form.spareparts.push({ sparepart_id: null, qty: '', not
 const removeSp = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); };
 
 const openAdd = () => {
-    form.reset(); form.spareparts = []; spSearch.value = []; spOpen.value = [];
-    previewA.value = null; previewB.value = null;
-    showAddModal.value = true;
+    form.reset();
+    form.spareparts     = [];
+    spSearch.value      = [];
+    spOpen.value        = [];
+    formJigSearch.value = '';
+    formJigOpen.value   = false;
+    previewA.value      = null;
+    previewB.value      = null;
+    showAddModal.value  = true;
 };
+
 const closeAdd = () => {
-    showAddModal.value = false; previewA.value = null; previewB.value = null;
-    spSearch.value = []; spOpen.value = []; form.reset();
+    showAddModal.value  = false;
+    previewA.value      = null;
+    previewB.value      = null;
+    spSearch.value      = [];
+    spOpen.value        = [];
+    formJigSearch.value = '';
+    formJigOpen.value   = false;
+    form.reset();
 };
 
 const handlePhoto = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
@@ -225,7 +298,6 @@ const handlePhoto = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
 
 const submitAdd = () => form.post('/jig/cm', { onSuccess: closeAdd });
 
-// ── EDIT FORM ─────────────────────────────────────────────────────────────────
 const editForm = useForm({
     _method:         'PUT',
     description:     '',
@@ -265,21 +337,26 @@ const addSpE    = () => { editForm.spareparts.push({ sparepart_id: null, qty: ''
 const removeSpE = (i: number) => { editForm.spareparts.splice(i, 1); spSearchE.value.splice(i, 1); spOpenE.value.splice(i, 1); };
 
 const openEdit = (r: CmReport) => {
-    selectedReport.value    = r;
-    previewC.value          = null;
-    previewD.value          = null;
-    spSearchE.value         = [];
-    spOpenE.value           = [];
+    selectedReport.value = r;
+    previewC.value       = null;
+    previewD.value       = null;
+    spSearchE.value      = [];
+    spOpenE.value        = [];
     editForm.reset();
-    editForm.description    = r.description ?? '';
-    editForm.penyebab       = r.penyebab    ?? '';
-    editForm.perbaikan      = r.perbaikan   ?? '';
-    editForm.spareparts     = [];
-    showEditModal.value     = true;
+    editForm.description = r.description ?? '';
+    editForm.penyebab    = r.penyebab    ?? '';
+    editForm.perbaikan   = r.perbaikan   ?? '';
+    editForm.spareparts  = [];
+    showEditModal.value  = true;
 };
+
 const closeEdit = () => {
-    showEditModal.value = false; previewC.value = null; previewD.value = null;
-    spSearchE.value = []; spOpenE.value = []; editForm.reset();
+    showEditModal.value = false;
+    previewC.value      = null;
+    previewD.value      = null;
+    spSearchE.value     = [];
+    spOpenE.value       = [];
+    editForm.reset();
 };
 
 const handlePhotoEdit = async (e: Event, field: 'photo' | 'photo_perbaikan') => {
@@ -303,7 +380,6 @@ const submitEdit = () => {
     editForm.post(`/jig/cm/${selectedReport.value.id}`, { onSuccess: closeEdit });
 };
 
-// ── CLOSE FORM ────────────────────────────────────────────────────────────────
 const closeForm = useForm({ action: '' });
 const openClose = (r: CmReport) => { selectedReport.value = r; closeForm.reset(); showCloseModal.value = true; };
 const submitClose = () => {
@@ -333,9 +409,9 @@ const fmtDatetime = (d: string | null) => {
 };
 
 const statusCfg: Record<string, { label: string; badge: string; cardBorder: string; icon: any }> = {
-    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',                                     cardBorder: 'border-l-red-400',     icon: AlertCircle  },
-    in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',                             cardBorder: 'border-l-amber-400',   icon: Clock        },
-    closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',                     cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
+    open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',                         cardBorder: 'border-l-red-400',     icon: AlertCircle  },
+    in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',                 cardBorder: 'border-l-amber-400',   icon: Clock        },
+    closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',         cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
 };
 
 const activeFilterCount = computed(() => {
@@ -345,13 +421,11 @@ const activeFilterCount = computed(() => {
     return c;
 });
 </script>
-
 <template>
     <Head title="CM Report" />
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'CM Report',href:'/jig/cm'}]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
-            <!-- HEADER -->
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -378,14 +452,12 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
-            <!-- FLASH -->
             <div v-if="flash?.success"
                 class="flex items-center gap-3 p-3 sm:p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 flex-shrink-0" />
                 <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
-            <!-- SUMMARY -->
             <div class="grid grid-cols-3 gap-2 sm:gap-3">
                 <div class="text-center p-3 sm:p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                     <p class="text-xs text-red-500 font-semibold flex items-center justify-center gap-1">
@@ -410,7 +482,6 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
-            <!-- FILTER -->
             <div class="space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
                     <button @click="showFilterPanel = !showFilterPanel"
@@ -426,9 +497,10 @@ const activeFilterCount = computed(() => {
                         </span>
                     </button>
                     <span class="text-xs text-gray-400">{{ reports.length }} laporan</span>
-                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; filterJig = ''"
+                    <button v-if="activeFilterCount > 0" @click="filterStatus = ''; clearJig()"
                         class="text-xs text-orange-500 font-semibold ml-auto">Reset filter</button>
                 </div>
+
                 <div v-if="showFilterPanel" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-3 shadow-sm">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Status</label>
@@ -441,18 +513,54 @@ const activeFilterCount = computed(() => {
                             </button>
                         </div>
                     </div>
+
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">JIG</label>
-                        <select v-model="filterJig"
-                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none">
-                            <option value="">Semua JIG</option>
-                            <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }}</option>
-                        </select>
+                        <div class="relative">
+                            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
+                            <input
+                                v-model="jigSearch"
+                                type="text"
+                                placeholder="Cari nama / tipe / line JIG..."
+                                autocomplete="off"
+                                @focus="jigOpen = true"
+                                @blur="closeJigDropdown"
+                                :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
+                                    selectedJigObj
+                                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-semibold'
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-orange-400']"
+                            />
+                            <button v-if="selectedJigObj" type="button" @click="clearJig"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
+                                <X class="w-4 h-4" />
+                            </button>
+                            <div v-if="jigOpen"
+                                class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                <div v-if="filteredJigs.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
+                                    Tidak ada JIG "{{ jigSearch }}"
+                                </div>
+                                <button v-for="j in filteredJigs" :key="j.id" type="button"
+                                    @mousedown.prevent="selectJig(j)"
+                                    :class="['w-full text-left px-3 py-2.5 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors',
+                                        selectedJigObj?.id === j.id ? 'bg-orange-50 dark:bg-orange-900/20' : '']">
+                                    <span class="block text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                        <template v-for="(part, pi) in highlightMatch(j.name, jigSearch)" :key="pi">
+                                            <mark v-if="part.match" class="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-white rounded px-0.5 not-italic">{{ part.text }}</mark>
+                                            <span v-else>{{ part.text }}</span>
+                                        </template>
+                                    </span>
+                                    <span class="text-xs text-gray-400">{{ j.type }} — {{ j.line }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div v-if="selectedJigObj" class="mt-1.5 flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+                            <span class="font-semibold">{{ selectedJigObj.name }}</span>
+                            <span class="text-gray-400">{{ selectedJigObj.type }} — {{ selectedJigObj.line }}</span>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- TABLE DESKTOP -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -533,7 +641,6 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
-            <!-- CARD MOBILE -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="reports.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <Wrench class="w-10 h-10 mx-auto mb-2 text-gray-300" />
@@ -562,7 +669,6 @@ const activeFilterCount = computed(() => {
                                 </span>
                             </div>
                         </div>
-
                         <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-2.5">
                             <div>
                                 <span class="text-gray-400">PIC</span>
@@ -582,7 +688,6 @@ const activeFilterCount = computed(() => {
                                 <p class="font-semibold text-gray-700 dark:text-gray-300 line-clamp-1">{{ r.penyebab }}</p>
                             </div>
                         </div>
-
                         <div class="flex items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
                             <button v-if="(isLeader || r.pic_id === authId) && r.status !== 'closed'" @click="openClose(r)"
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition-all">
@@ -603,7 +708,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
-        <!-- MODAL ADD -->
+        <!-- Modal Add -->
         <div v-if="showAddModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
@@ -619,18 +724,53 @@ const activeFilterCount = computed(() => {
                     </div>
                 </div>
                 <form @submit.prevent="submitAdd" class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+
+                    <!-- JIG searchable -->
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">JIG <span class="text-red-500">*</span></label>
-                        <select v-model="form.jig_id"
-                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none">
-                            <option :value="null" disabled>Pilih JIG</option>
-                            <option v-for="j in jigs" :key="j.id" :value="j.id">{{ j.name }} — {{ j.type }} ({{ j.line }})</option>
-                        </select>
+                        <div class="relative">
+                            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
+                            <input
+                                v-model="formJigSearch"
+                                type="text"
+                                placeholder="Cari nama / tipe / line JIG..."
+                                autocomplete="off"
+                                @focus="formJigOpen = true"
+                                @blur="closeFormJigDropdown"
+                                :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
+                                    form.jig_id
+                                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-semibold'
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-orange-400']"
+                            />
+                            <button v-if="form.jig_id" type="button" @click="clearFormJig"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
+                                <X class="w-4 h-4" />
+                            </button>
+                            <div v-if="formJigOpen"
+                                class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                <div v-if="filteredFormJigs.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
+                                    Tidak ada JIG "{{ formJigSearch }}"
+                                </div>
+                                <button v-for="j in filteredFormJigs" :key="j.id" type="button"
+                                    @mousedown.prevent="selectFormJig(j)"
+                                    :class="['w-full text-left px-3 py-2.5 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors',
+                                        form.jig_id === j.id ? 'bg-orange-50 dark:bg-orange-900/20' : '']">
+                                    <span class="block text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                        <template v-for="(part, pi) in highlightMatch(j.name, formJigSearch)" :key="pi">
+                                            <mark v-if="part.match" class="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-white rounded px-0.5 not-italic">{{ part.text }}</mark>
+                                            <span v-else>{{ part.text }}</span>
+                                        </template>
+                                    </span>
+                                    <span class="text-xs text-gray-400">{{ j.type }} — {{ j.line }}</span>
+                                </button>
+                            </div>
+                        </div>
                         <p v-if="form.errors.jig_id" class="mt-1 text-xs text-red-500">{{ form.errors.jig_id }}</p>
                     </div>
+
                     <div>
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">
-                            Deskripsi Kerusakan <span class="text-gray-400 font-normal text-xs ml-1">(opsional, bisa diisi nanti)</span>
+                            Deskripsi Kerusakan <span class="text-gray-400 font-normal text-xs ml-1">(opsional)</span>
                         </label>
                         <textarea v-model="form.description" rows="3" placeholder="Jelaskan kerusakan yang terjadi..."
                             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-orange-500 focus:outline-none resize-none transition-colors"></textarea>
@@ -718,8 +858,7 @@ const activeFilterCount = computed(() => {
                                 </div>
                                 <input v-model="sp.qty" type="number" inputmode="numeric" step="1" min="1" placeholder="Qty"
                                     class="w-16 sm:w-20 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
-                                <button type="button" @click="removeSp(i)"
-                                    class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
+                                <button type="button" @click="removeSp(i)" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
                                     <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
@@ -748,7 +887,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
-        <!-- MODAL EDIT -->
+        <!-- Modal Edit -->
         <div v-if="showEditModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
@@ -868,8 +1007,7 @@ const activeFilterCount = computed(() => {
                                 </div>
                                 <input v-model="sp.qty" type="number" inputmode="numeric" step="1" min="1" placeholder="Qty"
                                     class="w-16 sm:w-20 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
-                                <button type="button" @click="removeSpE(i)"
-                                    class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
+                                <button type="button" @click="removeSpE(i)" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors active:scale-95">
                                     <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
@@ -898,7 +1036,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
-        <!-- MODAL DETAIL -->
+        <!-- Modal Detail -->
         <div v-if="showDetailModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -937,9 +1075,7 @@ const activeFilterCount = computed(() => {
                             <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.closed_by.name }} · {{ fmtDatetime(selectedReport.closed_at) }}</span>
                         </div>
                         <div v-if="selectedReport.repair_duration" class="flex justify-between gap-2 pt-1 border-t border-gray-200 dark:border-gray-600">
-                            <span class="text-gray-400 shrink-0 flex items-center gap-1">
-                                <Timer class="w-3 h-3" /> Durasi Repair
-                            </span>
+                            <span class="text-gray-400 shrink-0 flex items-center gap-1"><Timer class="w-3 h-3" /> Durasi Repair</span>
                             <span class="font-black text-violet-600 dark:text-violet-400">{{ selectedReport.repair_duration }}</span>
                         </div>
                     </div>
@@ -1001,7 +1137,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
-        <!-- MODAL CLOSE -->
+        <!-- Modal Close -->
         <div v-if="showCloseModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -1041,7 +1177,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
-        <!-- MODAL IMAGE -->
+        <!-- Modal Image -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
             @click="showImageModal = false">
             <button class="absolute top-4 right-4 p-2 bg-white/10 rounded-xl text-white hover:bg-white/20 transition-colors">
