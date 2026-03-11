@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Esp32Device;
 use App\Models\Esp32Log;
 use App\Models\Esp32ProductionHistory;
+use App\Models\Line;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -15,6 +16,7 @@ class ESP32ApiController extends Controller
     public function postData(Request $request)
     {
         $this->autoStopIdleDevices();
+        $this->checkLineSchedules();
 
         try {
             $validated = $request->validate([
@@ -477,5 +479,14 @@ class ESP32ApiController extends Controller
                     'reset_requested'       => true,
                 ]);
             });
+    }
+
+    private function checkLineSchedules()
+    {
+        $scheduleService = app(\App\Services\LineScheduleService::class);
+
+        Line::where('is_archived', false)
+            ->whereIn('status', ['operating', 'paused'])
+            ->each(fn($line) => $scheduleService->checkAndApplySchedule($line));
     }
 }

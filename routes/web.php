@@ -314,8 +314,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/jig/sparepart/{sparepart}', [SparepartController::class, 'update'])->name('jig.sparepart.update');
         Route::delete('/jig/sparepart/{sparepart}', [SparepartController::class, 'destroy'])->name('jig.sparepart.destroy');
         Route::post('/jig/sparepart/{sparepart}/tambah-stok', [SparepartController::class, 'tambahStok'])->name('jig.sparepart.tambah-stok');
-        Route::post('/jig/sparepart/{sparepart}/kurangi-stok', [SparepartController::class, 'kurangiStok'])->name('jig.sparepart.kurangi-stok');
     });
+
+    Route::post('/jig/sparepart/{sparepart}/kurangi-stok', [SparepartController::class, 'kurangiStok'])
+    ->middleware('permission:jig.pic')
+    ->name('jig.sparepart.kurangi-stok');
 
     // ── PM Schedule ───────────────────────────────────────────────────────────────
     Route::middleware('permission:jig.view')->group(function () {
@@ -347,14 +350,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/jig/cm/{cmReport}', [CmReportController::class, 'update']);
     });
     Route::post('/jig/cm', [CmReportController::class, 'store'])
+    ->middleware('permission:jig.pic')
+    ->name('jig.cm.store');
+    Route::post('/jig/cm/quick-jig', [CmReportController::class, 'quickStoreJig'])
         ->middleware('permission:jig.pic')
-        ->name('jig.cm.store');
+        ->name('jig.cm.quick-jig');
     Route::put('/jig/cm/{cmReport}', [CmReportController::class, 'update'])
         ->middleware('permission:jig.pic')
         ->name('jig.cm.update');
     Route::post('/jig/cm/{cmReport}/close', [CmReportController::class, 'close'])
         ->middleware('permission:jig.pic')
         ->name('jig.cm.close');
+
 
     Route::post('/ai/chat', [AiChatController::class, 'chat']);
     Route::get('/ai/alerts', [AiChatController::class, 'alerts']);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CmReport;
+use App\Models\Jig;
 use App\Models\ReportSparepart;
 use App\Models\Sparepart;
 use App\Models\User;
@@ -38,7 +39,7 @@ class CmReportController extends Controller
             'closed'      => CmReport::where('status', 'closed')->count(),
         ];
 
-        $jigs = \App\Models\Jig::select('id', 'name', 'type', 'line')
+        $jigs = Jig::select('id', 'name', 'type', 'line')
             ->orderBy('name')->get();
 
         return Inertia::render('Cm/Index', [
@@ -52,6 +53,26 @@ class CmReportController extends Controller
                 'status' => $request->status ?? '',
                 'jig_id' => $request->jig_id ?? '',
             ],
+        ]);
+    }
+
+    public function quickStoreJig(Request $request)
+    {
+        $request->validate(['name' => 'required|string|max:255']);
+
+        $jig = Jig::create([
+            'name'     => $request->name,
+            'type'     => '-',
+            'line'     => '-',
+            'kategori' => 'regular',
+            'pic_id'   => Auth::id(),
+        ]);
+
+        return response()->json([
+            'id'   => $jig->id,
+            'name' => $jig->name,
+            'type' => $jig->type,
+            'line' => $jig->line,
         ]);
     }
 
@@ -106,14 +127,6 @@ class CmReportController extends Controller
 
     public function update(Request $request, CmReport $cmReport)
     {
-        $user     = User::with('roles')->find(Auth::id());
-        $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
-        $isPic    = $cmReport->pic_id === Auth::id();
-
-        if (!$isLeader && !$isPic) {
-            abort(403, 'Unauthorized');
-        }
-
         $request->validate([
             'description'               => 'nullable|string',
             'penyebab'                  => 'nullable|string',
@@ -165,15 +178,7 @@ class CmReportController extends Controller
 
     public function close(Request $request, CmReport $cmReport)
     {
-        $request->validate(['action' => 'required|string']);
-
-        $user     = User::with('roles')->find(Auth::id());
-        $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
-        $isPic    = $cmReport->pic_id === Auth::id();
-
-        if (!$isLeader && !$isPic) {
-            abort(403, 'Unauthorized');
-        }
+        $request->validate(['action' => 'nullable|string']);
 
         $cmReport->update([
             'status'    => 'closed',

@@ -145,8 +145,6 @@ const schedules = ref<Array<{
 
 const newBreakStart = ref('');
 const newBreakEnd = ref('');
-const newShiftStart = ref('');
-const newShiftEnd = ref('');
 const expandedShift = ref<number | null>(0);
 
 const activeHistoryTab = ref<'history' | 'logs'>('history');

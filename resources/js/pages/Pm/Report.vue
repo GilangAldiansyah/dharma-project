@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import {
     ClipboardList, CheckCircle2, Clock, AlertTriangle, X,
     Plus, Trash2, Package, FileText, Upload, Loader2, ShieldCheck, Search,
@@ -148,6 +148,22 @@ const isCompressingA = ref(false);
 const isCompressingB = ref(false);
 const previewPhoto   = ref<string | null>(null);
 const previewSpPhoto = ref<string | null>(null);
+
+const showPhotoPicker  = ref(false);
+const photoPickerField = ref<'photo' | 'photo_sparepart' | null>(null);
+
+const openPhotoPicker = (field: 'photo' | 'photo_sparepart') => {
+    photoPickerField.value = field;
+    showPhotoPicker.value  = true;
+};
+
+const triggerInput = (type: 'cam' | 'gal') => {
+    showPhotoPicker.value = false;
+    nextTick(() => {
+        const id = `${type}-${photoPickerField.value}`;
+        (document.getElementById(id) as HTMLInputElement)?.click();
+    });
+};
 
 const form = useForm({
     condition:       'ok' as 'ok' | 'nok',
@@ -328,6 +344,7 @@ const handlePhoto = async (e: Event, field: 'photo' | 'photo_sparepart') => {
         r.readAsDataURL(form.photo_sparepart);
         isCompressingB.value = false;
     }
+    (e.target as HTMLInputElement).value = '';
 };
 
 const submit = () => {
@@ -505,27 +522,19 @@ const activeFilterCount = computed(() => {
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Filter JIG</label>
                         <div class="relative">
                             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-                            <input
-                                v-model="jigSearch"
-                                type="text"
-                                placeholder="Cari nama JIG..."
-                                autocomplete="off"
-                                @focus="jigOpen = true"
-                                @blur="closeJigDropdown"
+                            <input v-model="jigSearch" type="text" placeholder="Cari nama JIG..." autocomplete="off"
+                                @focus="jigOpen = true" @blur="closeJigDropdown"
                                 :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
                                     selectedJig
                                         ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
-                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
-                            />
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
                             <button v-if="selectedJig" type="button" @click="clearJig"
                                 class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
                                 <X class="w-4 h-4" />
                             </button>
                             <div v-if="jigOpen"
                                 class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                                <div v-if="filteredJigs.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
-                                    Tidak ada JIG "{{ jigSearch }}"
-                                </div>
+                                <div v-if="filteredJigs.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada JIG "{{ jigSearch }}"</div>
                                 <button v-for="j in filteredJigs" :key="j.name" type="button"
                                     @mousedown.prevent="selectJig(j)"
                                     :class="['w-full text-left px-3 py-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors',
@@ -570,8 +579,7 @@ const activeFilterCount = computed(() => {
                                     Tidak ada laporan PM
                                 </td>
                             </tr>
-                            <tr v-for="r in filteredReports" :key="r.id"
-                                class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
+                            <tr v-for="r in filteredReports" :key="r.id" class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
                                 <td class="px-4 py-3">
                                     <p class="text-xs font-bold text-gray-900 dark:text-white">{{ r.pm_schedule?.jig?.name }}</p>
                                     <p class="text-xs text-gray-400 mt-0.5">{{ r.pm_schedule?.jig?.type }} — {{ r.pm_schedule?.jig?.line }}</p>
@@ -643,7 +651,6 @@ const activeFilterCount = computed(() => {
                                 </span>
                             </div>
                         </div>
-
                         <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-3">
                             <div>
                                 <span class="text-gray-400">PIC</span>
@@ -661,7 +668,6 @@ const activeFilterCount = computed(() => {
                                 <span class="text-xs text-gray-400 italic">NOK sudah di-close {{ formatDate(r.nok_closed_at) }}</span>
                             </div>
                         </div>
-
                         <div class="flex items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
                             <button v-if="r.status === 'pending'" @click="openSubmit(r)"
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all">
@@ -682,6 +688,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- Modal Detail -->
         <div v-if="showDetailModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -696,22 +703,10 @@ const activeFilterCount = computed(() => {
                 </div>
                 <div class="p-4 sm:p-5 space-y-4">
                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 space-y-2.5 text-xs">
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-400 shrink-0">JIG</span>
-                            <span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.pm_schedule?.jig?.name }}</span>
-                        </div>
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-400 shrink-0">PIC</span>
-                            <span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.pic?.name }}</span>
-                        </div>
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-400 shrink-0">Planned Week</span>
-                            <span class="font-bold text-indigo-600">{{ formatWeek(selectedReport.planned_week_start, selectedReport.planned_week_end) }}</span>
-                        </div>
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-400 shrink-0">Actual</span>
-                            <span class="font-bold text-gray-900 dark:text-white">{{ formatDate(selectedReport.actual_date) }}</span>
-                        </div>
+                        <div class="flex justify-between gap-2"><span class="text-gray-400 shrink-0">JIG</span><span class="font-bold text-gray-900 dark:text-white text-right">{{ selectedReport.pm_schedule?.jig?.name }}</span></div>
+                        <div class="flex justify-between gap-2"><span class="text-gray-400 shrink-0">PIC</span><span class="font-bold text-gray-900 dark:text-white">{{ selectedReport.pic?.name }}</span></div>
+                        <div class="flex justify-between gap-2"><span class="text-gray-400 shrink-0">Planned Week</span><span class="font-bold text-indigo-600">{{ formatWeek(selectedReport.planned_week_start, selectedReport.planned_week_end) }}</span></div>
+                        <div class="flex justify-between gap-2"><span class="text-gray-400 shrink-0">Actual</span><span class="font-bold text-gray-900 dark:text-white">{{ formatDate(selectedReport.actual_date) }}</span></div>
                         <div class="flex justify-between items-center gap-2">
                             <span class="text-gray-400 shrink-0">Status</span>
                             <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold', statusCfg[selectedReport.status].badge]">
@@ -733,19 +728,14 @@ const activeFilterCount = computed(() => {
                             <span class="font-bold text-emerald-600">{{ formatDate(selectedReport.nok_closed_at) }}</span>
                         </div>
                     </div>
-
                     <div v-if="selectedReport.notes" class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5">
                         <p class="text-xs text-gray-400 font-semibold uppercase mb-1.5">Catatan</p>
                         <p class="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-line leading-relaxed">{{ selectedReport.notes }}</p>
                     </div>
-
                     <div v-if="selectedReport.spareparts?.length">
-                        <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1.5">
-                            <Package class="w-3.5 h-3.5"/>Sparepart Diganti
-                        </p>
+                        <p class="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1.5"><Package class="w-3.5 h-3.5"/>Sparepart Diganti</p>
                         <div class="space-y-2">
-                            <div v-for="sp in selectedReport.spareparts" :key="sp.sparepart?.id"
-                                class="px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                            <div v-for="sp in selectedReport.spareparts" :key="sp.sparepart?.id" class="px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                                 <div class="flex justify-between text-xs">
                                     <span class="font-semibold text-gray-900 dark:text-white">{{ sp.sparepart?.name }}</span>
                                     <span class="text-gray-500 font-medium">{{ sp.qty }} {{ sp.sparepart?.satuan }}</span>
@@ -754,18 +744,15 @@ const activeFilterCount = computed(() => {
                             </div>
                         </div>
                     </div>
-
                     <div v-if="selectedReport.photo || selectedReport.photo_sparepart" class="grid grid-cols-2 gap-3">
                         <div v-if="selectedReport.photo">
                             <p class="text-xs font-semibold text-gray-400 uppercase mb-2">Foto Checksheet</p>
-                            <img :src="`/storage/${selectedReport.photo}`"
-                                @click="openImage(selectedReport.photo!)"
+                            <img :src="`/storage/${selectedReport.photo}`" @click="openImage(selectedReport.photo!)"
                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                         <div v-if="selectedReport.photo_sparepart">
                             <p class="text-xs font-semibold text-gray-400 uppercase mb-2">Foto Sparepart</p>
-                            <img :src="`/storage/${selectedReport.photo_sparepart}`"
-                                @click="openImage(selectedReport.photo_sparepart!)"
+                            <img :src="`/storage/${selectedReport.photo_sparepart}`" @click="openImage(selectedReport.photo_sparepart!)"
                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 active:opacity-80 h-32 sm:h-40 object-cover shadow-sm transition-opacity" />
                         </div>
                     </div>
@@ -779,6 +766,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- Modal Submit -->
         <div v-if="showSubmitModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[95vh] overflow-y-auto shadow-2xl">
@@ -818,32 +806,36 @@ const activeFilterCount = computed(() => {
                             <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">
                                 Foto Checksheet <span class="text-red-500">*</span>
                             </label>
-                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
-                                previewPhoto ? 'border-indigo-300 bg-indigo-50 p-0 overflow-hidden' : 'border-gray-200 hover:border-indigo-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
-                                <div v-if="!previewPhoto && !isCompressingA" class="text-center">
+                            <div @click="openPhotoPicker('photo')"
+                                :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                    previewPhoto ? 'border-indigo-300 bg-indigo-50 p-0 overflow-hidden' : 'border-gray-200 hover:border-indigo-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
+                                <Loader2 v-if="isCompressingA" class="w-7 h-7 text-indigo-400 animate-spin" />
+                                <img v-else-if="previewPhoto" :src="previewPhoto" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <div v-else class="text-center">
                                     <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
                                     <p class="text-xs text-gray-500 font-medium">Upload foto</p>
-                                    <p class="text-xs text-gray-400 mt-0.5">Tap untuk pilih</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">Kamera / Galeri</p>
                                 </div>
-                                <Loader2 v-else-if="isCompressingA" class="w-7 h-7 text-indigo-400 animate-spin" />
-                                <img v-else-if="previewPhoto" :src="previewPhoto" class="w-full h-full object-cover" style="min-height:8rem" />
-                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo')" class="hidden" />
-                            </label>
+                            </div>
+                            <input id="cam-photo" type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo')" class="hidden" />
+                            <input id="gal-photo" type="file" accept="image/*" @change="e => handlePhoto(e, 'photo')" class="hidden" />
                             <p v-if="form.errors.photo" class="mt-1 text-xs text-red-500">{{ form.errors.photo }}</p>
                         </div>
                         <div>
                             <label class="block text-xs font-semibold mb-2 text-gray-700 dark:text-gray-300">Foto Sparepart</label>
-                            <label :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
-                                previewSpPhoto ? 'border-purple-300 bg-purple-50 p-0 overflow-hidden' : 'border-gray-200 hover:border-purple-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
-                                <div v-if="!previewSpPhoto && !isCompressingB" class="text-center">
+                            <div @click="openPhotoPicker('photo_sparepart')"
+                                :class="['cursor-pointer flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all min-h-[8rem]',
+                                    previewSpPhoto ? 'border-purple-300 bg-purple-50 p-0 overflow-hidden' : 'border-gray-200 hover:border-purple-300 bg-gray-50 dark:bg-gray-700/30 p-3']">
+                                <Loader2 v-if="isCompressingB" class="w-7 h-7 text-purple-400 animate-spin" />
+                                <img v-else-if="previewSpPhoto" :src="previewSpPhoto" class="w-full h-full object-cover" style="min-height:8rem" />
+                                <div v-else class="text-center">
                                     <Upload class="w-7 h-7 text-gray-400 mx-auto mb-1.5" />
                                     <p class="text-xs text-gray-500 font-medium">Jika ada</p>
-                                    <p class="text-xs text-gray-400 mt-0.5">Ganti sparepart</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">Kamera / Galeri</p>
                                 </div>
-                                <Loader2 v-else-if="isCompressingB" class="w-7 h-7 text-purple-400 animate-spin" />
-                                <img v-else-if="previewSpPhoto" :src="previewSpPhoto" class="w-full h-full object-cover" style="min-height:8rem" />
-                                <input type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo_sparepart')" class="hidden" />
-                            </label>
+                            </div>
+                            <input id="cam-photo_sparepart" type="file" accept="image/*" capture="environment" @change="e => handlePhoto(e, 'photo_sparepart')" class="hidden" />
+                            <input id="gal-photo_sparepart" type="file" accept="image/*" @change="e => handlePhoto(e, 'photo_sparepart')" class="hidden" />
                         </div>
                     </div>
 
@@ -922,6 +914,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- Modal Close NOK -->
         <div v-if="showCloseNokModal && selectedReport"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -962,6 +955,7 @@ const activeFilterCount = computed(() => {
             </div>
         </div>
 
+        <!-- Modal Image -->
         <div v-if="showImageModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
             @click="showImageModal = false">
             <button class="absolute top-4 right-4 p-2 bg-white/10 rounded-xl text-white hover:bg-white/20 transition-colors">
@@ -970,5 +964,34 @@ const activeFilterCount = computed(() => {
             <img :src="imageSrc" class="max-w-full max-h-full rounded-xl object-contain" />
         </div>
 
+        <!-- Photo Picker Sheet -->
+        <div v-if="showPhotoPicker"
+            class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-end justify-center p-4"
+            @click.self="showPhotoPicker = false">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+                <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-4"></div>
+                <p class="text-center text-sm font-bold text-gray-700 dark:text-gray-200 mb-3 px-5">Pilih Sumber Foto</p>
+                <div class="grid grid-cols-2 gap-3 px-4 pb-5">
+                    <button @click="triggerInput('cam')"
+                        class="flex flex-col items-center gap-2.5 py-5 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold text-sm hover:bg-indigo-100 active:scale-95 transition-all">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        Kamera
+                    </button>
+                    <button @click="triggerInput('gal')"
+                        class="flex flex-col items-center gap-2.5 py-5 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold text-sm hover:bg-emerald-100 active:scale-95 transition-all">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Galeri
+                    </button>
+                </div>
+            </div>
+        </div>
+
     </AppLayout>
 </template>
+
+
