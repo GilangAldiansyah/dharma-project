@@ -105,6 +105,8 @@ class SparepartController extends Controller
 
     public function history(Request $request)
     {
+        $year = $request->year ?? now()->year;
+
         $query = SparepartHistory::with('sparepart', 'user')
             ->orderByDesc('created_at');
 
@@ -116,13 +118,24 @@ class SparepartController extends Controller
             $query->where('tipe', $request->tipe);
         }
 
+        if ($request->filled('month')) {
+            $query->whereRaw("DATE_FORMAT(created_at, '%Y-%m') = ?", [$year . '-' . $request->month]);
+        } else {
+            $query->whereYear('created_at', $year);
+        }
+
         $histories  = $query->paginate(20)->withQueryString();
         $spareparts = Sparepart::orderBy('name')->get(['id', 'name', 'satuan', 'stok']);
 
         return Inertia::render('Jig/SparepartHistory', [
             'histories'  => $histories,
             'spareparts' => $spareparts,
-            'filters'    => $request->only('sparepart_id', 'tipe'),
+            'filters'    => [
+                'sparepart_id' => $request->sparepart_id ?? '',
+                'tipe'         => $request->tipe         ?? '',
+                'month'        => $request->month        ?? '',
+                'year'         => (string) $year,
+            ],
         ]);
     }
 }

@@ -31,6 +31,7 @@ use App\Http\Controllers\PmScheduleController;
 use App\Http\Controllers\PmReportController;
 use App\Http\Controllers\CmReportController;
 use App\Http\Controllers\SparepartController;
+use App\Http\Controllers\ImprovementReportController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -361,6 +362,23 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/jig/cm/{cmReport}/close', [CmReportController::class, 'close'])
         ->middleware('permission:jig.pic')
         ->name('jig.cm.close');
+    // ── Improvement Report ────────────────────────────────────────────────────────
+    Route::middleware('permission:jig.view')->group(function () {
+        Route::get('/jig/improvement', [ImprovementReportController::class, 'index'])->name('jig.improvement.index');
+        Route::put('/jig/improvement/{improvementReport}', [ImprovementReportController::class, 'update']);
+    });
+    Route::post('/jig/improvement', [ImprovementReportController::class, 'store'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.improvement.store');
+    Route::post('/jig/improvement/quick-jig', [ImprovementReportController::class, 'quickStoreJig'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.improvement.quick-jig');
+    Route::put('/jig/improvement/{improvementReport}', [ImprovementReportController::class, 'update'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.improvement.update');
+    Route::post('/jig/improvement/{improvementReport}/close', [ImprovementReportController::class, 'close'])
+        ->middleware('permission:jig.pic')
+        ->name('jig.improvement.close');
 
 
     Route::post('/ai/chat', [AiChatController::class, 'chat']);

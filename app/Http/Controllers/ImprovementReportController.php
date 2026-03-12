@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CmReport;
+use App\Models\ImprovementReport;
 use App\Models\Jig;
 use App\Models\ReportSparepart;
 use App\Models\Sparepart;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
-class CmReportController extends Controller
+class ImprovementReportController extends Controller
 {
     public function index(Request $request)
     {
@@ -21,7 +21,7 @@ class CmReportController extends Controller
 
         $year = $request->year ?? now()->year;
 
-        $reports = CmReport::with([
+        $reports = ImprovementReport::with([
             'jig:id,name,type,line',
             'pic:id,name',
             'closedBy:id,name',
@@ -38,15 +38,15 @@ class CmReportController extends Controller
         ]));
 
         $summary = [
-            'open'        => CmReport::where('status', 'open')->count(),
-            'in_progress' => CmReport::where('status', 'in_progress')->count(),
-            'closed'      => CmReport::where('status', 'closed')->count(),
+            'open'        => ImprovementReport::where('status', 'open')->count(),
+            'in_progress' => ImprovementReport::where('status', 'in_progress')->count(),
+            'closed'      => ImprovementReport::where('status', 'closed')->count(),
         ];
 
         $jigs = Jig::select('id', 'name', 'type', 'line')
             ->orderBy('name')->get();
 
-        return Inertia::render('Cm/Index', [
+        return Inertia::render('Improvement/Index', [
             'reports'    => $reports,
             'jigs'       => $jigs,
             'spareparts' => Sparepart::select('id', 'name', 'satuan', 'stok')->orderBy('name')->get(),
@@ -98,10 +98,10 @@ class CmReportController extends Controller
         ]);
 
         DB::transaction(function () use ($request) {
-            $photoPath      = $request->file('photo')?->store('cm-reports', 'public');
-            $photoPerbaikan = $request->file('photo_perbaikan')?->store('cm-reports', 'public');
+            $photoPath      = $request->file('photo')?->store('improvement-reports', 'public');
+            $photoPerbaikan = $request->file('photo_perbaikan')?->store('improvement-reports', 'public');
 
-            $cm = CmReport::create([
+            $imp = ImprovementReport::create([
                 'jig_id'          => $request->jig_id,
                 'pic_id'          => Auth::id(),
                 'report_date'     => now(),
@@ -116,22 +116,22 @@ class CmReportController extends Controller
             if ($request->spareparts) {
                 foreach ($request->spareparts as $sp) {
                     ReportSparepart::create([
-                        'report_type'  => 'cm',
-                        'report_id'    => $cm->id,
+                        'report_type'  => 'improvement',
+                        'report_id'    => $imp->id,
                         'sparepart_id' => $sp['sparepart_id'],
                         'qty'          => $sp['qty'],
                         'notes'        => $sp['notes'] ?? null,
                     ]);
                     Sparepart::find($sp['sparepart_id'])
-                        ?->kurangiStok($sp['qty'], 'cm', $cm->id, $sp['notes'] ?? null);
+                        ?->kurangiStok($sp['qty'], 'improvement', $imp->id, $sp['notes'] ?? null);
                 }
             }
         });
 
-        return back()->with('success', 'Laporan CM berhasil dibuat.');
+        return back()->with('success', 'Laporan Improvement berhasil dibuat.');
     }
 
-    public function update(Request $request, CmReport $cmReport)
+    public function update(Request $request, ImprovementReport $improvementReport)
     {
         $request->validate([
             'description'               => 'nullable|string',
@@ -145,7 +145,7 @@ class CmReportController extends Controller
             'spareparts.*.notes'        => 'nullable|string',
         ]);
 
-        DB::transaction(function () use ($request, $cmReport) {
+        DB::transaction(function () use ($request, $improvementReport) {
             $data = ['status' => 'in_progress'];
 
             if ($request->filled('description')) $data['description'] = $request->description;
@@ -153,46 +153,46 @@ class CmReportController extends Controller
             if ($request->filled('perbaikan'))   $data['perbaikan']   = $request->perbaikan;
 
             if ($request->hasFile('photo')) {
-                $data['photo'] = $request->file('photo')->store('cm-reports', 'public');
+                $data['photo'] = $request->file('photo')->store('improvement-reports', 'public');
             }
             if ($request->hasFile('photo_perbaikan')) {
-                $data['photo_perbaikan'] = $request->file('photo_perbaikan')->store('cm-reports', 'public');
+                $data['photo_perbaikan'] = $request->file('photo_perbaikan')->store('improvement-reports', 'public');
             }
 
-            $cmReport->update($data);
+            $improvementReport->update($data);
 
             if ($request->spareparts) {
                 foreach ($request->spareparts as $sp) {
-                    $existing = $cmReport->spareparts()->where('sparepart_id', $sp['sparepart_id'])->first();
+                    $existing = $improvementReport->spareparts()->where('sparepart_id', $sp['sparepart_id'])->first();
                     if (!$existing) {
                         ReportSparepart::create([
-                            'report_type'  => 'cm',
-                            'report_id'    => $cmReport->id,
+                            'report_type'  => 'improvement',
+                            'report_id'    => $improvementReport->id,
                             'sparepart_id' => $sp['sparepart_id'],
                             'qty'          => $sp['qty'],
                             'notes'        => $sp['notes'] ?? null,
                         ]);
                         Sparepart::find($sp['sparepart_id'])
-                            ?->kurangiStok($sp['qty'], 'cm', $cmReport->id, $sp['notes'] ?? null);
+                            ?->kurangiStok($sp['qty'], 'improvement', $improvementReport->id, $sp['notes'] ?? null);
                     }
                 }
             }
         });
 
-        return back()->with('success', 'Laporan CM berhasil diperbarui.');
+        return back()->with('success', 'Laporan Improvement berhasil diperbarui.');
     }
 
-    public function close(Request $request, CmReport $cmReport)
+    public function close(Request $request, ImprovementReport $improvementReport)
     {
         $request->validate(['action' => 'nullable|string']);
 
-        $cmReport->update([
+        $improvementReport->update([
             'status'    => 'closed',
             'action'    => $request->action,
             'closed_by' => Auth::id(),
             'closed_at' => now(),
         ]);
 
-        return back()->with('success', 'CM berhasil ditutup.');
+        return back()->with('success', 'Improvement berhasil ditutup.');
     }
 }

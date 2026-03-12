@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CmReport;
+use App\Models\ImprovementReport;
 use App\Models\PmReport;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -34,6 +35,10 @@ class JigDashboardController extends Controller
             ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
             ->when($picId && !$isPic, fn($q) => $q->where('pic_id', $picId));
 
+        $impBase = ImprovementReport::query()
+            ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
+            ->when($picId && !$isPic, fn($q) => $q->where('pic_id', $picId));
+
         $pmSummary = [
             'total'   => (clone $pmBase)->count(),
             'done'    => (clone $pmBase)->where('status', 'done')->count(),
@@ -45,6 +50,12 @@ class JigDashboardController extends Controller
             'open'        => (clone $cmBase)->where('status', 'open')->count(),
             'in_progress' => (clone $cmBase)->where('status', 'in_progress')->count(),
             'closed'      => (clone $cmBase)->where('status', 'closed')->count(),
+        ];
+
+        $impSummary = [
+            'open'        => (clone $impBase)->where('status', 'open')->count(),
+            'in_progress' => (clone $impBase)->where('status', 'in_progress')->count(),
+            'closed'      => (clone $impBase)->where('status', 'closed')->count(),
         ];
 
         $completionRate = $pmSummary['total'] > 0
@@ -102,6 +113,30 @@ class JigDashboardController extends Controller
             'total'       => (int) ($cmTrendRaw[$m]->total       ?? 0),
         ], range(1, 12));
 
+        $impTrendRaw = ImprovementReport::query()
+            ->when($isPic, fn($q) => $q->where('pic_id', $user->id))
+            ->when($picId && !$isPic, fn($q) => $q->where('pic_id', $picId))
+            ->whereYear('report_date', $tahun)
+            ->select(
+                DB::raw('MONTH(report_date) as bulan'),
+                DB::raw('COUNT(*) as total'),
+                DB::raw("SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) as open"),
+                DB::raw("SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END) as in_progress"),
+                DB::raw("SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) as closed")
+            )
+            ->groupBy('bulan')
+            ->get()
+            ->keyBy('bulan');
+
+        $impTrend = array_map(fn($m) => [
+            'bulan'       => $m,
+            'label'       => $labelMap[$m - 1],
+            'open'        => (int) ($impTrendRaw[$m]->open        ?? 0),
+            'in_progress' => (int) ($impTrendRaw[$m]->in_progress ?? 0),
+            'closed'      => (int) ($impTrendRaw[$m]->closed      ?? 0),
+            'total'       => (int) ($impTrendRaw[$m]->total       ?? 0),
+        ], range(1, 12));
+
         $upcomingPm = (clone $pmBase)
             ->with('pmSchedule.jig:id,name,type,line', 'pic:id,name')
             ->where('status', 'pending')
@@ -109,6 +144,12 @@ class JigDashboardController extends Controller
             ->take(5)->get();
 
         $recentCm = (clone $cmBase)
+            ->with('jig:id,name', 'pic:id,name')
+            ->whereIn('status', ['open', 'in_progress'])
+            ->latest('report_date')
+            ->take(5)->get();
+
+        $recentImp = (clone $impBase)
             ->with('jig:id,name', 'pic:id,name')
             ->whereIn('status', ['open', 'in_progress'])
             ->latest('report_date')
@@ -154,6 +195,21 @@ class JigDashboardController extends Controller
                 ->get()
                 ->keyBy('pic_id');
 
+            $impActivePicRaw = ImprovementReport::whereIn('pic_id', $picIds)
+                ->whereIn('status', ['open', 'in_progress'])
+                ->select('pic_id', DB::raw('COUNT(*) as cnt'))
+                ->groupBy('pic_id')
+                ->get()
+                ->keyBy('pic_id');
+
+            $impTotalPicRaw = ImprovementReport::whereIn('pic_id', $picIds)
+                ->whereYear('report_date', $tahun)
+                ->when($bulan !== 'all', fn($q) => $q->whereMonth('report_date', $bulan))
+                ->select('pic_id', DB::raw('COUNT(*) as cnt'))
+                ->groupBy('pic_id')
+                ->get()
+                ->keyBy('pic_id');
+
             $pmMonthlyRaw = PmReport::whereIn('pic_id', $picIds)
                 ->whereYear('planned_week_start', $tahun)
                 ->when($minggu, fn($q) => $q->whereRaw('CEIL(DAY(planned_week_start)/7) = ?', [$minggu]))
@@ -192,8 +248,10 @@ class JigDashboardController extends Controller
                     'done'            => $done,
                     'late'            => $late,
                     'pending'         => $pending,
-                    'cm_active'       => (int) ($cmActivePicRaw[$pic->id]->cnt ?? 0),
-                    'cm_total'        => (int) ($cmTotalPicRaw[$pic->id]->cnt  ?? 0),
+                    'cm_active'       => (int) ($cmActivePicRaw[$pic->id]->cnt  ?? 0),
+                    'cm_total'        => (int) ($cmTotalPicRaw[$pic->id]->cnt   ?? 0),
+                    'imp_active'      => (int) ($impActivePicRaw[$pic->id]->cnt ?? 0),
+                    'imp_total'       => (int) ($impTotalPicRaw[$pic->id]->cnt  ?? 0),
                     'completion_rate' => $total > 0 ? round(($done / $total) * 100) : 0,
                     'monthly'         => $monthly,
                 ];
@@ -205,12 +263,15 @@ class JigDashboardController extends Controller
         return Inertia::render('Jig/Dashboard', [
             'pmSummary'      => $pmSummary,
             'cmSummary'      => $cmSummary,
+            'impSummary'     => $impSummary,
             'upcomingPm'     => $upcomingPm,
             'recentCm'       => $recentCm,
+            'recentImp'      => $recentImp,
             'completionRate' => $completionRate,
             'picPerformance' => $picPerformance,
             'pmTrend'        => $pmTrend,
             'cmTrend'        => $cmTrend,
+            'impTrend'       => $impTrend,
             'pics'           => $pics,
             'bulan'          => $bulan,
             'tahun'          => $tahun,

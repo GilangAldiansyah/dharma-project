@@ -165,10 +165,10 @@ const editWillRegenerate = computed(() => {
                     <p class="text-sm text-gray-500 mt-0.5">Jadwal preventive maintenance JIG</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button @click="showBulkModal = true"
+                    <!-- <button @click="showBulkModal = true"
                         class="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl hover:shadow-lg transition-all font-semibold text-sm">
                         <Zap class="w-4 h-4" /> Generate Semua
-                    </button>
+                    </button> -->
                     <button @click="openAdd"
                         class="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-sm">
                         <Plus class="w-4 h-4" /> Tambah Manual

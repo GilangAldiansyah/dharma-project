@@ -4,24 +4,17 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
 
 withDefaults(
-    defineProps<{
-        breadcrumbs?: BreadcrumbItemType[];
-    }>(),
-    {
-        breadcrumbs: () => [],
-    },
+    defineProps<{ breadcrumbs?: BreadcrumbItemType[] }>(),
+    { breadcrumbs: () => [] },
 );
 </script>
 
 <template>
-    <header
-        class="flex h-16 shrink-0 items-center gap-2 border-b border-sidebar-border/70 px-6 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 md:px-4"
-    >
-        <div class="flex items-center gap-2">
-            <SidebarTrigger class="-ml-1" />
-            <template v-if="breadcrumbs && breadcrumbs.length > 0">
-                <Breadcrumbs :breadcrumbs="breadcrumbs" />
-            </template>
+    <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-sidebar-border/50 bg-background/80 backdrop-blur-xl px-4 transition-all ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+       <SidebarTrigger class="w-9 h-9 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent active:scale-95 transition-all duration-200 flex items-center justify-center border-0 -ml-1 shrink-0 [&>svg]:w-4 [&>svg]:h-4" />
+        <div v-if="breadcrumbs?.length" class="flex items-center gap-2 min-w-0">
+            <div class="w-px h-4 bg-border shrink-0"></div>
+            <Breadcrumbs :breadcrumbs="breadcrumbs" />
         </div>
     </header>
 </template>

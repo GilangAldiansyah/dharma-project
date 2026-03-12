@@ -62,7 +62,7 @@ const BULAN_LABEL: Record<number | string, string> = {
     all:'Semua Bulan',
 };
 
-const MINGGU_LIST = [1,2,3,4,5].map(w => ({ val: w, label: `Week ${w}` }));
+const MINGGU_LIST = [1,2,3,4,5].map(w => ({ val: w, label: `W${w}` }));
 
 const periodeLabel = computed(() => {
     const bulanStr = filterBulan.value === 'all'
@@ -396,10 +396,11 @@ const activeFilterCount = computed(() => {
     return c;
 });
 </script>
+
 <template>
     <Head title="PM Report" />
     <AppLayout :breadcrumbs="[{title:'JIG',href:'/jig/dashboard'},{title:'PM Report',href:'/jig/pm/report'}]">
-        <div class="p-3 sm:p-5 lg:p-6 space-y-4">
+        <div class="p-3 sm:p-5 lg:p-6 space-y-3">
 
             <div class="flex items-center justify-between">
                 <div>
@@ -420,60 +421,76 @@ const activeFilterCount = computed(() => {
             </div>
 
             <div v-if="flash?.success"
-                class="flex items-center gap-3 p-3 sm:p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-sm">
-                <CheckCircle2 class="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 flex-shrink-0" />
+                class="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-sm">
+                <CheckCircle2 class="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
-            <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-3 sm:p-4 space-y-3">
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-                    <div class="text-center p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50">
-                        <p class="text-xs text-gray-400 font-medium">Total</p>
-                        <p class="text-2xl font-black text-gray-900 dark:text-white">{{ summary.total }}</p>
+            <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-3 space-y-2.5">
+                <div class="flex items-center gap-2.5">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700/50 rounded-xl flex-1 min-w-0">
+                            <span class="text-xs text-gray-400 shrink-0">Total</span>
+                            <span class="text-lg font-black text-gray-900 dark:text-white">{{ summary.total }}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex-1 min-w-0">
+                            <CheckCircle2 class="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span class="text-lg font-black text-emerald-600">{{ summary.done }}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 dark:bg-amber-900/20 rounded-xl flex-1 min-w-0">
+                            <Clock class="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span class="text-lg font-black text-amber-600">{{ summary.pending }}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-red-50 dark:bg-red-900/20 rounded-xl flex-1 min-w-0">
+                            <AlertTriangle class="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span class="text-lg font-black text-red-600">{{ summary.late }}</span>
+                        </div>
                     </div>
-                    <div class="text-center p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20">
-                        <p class="text-xs text-emerald-600 font-semibold flex items-center justify-center gap-1"><CheckCircle2 class="w-3 h-3"/>Selesai</p>
-                        <p class="text-2xl font-black text-emerald-600">{{ summary.done }}</p>
-                    </div>
-                    <div class="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20">
-                        <p class="text-xs text-amber-600 font-semibold flex items-center justify-center gap-1"><Clock class="w-3 h-3"/>Pending</p>
-                        <p class="text-2xl font-black text-amber-600">{{ summary.pending }}</p>
-                    </div>
-                    <div class="text-center p-3 rounded-xl bg-red-50 dark:bg-red-900/20">
-                        <p class="text-xs text-red-600 font-semibold flex items-center justify-center gap-1"><AlertTriangle class="w-3 h-3"/>Terlambat</p>
-                        <p class="text-2xl font-black text-red-600">{{ summary.late }}</p>
+                    <div class="text-right shrink-0">
+                        <p class="text-xl font-black text-indigo-600">{{ Math.round(doneRate) }}%</p>
+                        <p class="text-xs text-gray-400 leading-none">selesai</p>
                     </div>
                 </div>
                 <div>
-                    <div class="flex justify-between text-xs text-gray-500 mb-1.5">
-                        <span class="font-medium">Progress Completion</span>
-                        <span class="font-bold text-indigo-600">{{ Math.round(doneRate) }}%</span>
-                    </div>
-                    <div class="w-full h-2.5 sm:h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex">
+                    <div class="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex">
                         <div class="h-full bg-emerald-500 transition-all duration-700" :style="{width: doneRate+'%'}"></div>
                         <div class="h-full bg-red-400 transition-all duration-700"     :style="{width: lateRate+'%'}"></div>
                         <div class="h-full bg-amber-400 transition-all duration-700"   :style="{width: pendingRate+'%'}"></div>
                     </div>
-                    <div class="flex items-center gap-3 sm:gap-4 mt-2">
-                        <div class="flex items-center gap-1 text-xs text-gray-500"><div class="w-2 h-2 bg-emerald-500 rounded-sm"></div>{{ Math.round(doneRate) }}%</div>
-                        <div class="flex items-center gap-1 text-xs text-gray-500"><div class="w-2 h-2 bg-red-400 rounded-sm"></div>{{ Math.round(lateRate) }}%</div>
-                        <div class="flex items-center gap-1 text-xs text-gray-500"><div class="w-2 h-2 bg-amber-400 rounded-sm"></div>{{ Math.round(pendingRate) }}%</div>
+                    <div class="flex items-center gap-3 mt-1.5">
+                        <div class="flex items-center gap-1 text-xs text-gray-400"><div class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>Selesai {{ Math.round(doneRate) }}%</div>
+                        <div class="flex items-center gap-1 text-xs text-gray-400"><div class="w-1.5 h-1.5 bg-red-400 rounded-full"></div>Terlambat {{ Math.round(lateRate) }}%</div>
+                        <div class="flex items-center gap-1 text-xs text-gray-400"><div class="w-1.5 h-1.5 bg-amber-400 rounded-full"></div>Pending {{ Math.round(pendingRate) }}%</div>
                     </div>
                 </div>
             </div>
 
             <div class="space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
-                    <select v-model="filterBulan"
-                        class="px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none w-full sm:w-auto">
-                        <option v-for="b in BULAN_LIST" :key="b.val" :value="b.val">{{ b.label }}</option>
-                    </select>
-                    <input v-model="filterTahun" type="number" min="2020"
-                        class="w-full sm:w-24 px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none" />
+                    <div class="flex items-center gap-2 w-full">
+                        <select v-model="filterBulan"
+                            class="flex-1 min-w-0 px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none">
+                            <option v-for="b in BULAN_LIST" :key="b.val" :value="b.val">{{ b.label }}</option>
+                        </select>
+                        <input v-model="filterTahun" type="number" min="2020"
+                            class="w-24 shrink-0 px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 text-sm focus:border-indigo-500 focus:outline-none" />
+                        <button @click="showFilterPanel = !showFilterPanel"
+                            :class="['relative flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-sm font-medium transition-colors shrink-0',
+                                showFilterPanel || activeFilterCount > 0
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-indigo-400']">
+                            <Filter class="w-4 h-4" />
+                            <span class="hidden sm:inline">Filter</span>
+                            <span v-if="activeFilterCount > 0"
+                                class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                                {{ activeFilterCount }}
+                            </span>
+                        </button>
+                    </div>
 
-                    <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-xl p-1 w-full sm:w-auto">
+                    <div class="flex items-center bg-gray-100 dark:bg-gray-700 rounded-xl p-1 w-full">
                         <button @click="filterMinggu = ''"
-                            :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
+                            :class="['flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all text-center',
                                 filterMinggu === ''
                                     ? 'bg-white dark:bg-gray-600 text-indigo-600 shadow-sm'
                                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300']">
@@ -481,26 +498,13 @@ const activeFilterCount = computed(() => {
                         </button>
                         <button v-for="w in MINGGU_LIST" :key="w.val"
                             @click="filterMinggu = w.val"
-                            :class="['px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
+                            :class="['flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all text-center',
                                 filterMinggu == w.val
                                     ? 'bg-white dark:bg-gray-600 text-indigo-600 shadow-sm'
                                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300']">
                             {{ w.label }}
                         </button>
                     </div>
-
-                    <button @click="showFilterPanel = !showFilterPanel"
-                        :class="['relative flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-sm font-medium transition-colors whitespace-nowrap w-full sm:w-auto justify-center sm:justify-start',
-                            showFilterPanel || activeFilterCount > 0
-                                ? 'bg-indigo-600 border-indigo-600 text-white'
-                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-indigo-400']">
-                        <Filter class="w-4 h-4" />
-                        <span>Filter</span>
-                        <span v-if="activeFilterCount > 0"
-                            class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-                            {{ activeFilterCount }}
-                        </span>
-                    </button>
                 </div>
 
                 <div v-if="showFilterPanel" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-3 shadow-sm">
@@ -626,20 +630,20 @@ const activeFilterCount = computed(() => {
                 </div>
             </div>
 
-            <div class="lg:hidden space-y-2.5">
+            <div class="lg:hidden space-y-2">
                 <div v-if="filteredReports.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <ClipboardList class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                     <p class="text-gray-400 text-sm">Tidak ada laporan PM</p>
                 </div>
                 <div v-for="r in filteredReports" :key="r.id"
                     :class="['bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden border-l-4', statusCfg[r.status].cardBorder]">
-                    <div class="p-3.5">
-                        <div class="flex items-start justify-between gap-2 mb-2.5">
+                    <div class="p-3">
+                        <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm font-bold text-gray-900 dark:text-white leading-tight">{{ r.pm_schedule?.jig?.name }}</p>
+                                <p class="text-sm font-bold text-gray-900 dark:text-white leading-tight truncate">{{ r.pm_schedule?.jig?.name }}</p>
                                 <p class="text-xs text-gray-400 mt-0.5">{{ r.pm_schedule?.jig?.type }} — {{ r.pm_schedule?.jig?.line }}</p>
                             </div>
-                            <div class="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+                            <div class="flex items-center gap-1.5 flex-shrink-0 ml-2">
                                 <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold', statusCfg[r.status].badge]">
                                     <component :is="statusCfg[r.status].icon" class="w-3 h-3" />
                                     {{ statusCfg[r.status].label }}
@@ -651,24 +655,27 @@ const activeFilterCount = computed(() => {
                                 </span>
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-3">
-                            <div>
-                                <span class="text-gray-400">PIC</span>
-                                <p class="font-semibold text-gray-700 dark:text-gray-300 truncate">{{ r.pic?.name }}</p>
+
+                        <div class="flex items-center gap-3 text-xs mb-2.5">
+                            <div class="flex items-center gap-1 text-gray-500 min-w-0">
+                                <span class="text-gray-400 shrink-0">PIC:</span>
+                                <span class="font-semibold text-gray-700 dark:text-gray-300 truncate">{{ r.pic?.name }}</span>
                             </div>
-                            <div>
-                                <span class="text-gray-400">Actual</span>
-                                <p class="font-semibold text-gray-700 dark:text-gray-300">{{ formatDate(r.actual_date) }}</p>
-                            </div>
-                            <div class="col-span-2">
-                                <span class="text-gray-400">Planned Week</span>
-                                <p class="font-semibold text-indigo-600 dark:text-indigo-400">{{ formatWeek(r.planned_week_start, r.planned_week_end) }}</p>
-                            </div>
-                            <div v-if="r.condition === 'nok' && r.nok_closed_at" class="col-span-2">
-                                <span class="text-xs text-gray-400 italic">NOK sudah di-close {{ formatDate(r.nok_closed_at) }}</span>
+                            <div class="flex items-center gap-1 text-gray-500 shrink-0">
+                                <span class="text-gray-400">Actual:</span>
+                                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ formatDate(r.actual_date) }}</span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
+
+                        <div class="flex items-center justify-between mb-2.5">
+                            <div class="text-xs">
+                                <span class="text-gray-400">Planned: </span>
+                                <span class="font-semibold text-indigo-600 dark:text-indigo-400">{{ formatWeek(r.planned_week_start, r.planned_week_end) }}</span>
+                            </div>
+                            <span v-if="r.condition === 'nok' && r.nok_closed_at" class="text-xs text-emerald-600 font-medium italic">✓ NOK closed</span>
+                        </div>
+
+                        <div class="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
                             <button v-if="r.status === 'pending'" @click="openSubmit(r)"
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all">
                                 <Upload class="w-3.5 h-3.5" /> Submit
@@ -993,5 +1000,3 @@ const activeFilterCount = computed(() => {
 
     </AppLayout>
 </template>
-
-

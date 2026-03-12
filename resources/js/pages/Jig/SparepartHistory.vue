@@ -2,14 +2,14 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, watch, computed } from 'vue';
-import { History, TrendingUp, TrendingDown, X, Search, Filter } from 'lucide-vue-next';
+import { History, TrendingUp, TrendingDown, X, Search, Filter, ChevronUp, ChevronDown } from 'lucide-vue-next';
 
 interface Sparepart { id: number; name: string; satuan: string; stok: number; }
 interface User      { id: number; name: string; }
 interface HistoryItem {
     id:           number;
     tipe:         'masuk' | 'keluar';
-    report_type:  'pm' | 'cm' | 'manual' | null;
+    report_type:  'pm' | 'cm' | 'improvement' | 'manual' | null;
     report_id:    number | null;
     qty:          number;
     stok_before:  number;
@@ -31,18 +31,33 @@ interface Paginator {
 interface Props {
     histories:  Paginator;
     spareparts: { id: number; name: string; satuan: string; stok: number }[];
-    filters:    { sparepart_id?: any; tipe?: string };
+    filters:    { sparepart_id?: any; tipe?: string; month?: string; year?: string };
 }
 
 const props = defineProps<Props>();
 
+const currentYear = new Date().getFullYear();
+
 const filterSp        = ref(props.filters.sparepart_id ?? '');
 const filterTipe      = ref(props.filters.tipe         ?? '');
+const filterMonth     = ref(props.filters.month        ?? '');
+const filterYear      = ref(props.filters.year ? Number(props.filters.year) : currentYear);
 const showModal       = ref(false);
 const showFilterPanel = ref(false);
 
-const selectedSp    = ref<Props['spareparts'][0] | null>(null);
-const filterSpObj   = ref<Props['spareparts'][0] | null>(
+const months = [
+    { v: '',   l: 'Semua' },
+    { v: '01', l: 'Jan' }, { v: '02', l: 'Feb' }, { v: '03', l: 'Mar' },
+    { v: '04', l: 'Apr' }, { v: '05', l: 'Mei' }, { v: '06', l: 'Jun' },
+    { v: '07', l: 'Jul' }, { v: '08', l: 'Agu' }, { v: '09', l: 'Sep' },
+    { v: '10', l: 'Okt' }, { v: '11', l: 'Nov' }, { v: '12', l: 'Des' },
+];
+
+const incrementYear = () => { if (filterYear.value < currentYear) filterYear.value++; };
+const decrementYear = () => { if (filterYear.value > currentYear - 4) filterYear.value--; };
+
+const selectedSp  = ref<Props['spareparts'][0] | null>(null);
+const filterSpObj = ref<Props['spareparts'][0] | null>(
     props.filters.sparepart_id
         ? props.spareparts.find(s => s.id == props.filters.sparepart_id) ?? null
         : null
@@ -50,8 +65,8 @@ const filterSpObj   = ref<Props['spareparts'][0] | null>(
 
 const form = useForm({ sparepart_id: '', qty: '', notes: '' });
 
-const spSearch     = ref('');
-const spOpen       = ref(false);
+const spSearch       = ref('');
+const spOpen         = ref(false);
 const filterSpSearch = ref(filterSpObj.value?.name ?? '');
 const filterSpOpen   = ref(false);
 
@@ -71,10 +86,10 @@ const filteredFilterSpareparts = computed(() => {
 });
 
 const selectFilterSp = (s: Props['spareparts'][0]) => {
-    filterSp.value      = s.id;
-    filterSpObj.value   = s;
+    filterSp.value       = s.id;
+    filterSpObj.value    = s;
     filterSpSearch.value = s.name;
-    filterSpOpen.value  = false;
+    filterSpOpen.value   = false;
 };
 
 const clearFilterSp = () => {
@@ -111,10 +126,13 @@ const highlightMatch = (name: string, query: string): { text: string; match: boo
     ].filter(p => p.text !== '');
 };
 
-watch([filterSp, filterTipe], () => {
+watch([filterSp, filterTipe, filterMonth, filterYear], () => {
     router.get('/jig/sparepart/history', {
         sparepart_id: filterSp.value,
         tipe:         filterTipe.value,
+        month:        filterMonth.value,
+        year:         String(filterYear.value),
+        page:         1,
     }, { preserveState: true, preserveScroll: true });
 });
 
@@ -122,6 +140,8 @@ const goPage = (p: number) => {
     router.get('/jig/sparepart/history', {
         sparepart_id: filterSp.value,
         tipe:         filterTipe.value,
+        month:        filterMonth.value,
+        year:         String(filterYear.value),
         page:         p,
     }, { preserveState: true, preserveScroll: true });
 };
@@ -169,9 +189,23 @@ const fmt = (d: string) =>
 const fmtShort = (d: string) =>
     new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+const reportLabelMap: Record<string, string> = {
+    pm:          'PM',
+    cm:          'CM',
+    improvement: 'IMP',
+    manual:      'Manual',
+};
+
 const reportLabel = (type: string | null, id: number | null) => {
-    if (!type || !id) return 'Manual';
-    return `${type.toUpperCase()} #${id}`;
+    if (!type || type === 'manual' || !id) return 'Manual';
+    return `${reportLabelMap[type] ?? type.toUpperCase()} #${id}`;
+};
+
+const reportBadgeClass = (type: string | null) => {
+    if (type === 'pm')          return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400';
+    if (type === 'cm')          return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400';
+    if (type === 'improvement') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400';
+    return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400';
 };
 </script>
 
@@ -202,6 +236,35 @@ const reportLabel = (type: string | null, id: number | null) => {
                 </button>
             </div>
 
+            <!-- Month + Year Filter Bar -->
+            <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-3 shadow-sm">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-1.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+                        <button v-for="m in months" :key="m.v" @click="filterMonth = m.v"
+                            :class="['flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95',
+                                filterMonth === m.v
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600']">
+                            {{ m.l }}
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-1 flex-shrink-0 bg-gray-100 dark:bg-gray-700 rounded-xl px-3 py-1.5">
+                        <span class="text-sm font-black text-gray-800 dark:text-gray-200 tabular-nums w-10 text-center">{{ filterYear }}</span>
+                        <div class="flex flex-col gap-0.5 ml-1">
+                            <button @click="incrementYear" :disabled="filterYear >= currentYear"
+                                class="p-0.5 text-gray-500 hover:text-indigo-600 disabled:opacity-30 transition-colors">
+                                <ChevronUp class="w-3 h-3" />
+                            </button>
+                            <button @click="decrementYear" :disabled="filterYear <= currentYear - 4"
+                                class="p-0.5 text-gray-500 hover:text-indigo-600 disabled:opacity-30 transition-colors">
+                                <ChevronDown class="w-3 h-3" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Panel -->
             <div class="space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
                     <button @click="showFilterPanel = !showFilterPanel"
@@ -225,8 +288,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Tipe</label>
                         <div class="flex gap-2">
                             <button v-for="opt in [{v:'',l:'Semua'},{v:'masuk',l:'Masuk'},{v:'keluar',l:'Keluar'}]"
-                                :key="opt.v"
-                                @click="filterTipe = opt.v"
+                                :key="opt.v" @click="filterTipe = opt.v"
                                 :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors active:scale-95',
                                     filterTipe === opt.v
                                         ? 'bg-indigo-600 text-white'
@@ -239,18 +301,12 @@ const reportLabel = (type: string | null, id: number | null) => {
                         <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Sparepart</label>
                         <div class="relative">
                             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
-                            <input
-                                v-model="filterSpSearch"
-                                type="text"
-                                placeholder="Cari nama sparepart..."
-                                autocomplete="off"
-                                @focus="filterSpOpen = true"
-                                @blur="closeFilterSpDropdown"
+                            <input v-model="filterSpSearch" type="text" placeholder="Cari nama sparepart..."
+                                autocomplete="off" @focus="filterSpOpen = true" @blur="closeFilterSpDropdown"
                                 :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
                                     filterSpObj
                                         ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
-                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
-                            />
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
                             <button v-if="filterSpObj" type="button" @click="clearFilterSp"
                                 class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
                                 <X class="w-3.5 h-3.5" />
@@ -260,9 +316,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                                 <div v-if="filteredFilterSpareparts.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
                                     Tidak ada hasil untuk "{{ filterSpSearch }}"
                                 </div>
-                                <button
-                                    v-for="s in filteredFilterSpareparts" :key="s.id"
-                                    type="button"
+                                <button v-for="s in filteredFilterSpareparts" :key="s.id" type="button"
                                     @mousedown.prevent="selectFilterSp(s)"
                                     :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-between gap-2',
                                         filterSpObj?.id === s.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
@@ -284,6 +338,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                 </div>
             </div>
 
+            <!-- Desktop Table -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -317,17 +372,16 @@ const reportLabel = (type: string | null, id: number | null) => {
                                 </td>
                                 <td class="px-4 py-3 text-center">
                                     <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold',
-                                        h.tipe === 'masuk' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400']">
+                                        h.tipe === 'masuk'
+                                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                                            : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400']">
                                         <TrendingUp v-if="h.tipe === 'masuk'" class="w-3 h-3" />
                                         <TrendingDown v-else class="w-3 h-3" />
                                         {{ h.tipe === 'masuk' ? 'Masuk' : 'Keluar' }}
                                     </span>
                                 </td>
                                 <td class="px-4 py-3 text-center">
-                                    <span :class="['px-2 py-0.5 rounded-full text-xs font-bold',
-                                        h.report_type === 'pm' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400' :
-                                        h.report_type === 'cm' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400' :
-                                        'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400']">
+                                    <span :class="['px-2 py-0.5 rounded-full text-xs font-bold', reportBadgeClass(h.report_type)]">
                                         {{ reportLabel(h.report_type, h.report_id) }}
                                     </span>
                                 </td>
@@ -365,6 +419,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                 </div>
             </div>
 
+            <!-- Mobile Cards -->
             <div class="lg:hidden space-y-2">
                 <div v-if="histories.data.length === 0" class="py-14 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <History class="w-10 h-10 mx-auto mb-2 text-gray-300" />
@@ -381,10 +436,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                                 <p class="text-xs text-gray-400 mt-0.5">{{ fmtShort(h.created_at) }} · {{ h.user?.name }}</p>
                             </div>
                             <div class="flex items-center gap-1.5 flex-shrink-0">
-                                <span :class="['px-1.5 py-0.5 rounded-full text-xs font-bold',
-                                    h.report_type === 'pm' ? 'bg-indigo-100 text-indigo-700' :
-                                    h.report_type === 'cm' ? 'bg-orange-100 text-orange-700' :
-                                    'bg-gray-100 text-gray-500']">
+                                <span :class="['px-1.5 py-0.5 rounded-full text-xs font-bold', reportBadgeClass(h.report_type)]">
                                     {{ reportLabel(h.report_type, h.report_id) }}
                                 </span>
                                 <span :class="['inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold',
@@ -416,8 +468,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                     </div>
                 </div>
 
-                <div v-if="histories.last_page > 1"
-                    class="flex items-center justify-between px-1 py-2">
+                <div v-if="histories.last_page > 1" class="flex items-center justify-between px-1 py-2">
                     <p class="text-xs text-gray-400">Hal. {{ histories.current_page }} / {{ histories.last_page }}</p>
                     <div class="flex gap-1">
                         <button v-for="p in histories.last_page" :key="p" @click="goPage(p)"
@@ -432,6 +483,7 @@ const reportLabel = (type: string | null, id: number | null) => {
             </div>
         </div>
 
+        <!-- Modal Ambil Reguler -->
         <div v-if="showModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -449,18 +501,12 @@ const reportLabel = (type: string | null, id: number | null) => {
                         <label class="block text-sm font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Sparepart <span class="text-red-500">*</span></label>
                         <div class="relative">
                             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-                            <input
-                                v-model="spSearch"
-                                type="text"
-                                placeholder="Cari sparepart..."
-                                autocomplete="off"
-                                @focus="spOpen = true"
-                                @blur="closeSpDropdown"
+                            <input v-model="spSearch" type="text" placeholder="Cari sparepart..." autocomplete="off"
+                                @focus="spOpen = true" @blur="closeSpDropdown"
                                 :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
                                     selectedSp
                                         ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold'
-                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']"
-                            />
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400']" />
                             <button v-if="selectedSp" type="button" @click="clearModalSp"
                                 class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
                                 <X class="w-3.5 h-3.5" />
@@ -470,9 +516,7 @@ const reportLabel = (type: string | null, id: number | null) => {
                                 <div v-if="filteredSpareparts.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
                                     Tidak ada hasil untuk "{{ spSearch }}"
                                 </div>
-                                <button
-                                    v-for="s in filteredSpareparts" :key="s.id"
-                                    type="button"
+                                <button v-for="s in filteredSpareparts" :key="s.id" type="button"
                                     @mousedown.prevent="selectModalSp(s)"
                                     :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-center justify-between gap-2',
                                         selectedSp?.id === s.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
