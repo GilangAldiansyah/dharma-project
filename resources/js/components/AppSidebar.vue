@@ -21,8 +21,8 @@ const { can } = usePermissions();
 const page = usePage();
 const showSwitcher = ref(false);
 const isMobile = ref(false);
-
 const isDark = ref(false);
+
 onMounted(() => {
     isDark.value = document.documentElement.classList.contains('dark');
     const check = () => { isMobile.value = window.innerWidth < 768; };
@@ -67,13 +67,16 @@ const allNavGroups: NavGroup[] = [
         ],
     },
     {
-        title: 'Die Shop', icon: Wrench, permission: 'die-shop.view',
+        title: 'Dies', icon: Wrench, permission: 'dies.view',
         gradient: 'from-orange-500 to-amber-500', accent: '#f97316', accentRgb: '249,115,22',
-        routes: ['/die-shop-dashboard', '/die-shop-reports', '/die-parts'], dashboardRoute: '/die-shop-dashboard',
+        routes: ['/dies', '/dies/preventive', '/dies/corrective', '/dies/sparepart', '/dies/dashboard'],
+        dashboardRoute: '/dies/dashboard',
         items: [
-            { title: 'Dashboard Die Shop', href: '/die-shop-dashboard', icon: BarChart3, permission: 'die-shop.view' },
-            { title: 'Laporan Perbaikan',  href: '/die-shop-reports',  icon: FileText,  permission: 'die-shop.view' },
-            { title: 'Master Die Parts',   href: '/die-parts',         icon: Box,       permission: 'die-parts.edit' },
+            { title: 'Dashboard Dies',       href: '/dies/dashboard',    icon: BarChart3, permission: 'dies.view'   },
+            { title: 'Master Dies',          href: '/dies',              icon: Box,       permission: 'dies.view'   },
+            { title: 'Preventive Maintenance', href: '/dies/preventive', icon: FileText,  permission: 'dies.view'   },
+            { title: 'Corrective Maintenance', href: '/dies/corrective', icon: FileText,  permission: 'dies.view'   },
+            { title: 'Sparepart',            href: '/dies/sparepart',    icon: Package,   permission: 'dies.view'   },
         ],
     },
     {
@@ -160,13 +163,23 @@ const visibleItems = computed(() =>
 );
 
 const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome');
+
+const activeHref = computed(() => {
+    const url = page.url;
+    const items = visibleItems.value;
+    const matched = items.filter(i => url === i.href || url.startsWith(i.href + '/') || url.startsWith(i.href + '?'));
+    if (!matched.length) return null;
+    return matched.reduce((a, b) => a.href.length >= b.href.length ? a : b).href;
+});
+
+const isActive = (href: string) => activeHref.value === href;
 </script>
 
 <template>
     <Sidebar collapsible="icon" variant="inset">
 
         <SidebarHeader class="p-0">
-            <div class="px-3 pt-3 pb-2">
+            <div class="px-2 pt-3 pb-2">
                 <SidebarMenu>
                     <SidebarMenuItem>
                         <SidebarMenuButton size="lg" as-child class="rounded-xl hover:bg-sidebar-accent px-2">
@@ -176,110 +189,94 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
                 </SidebarMenu>
             </div>
 
-            <template v-if="currentSystem">
-                <!-- Expanded: card pembungkus dengan tinted accent -->
-                <div class="group-data-[collapsible=icon]:hidden mx-3 mb-2 rounded-2xl overflow-hidden"
-                    :style="`
-                        background: rgba(${currentSystem.accentRgb}, 0.08);
-                        border: 1.5px solid rgba(${currentSystem.accentRgb}, 0.2);
-                        box-shadow: 0 2px 12px rgba(${currentSystem.accentRgb}, 0.08);
-                    `">
-
-                    <!-- Header sistem -->
-                    <div class="flex items-center gap-2.5 px-3 pt-3 pb-2.5">
-                        <div :class="`w-8 h-8 rounded-xl bg-gradient-to-br ${currentSystem.gradient} flex items-center justify-center shrink-0`"
-                            :style="`box-shadow: 0 4px 14px rgba(${currentSystem.accentRgb}, 0.4)`">
-                            <component :is="currentSystem.icon" class="w-4 h-4 text-white" />
+            <div class="group-data-[collapsible=icon]:hidden px-3 pb-2">
+                <template v-if="currentSystem">
+                    <div class="flex items-center gap-2 px-2.5 py-2 rounded-xl"
+                        :style="`background: rgba(${currentSystem.accentRgb}, 0.07); border: 1px solid rgba(${currentSystem.accentRgb}, 0.15)`">
+                        <div :class="`w-5 h-5 rounded-md bg-gradient-to-br ${currentSystem.gradient} flex items-center justify-center shrink-0`">
+                            <component :is="currentSystem.icon" class="w-3 h-3 text-white" />
                         </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-[10px] font-bold uppercase tracking-[0.14em] leading-none mb-0.5"
-                                :style="`color: ${currentSystem.accent}`">Aktif</p>
-                            <p class="text-[13px] font-bold text-foreground truncate leading-none">{{ currentSystem.title }}</p>
-                        </div>
+                        <span class="text-[11px] font-bold uppercase tracking-widest flex-1 truncate"
+                            :style="`color: ${currentSystem.accent}`">
+                            {{ currentSystem.title }}
+                        </span>
                         <button @click="showSwitcher = true"
-                            class="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95 shrink-0"
-                            :style="`color: ${currentSystem.accent}; background: rgba(${currentSystem.accentRgb}, 0.15)`">
-                            <GridIcon class="w-3.5 h-3.5" />
+                            class="w-5 h-5 rounded-md flex items-center justify-center transition-all hover:scale-110 active:scale-95 shrink-0 text-muted-foreground/60 hover:text-muted-foreground">
+                            <GridIcon class="w-3 h-3" />
                         </button>
                     </div>
-
-                    <!-- Divider -->
-                    <div class="mx-3 h-px" :style="`background: rgba(${currentSystem.accentRgb}, 0.15)`" />
-
-                    <!-- Nav items -->
-                    <div class="px-1.5 py-1.5">
-                        <SidebarMenu class="gap-px">
-                            <SidebarMenuItem v-for="item in visibleItems" :key="item.title">
-                                <SidebarMenuButton as-child :tooltip="item.title"
-                                    class="relative rounded-xl h-9 text-[13px] transition-all duration-150">
-                                    <Link :href="item.href" class="flex items-center gap-2.5 px-2.5 font-medium text-foreground/60 hover:text-foreground hover:bg-background/50">
-                                        <component :is="item.icon" class="w-[14px] h-[14px] shrink-0" />
-                                        <span>{{ item.title }}</span>
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                        </SidebarMenu>
-                    </div>
-                </div>
-
-                <!-- Collapsed: icon sistem saja -->
-                <div class="group-data-[collapsible=icon]:flex hidden justify-center px-2 pb-2">
+                </template>
+                <template v-else>
                     <button @click="showSwitcher = true"
-                        class="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105"
-                        :style="`background: rgba(${currentSystem.accentRgb}, 0.12); color: ${currentSystem.accent}`">
-                        <component :is="currentSystem.icon" class="w-4 h-4" />
+                        class="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[12px] font-medium">
+                        <GridIcon class="w-3.5 h-3.5 shrink-0" />
+                        <span>Pilih Sistem</span>
+                        <ChevronRight class="w-3 h-3 ml-auto" />
                     </button>
-                </div>
-            </template>
+                </template>
+            </div>
 
-            <div v-if="!currentSystem" class="group-data-[collapsible=icon]:hidden mx-4 mb-3 h-px bg-border" />
+            <div class="group-data-[collapsible=icon]:hidden mx-3 h-px bg-border/40 mb-1" />
         </SidebarHeader>
 
-        <SidebarContent class="px-3 py-0">
-            <div v-if="!currentSystem" class="group-data-[collapsible=icon]:hidden py-12 text-center px-2">
-                <div class="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
-                    <GridIcon class="w-5 h-5 text-muted-foreground/40" />
-                </div>
-                <p class="text-xs text-muted-foreground mb-3">Belum ada sistem aktif</p>
-                <button @click="showSwitcher = true"
-                    class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity">
-                    Pilih sistem <ChevronRight class="w-3 h-3" />
-                </button>
-            </div>
+        <SidebarContent class="px-2 py-1">
+            <SidebarMenu class="gap-0.5">
+                <SidebarMenuItem v-for="item in visibleItems" :key="item.title"
+                    class="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
+                    <SidebarMenuButton as-child :tooltip="item.title"
+                        class="group-data-[collapsible=icon]:!w-auto group-data-[collapsible=icon]:!p-0">
+                        <Link :href="item.href"
+                            class="flex items-center gap-3 px-3 h-9 rounded-xl text-[13px] transition-all duration-150 group/nav group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:gap-0"
+                            :class="!isActive(item.href) ? 'font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60' : 'font-semibold'"
+                            :style="isActive(item.href) && currentSystem
+                                ? `color: ${currentSystem.accent}; background: rgba(${currentSystem.accentRgb}, 0.1)`
+                                : ''">
+                            <component :is="item.icon" class="w-[15px] h-[15px] shrink-0 transition-transform duration-150 group-hover/nav:scale-110" />
+                            <span class="truncate group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                            <span v-if="isActive(item.href) && currentSystem"
+                                class="ml-auto w-1.5 h-1.5 rounded-full shrink-0 group-data-[collapsible=icon]:hidden"
+                                :style="`background: ${currentSystem.accent}`" />
+                        </Link>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
         </SidebarContent>
 
-        <SidebarFooter class="p-3 gap-0">
-            <div class="rounded-2xl border border-border/60 overflow-hidden mb-2" :class="isDark ? 'bg-white/[0.03]' : 'bg-black/[0.02]'">
+        <SidebarFooter class="p-2 gap-1">
+            <div class="rounded-xl border border-border/50 overflow-hidden">
                 <button @click="toggleDark"
-                    class="w-full flex items-center gap-3 px-3 py-2.5 transition-colors group-data-[collapsible=icon]:justify-center"
-                    :class="isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-black/[0.04]'">
-                    <div class="relative w-8 h-[18px] shrink-0">
-                        <div class="absolute inset-0 rounded-full transition-colors duration-300"
-                            :class="isDark ? 'bg-indigo-500' : 'bg-amber-400'">
-                            <div class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-all duration-300 flex items-center justify-center"
-                                :class="isDark ? 'left-[18px]' : 'left-[2px]'">
-                                <Moon v-if="isDark" class="w-2 h-2 text-indigo-500" />
-                                <Sun v-else class="w-2 h-2 text-amber-400" />
+                    class="w-full flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+                    <div class="group-data-[collapsible=icon]:block hidden">
+                        <Moon v-if="isDark" class="w-[14px] h-[14px] text-indigo-400" />
+                        <Sun v-else class="w-[14px] h-[14px] text-amber-400" />
+                    </div>
+                    <div class="group-data-[collapsible=icon]:hidden flex items-center gap-3 w-full">
+                        <div class="relative w-8 h-[18px] shrink-0">
+                            <div class="absolute inset-0 rounded-full transition-colors duration-300"
+                                :class="isDark ? 'bg-indigo-500' : 'bg-amber-400'">
+                                <div class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-all duration-300 flex items-center justify-center"
+                                    :class="isDark ? 'left-[18px]' : 'left-[2px]'">
+                                    <Moon v-if="isDark" class="w-2 h-2 text-indigo-500" />
+                                    <Sun v-else class="w-2 h-2 text-amber-500" />
+                                </div>
                             </div>
                         </div>
+                        <span class="text-[12px] font-medium text-muted-foreground">
+                            {{ isDark ? 'Dark mode' : 'Light mode' }}
+                        </span>
                     </div>
-                    <span class="text-[13px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-                        {{ isDark ? 'Dark mode' : 'Light mode' }}
-                    </span>
                 </button>
                 <div class="h-px bg-border/50" />
                 <Link href="/welcome"
-                    class="flex items-center gap-3 px-3 py-2.5 transition-colors text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:justify-center"
-                    :class="isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-black/[0.04]'">
+                    class="flex items-center gap-3 px-3 py-2.5 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
                     <Home class="w-[14px] h-[14px] shrink-0" />
-                    <span class="text-[13px] font-medium group-data-[collapsible=icon]:hidden">Home</span>
+                    <span class="text-[12px] font-medium group-data-[collapsible=icon]:hidden">Home</span>
                 </Link>
                 <div class="h-px bg-border/50" />
                 <Link href="/settings"
-                    class="flex items-center gap-3 px-3 py-2.5 transition-colors text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:justify-center"
-                    :class="isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-black/[0.04]'">
+                    class="flex items-center gap-3 px-3 py-2.5 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
                     <Settings class="w-[14px] h-[14px] shrink-0" />
-                    <span class="text-[13px] font-medium group-data-[collapsible=icon]:hidden">Settings</span>
+                    <span class="text-[12px] font-medium group-data-[collapsible=icon]:hidden">Settings</span>
                 </Link>
             </div>
             <NavUser />
@@ -287,20 +284,18 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
     </Sidebar>
 
     <Teleport to="body">
-        <!-- Backdrop — z lebih tinggi dari sidebar drawer (biasanya z-40/50) -->
         <Transition
             enter-active-class="transition duration-200 ease-out"
             enter-from-class="opacity-0"
             enter-to-class="opacity-100"
-            leave-active-class="transition duration-200"
+            leave-active-class="transition duration-150"
             leave-from-class="opacity-100"
             leave-to-class="opacity-0">
             <div v-if="showSwitcher"
-                class="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm"
+                class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm"
                 @click="showSwitcher = false" />
         </Transition>
 
-        <!-- Mobile: bottom sheet — z lebih tinggi dari backdrop -->
         <Transition
             enter-active-class="transition duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
             enter-from-class="translate-y-full"
@@ -314,28 +309,27 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
                 <div class="flex justify-center pt-3 pb-1">
                     <div class="w-10 h-1 rounded-full bg-muted-foreground/20" />
                 </div>
-                <div class="flex items-center justify-between px-5 py-2 mb-1">
-                    <p class="text-base font-bold">Pilih Sistem</p>
+                <div class="flex items-center justify-between px-5 py-3">
+                    <p class="text-sm font-bold">Pilih Sistem</p>
                     <button @click="showSwitcher = false"
                         class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
                         <X class="w-4 h-4" />
                     </button>
                 </div>
-                <div class="px-4 pb-6 overflow-y-auto grid grid-cols-2 gap-2.5"
+                <div class="px-4 pb-6 overflow-y-auto grid grid-cols-2 gap-2"
                     style="max-height: calc(85vh - 90px)">
                     <Link v-for="group in visibleNavGroups" :key="group.title"
                         :href="group.dashboardRoute"
                         @click="showSwitcher = false"
                         class="relative flex flex-col items-center gap-2.5 p-4 rounded-2xl transition-all duration-150 active:scale-95"
                         :style="currentSystem?.title === group.title
-                            ? `border: 2px solid ${group.accent}; background: rgba(${group.accentRgb}, 0.08)`
-                            : 'border: 2px solid transparent; background: var(--muted)'">
+                            ? `border: 1.5px solid ${group.accent}; background: rgba(${group.accentRgb}, 0.08)`
+                            : 'border: 1.5px solid transparent; background: var(--muted)'">
                         <div v-if="currentSystem?.title === group.title"
-                            class="absolute top-2.5 right-2.5 w-2 h-2 rounded-full"
+                            class="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full"
                             :style="`background: ${group.accent}`" />
-                        <div :class="`w-12 h-12 rounded-2xl bg-gradient-to-br ${group.gradient} flex items-center justify-center`"
-                            :style="currentSystem?.title === group.title ? `box-shadow: 0 8px 20px rgba(${group.accentRgb}, 0.4)` : ''">
-                            <component :is="group.icon" class="w-6 h-6 text-white" />
+                        <div :class="`w-11 h-11 rounded-xl bg-gradient-to-br ${group.gradient} flex items-center justify-center`">
+                            <component :is="group.icon" class="w-5 h-5 text-white" />
                         </div>
                         <span class="text-[12px] font-semibold text-center leading-tight"
                             :style="currentSystem?.title === group.title ? `color: ${group.accent}` : ''">
@@ -346,7 +340,6 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
             </div>
         </Transition>
 
-        <!-- Desktop: dropdown popup -->
         <Transition
             enter-active-class="transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
             enter-from-class="opacity-0 scale-95 -translate-y-1"
@@ -355,32 +348,29 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
             leave-from-class="opacity-100 scale-100"
             leave-to-class="opacity-0 scale-95 -translate-y-1">
             <div v-if="showSwitcher && !isMobile"
-                class="fixed left-[calc(var(--sidebar-width)+12px)] top-[52px] z-[201] w-60 rounded-2xl overflow-hidden shadow-2xl border border-border bg-background">
-                <div class="px-4 py-3 flex items-center justify-between border-b border-border">
-                    <p class="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Pilih Sistem</p>
+                class="fixed left-[calc(var(--sidebar-width)+12px)] top-[52px] z-[201] w-56 rounded-2xl overflow-hidden shadow-xl border border-border bg-background">
+                <div class="px-4 py-2.5 flex items-center justify-between border-b border-border">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pilih Sistem</p>
                     <button @click="showSwitcher = false"
                         class="w-6 h-6 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                         <X class="w-3 h-3" />
                     </button>
                 </div>
-                <div class="p-2 max-h-80 overflow-y-auto">
+                <div class="p-1.5 max-h-80 overflow-y-auto">
                     <Link v-for="group in visibleNavGroups" :key="group.title"
                         :href="group.dashboardRoute"
                         @click="showSwitcher = false"
-                        class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 group/sw"
+                        class="flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all duration-150 group/sw"
                         :class="currentSystem?.title !== group.title ? 'hover:bg-muted' : ''"
                         :style="currentSystem?.title === group.title
-                            ? `background: rgba(${group.accentRgb}, 0.08); border: 1px solid rgba(${group.accentRgb}, 0.2)`
-                            : 'border: 1px solid transparent'">
-                        <div :class="`w-7 h-7 rounded-xl bg-gradient-to-br ${group.gradient} flex items-center justify-center shrink-0 transition-transform duration-150 group-hover/sw:scale-110`"
-                            :style="currentSystem?.title === group.title ? `box-shadow: 0 4px 10px rgba(${group.accentRgb}, 0.4)` : ''">
+                            ? `background: rgba(${group.accentRgb}, 0.08); outline: 1px solid rgba(${group.accentRgb}, 0.2)`
+                            : ''">
+                        <div :class="`w-7 h-7 rounded-xl bg-gradient-to-br ${group.gradient} flex items-center justify-center shrink-0 transition-transform duration-150 group-hover/sw:scale-110`">
                             <component :is="group.icon" class="w-3.5 h-3.5 text-white" />
                         </div>
-                        <span class="text-[13px] flex-1 transition-colors"
-                            :style="currentSystem?.title === group.title
-                                ? `color: ${group.accent}; font-weight: 600`
-                                : 'color: var(--muted-foreground); font-weight: 500'"
-                            :class="currentSystem?.title !== group.title ? 'group-hover/sw:text-foreground' : ''">
+                        <span class="text-[12px] flex-1 truncate font-medium transition-colors"
+                            :style="currentSystem?.title === group.title ? `color: ${group.accent}; font-weight: 600` : ''"
+                            :class="currentSystem?.title !== group.title ? 'text-muted-foreground group-hover/sw:text-foreground' : ''">
                             {{ group.title }}
                         </span>
                         <div v-if="currentSystem?.title === group.title"
