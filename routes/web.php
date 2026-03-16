@@ -8,9 +8,6 @@ use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\NgReportController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\StockController;
-use App\Http\Controllers\DiePartController;
-use App\Http\Controllers\DieShopReportController;
-use App\Http\Controllers\DieShopDashboardController;
 use App\Http\Controllers\ESP32Controller;
 use App\Http\Controllers\MaterialController;
 use App\Http\Controllers\PartMaterialController;
@@ -32,6 +29,13 @@ use App\Http\Controllers\PmReportController;
 use App\Http\Controllers\CmReportController;
 use App\Http\Controllers\SparepartController;
 use App\Http\Controllers\ImprovementReportController;
+use App\Http\Controllers\DiesController;
+use App\Http\Controllers\DiesProcessController;
+use App\Http\Controllers\DiesPreventiveController;
+use App\Http\Controllers\DiesCorrectiveController;
+use App\Http\Controllers\DiesSparepartController;
+use App\Http\Controllers\DiesDashboardController;
+
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -120,26 +124,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/parts/{part}', [PartController::class, 'update'])->name('parts.update');
         Route::post('/parts/import', [PartController::class, 'import'])->name('parts.import');
         Route::delete('/parts/{part}', [PartController::class, 'destroy'])->name('parts.destroy');
-    });
-
-    // ── Die Shop ──────────────────────────────────────────────────────────────
-    Route::get('die-shop-dashboard', [DieShopDashboardController::class, 'index'])->middleware('permission:die-shop.view')->name('die-shop-dashboard');
-    Route::middleware('permission:die-shop.view')->group(function () {
-        Route::resource('die-parts', DiePartController::class)->only(['index', 'show']);
-        Route::resource('die-shop-reports', DieShopReportController::class)->only(['index', 'show']);
-    });
-    Route::middleware('permission:die-shop.create')->group(function () {
-        Route::resource('die-parts', DiePartController::class)->only(['store']);
-        Route::resource('die-shop-reports', DieShopReportController::class)->only(['store']);
-        Route::post('die-shop-reports/{dieShopReport}/quick-complete', [DieShopReportController::class, 'quickComplete'])->name('die-shop-reports.quick-complete');
-    });
-    Route::middleware('permission:die-shop.edit')->group(function () {
-        Route::resource('die-parts', DiePartController::class)->only(['update']);
-        Route::resource('die-shop-reports', DieShopReportController::class)->only(['update']);
-    });
-    Route::middleware('permission:die-shop.delete')->group(function () {
-        Route::resource('die-parts', DiePartController::class)->only(['destroy']);
-        Route::resource('die-shop-reports', DieShopReportController::class)->only(['destroy']);
     });
 
     // ── ESP32 / Robot ─────────────────────────────────────────────────────────
@@ -348,7 +332,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('permission:jig.view')->group(function () {
         Route::get('/jig/cm', [CmReportController::class, 'index'])->name('jig.cm.index');
         Route::get('/jig/cm/{cmReport}', [CmReportController::class, 'show'])->name('jig.cm.show');
-        Route::put('/jig/cm/{cmReport}', [CmReportController::class, 'update']);
     });
     Route::post('/jig/cm', [CmReportController::class, 'store'])
     ->middleware('permission:jig.pic')
@@ -362,10 +345,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/jig/cm/{cmReport}/close', [CmReportController::class, 'close'])
         ->middleware('permission:jig.pic')
         ->name('jig.cm.close');
+
     // ── Improvement Report ────────────────────────────────────────────────────────
     Route::middleware('permission:jig.view')->group(function () {
         Route::get('/jig/improvement', [ImprovementReportController::class, 'index'])->name('jig.improvement.index');
-        Route::put('/jig/improvement/{improvementReport}', [ImprovementReportController::class, 'update']);
     });
     Route::post('/jig/improvement', [ImprovementReportController::class, 'store'])
         ->middleware('permission:jig.pic')
@@ -380,7 +363,73 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('permission:jig.pic')
         ->name('jig.improvement.close');
 
+    // ── Dies ──────────────────────────────────────────────────────────────────
+   Route::prefix('dies')->name('dies.')->group(function () {
 
+    Route::middleware('permission:dies.view')->group(function () {
+        Route::get('/', [DiesController::class, 'index'])->name('index');
+        Route::get('/dashboard', [DiesDashboardController::class, 'index'])->name('dashboard');
+
+        Route::get('/preventive', [DiesPreventiveController::class, 'index'])->name('preventive.index');
+
+        Route::get('/corrective', [DiesCorrectiveController::class, 'index'])->name('corrective.index');
+        Route::get('/corrective/create', [DiesCorrectiveController::class, 'create'])->name('corrective.create');
+        Route::get('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'show'])->name('corrective.show');
+        Route::get('/corrective/{diesCorrective}/edit', [DiesCorrectiveController::class, 'edit'])->name('corrective.edit');
+
+        Route::get('/sparepart', [DiesSparepartController::class, 'index'])->name('sparepart.index');
+        Route::get('/sparepart/history', [DiesSparepartController::class, 'historyIndex'])->name('sparepart.history');
+        Route::get('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'show'])->name('sparepart.show');
+
+        Route::get('/create', [DiesController::class, 'create'])->name('create');
+        Route::get('/import-bstb-preview', fn() => redirect()->route('dies.index'));
+        Route::get('/{idSap}', [DiesController::class, 'show'])->name('show');
+        Route::get('/{idSap}/edit', [DiesController::class, 'edit'])->name('edit');
+    });
+
+    Route::middleware('permission:dies.create')->group(function () {
+        Route::post('/', [DiesController::class, 'store'])->name('store');
+        Route::post('/import', [DiesController::class, 'import'])->name('import');
+        Route::post('/schedule-pm', [DiesDashboardController::class, 'schedulePm'])->name('schedule-pm');
+        Route::post('/preventive', [DiesPreventiveController::class, 'store'])->name('preventive.store');
+        Route::post('/corrective', [DiesCorrectiveController::class, 'store'])->name('corrective.store');
+    });
+
+    Route::middleware('permission:dies.edit')->group(function () {
+        Route::put('/{idSap}', [DiesController::class, 'update'])->name('update');
+        Route::put('/preventive/{diesPreventive}', [DiesPreventiveController::class, 'update'])->name('preventive.update');
+        Route::put('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update'])->name('corrective.update');
+        Route::post('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update']);
+        Route::post('/corrective/{diesCorrective}/close', [DiesCorrectiveController::class, 'close'])->name('corrective.close');
+        Route::post('/corrective/{diesCorrective}/delete-photo', [DiesCorrectiveController::class, 'deletePhoto'])->name('corrective.delete-photo-post');
+        Route::delete('/preventive/{diesPreventive}/photo', [DiesPreventiveController::class, 'deletePhoto'])->name('preventive.delete-photo');
+        Route::delete('/corrective/{diesCorrective}/photo', [DiesCorrectiveController::class, 'deletePhoto'])->name('corrective.delete-photo');
+        Route::post('/import-bstb-preview', [DiesController::class, 'importBstbPreview'])->name('import-bstb-preview');
+        Route::post('/import-bstb-confirm', [DiesController::class, 'importBstbConfirm'])->name('import-bstb-confirm');
+
+        Route::prefix('/{idSap}/processes')->name('processes.')->group(function () {
+            Route::post('/', [DiesProcessController::class, 'store'])->name('store');
+            Route::put('/{process}', [DiesProcessController::class, 'update'])->name('update');
+            Route::delete('/{process}', [DiesProcessController::class, 'destroy'])->name('destroy');
+        });
+
+        Route::post('/sparepart', [DiesSparepartController::class, 'store'])->name('sparepart.store');
+        Route::put('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'update'])->name('sparepart.update');
+        Route::post('/sparepart/{diesSparepart}/adjust-stok', [DiesSparepartController::class, 'adjustStok'])->name('sparepart.adjust-stok');
+        Route::delete('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'destroy'])->name('sparepart.destroy');
+    });
+
+    Route::middleware('permission:dies.delete')->group(function () {
+        Route::delete('/{idSap}', [DiesController::class, 'destroy'])->name('destroy');
+        Route::delete('/preventive/{diesPreventive}', [DiesPreventiveController::class, 'destroy'])->name('preventive.destroy');
+        Route::delete('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'destroy'])->name('corrective.destroy');
+    });
+
+    Route::middleware('permission:dies.pic')->group(function () {
+        Route::post('/sparepart/history', [DiesSparepartController::class, 'historyStore'])->name('sparepart.history.store');
+        Route::delete('/sparepart/history/{history}', [DiesSparepartController::class, 'historyDestroy'])->name('sparepart.history.destroy');
+    });
+    });
     Route::post('/ai/chat', [AiChatController::class, 'chat']);
     Route::get('/ai/alerts', [AiChatController::class, 'alerts']);
     Route::get('/ai/export-data', [AiChatController::class, 'exportData']);

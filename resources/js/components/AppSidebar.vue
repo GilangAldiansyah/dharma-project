@@ -4,13 +4,12 @@ import {
     Sidebar, SidebarContent, SidebarFooter, SidebarHeader,
     SidebarMenu, SidebarMenuButton, SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { type NavItem } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import {
     LayoutGrid, PackageSearch, Warehouse, Settings, AlertTriangle,
     Users, BoxIcon, Package, BarChart3, Wrench, FileText, Box,
     Home, TrendingUp, ClipboardList, Layers, Database, Bot,
-    Activity, Cog, Scan, Calendar, History, X,
+    Activity, Cog, Calendar, History, X,
     Sun, Moon, ChevronRight, LayoutGrid as GridIcon,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
@@ -36,7 +35,13 @@ const toggleDark = () => {
     localStorage.setItem('theme', isDark.value ? 'dark' : 'light');
 };
 
-interface NavItemWithPermission extends NavItem { permission?: string; }
+interface NavItemWithPermission {
+    title: string;
+    href: string;
+    icon: any;
+    permission?: string;
+}
+
 interface NavGroup {
     title: string; icon: any; items: NavItemWithPermission[];
     routes: string[]; dashboardRoute: string; permission: string;
@@ -72,11 +77,11 @@ const allNavGroups: NavGroup[] = [
         routes: ['/dies', '/dies/preventive', '/dies/corrective', '/dies/sparepart', '/dies/dashboard'],
         dashboardRoute: '/dies/dashboard',
         items: [
-            { title: 'Dashboard Dies',       href: '/dies/dashboard',    icon: BarChart3, permission: 'dies.view'   },
-            { title: 'Master Dies',          href: '/dies',              icon: Box,       permission: 'dies.view'   },
-            { title: 'Preventive Maintenance', href: '/dies/preventive', icon: FileText,  permission: 'dies.view'   },
-            { title: 'Corrective Maintenance', href: '/dies/corrective', icon: FileText,  permission: 'dies.view'   },
-            { title: 'Sparepart',            href: '/dies/sparepart',    icon: Package,   permission: 'dies.view'   },
+            { title: 'Dashboard Dies',             href: '/dies/dashboard',    icon: BarChart3, permission: 'dies.view' },
+            { title: 'Master Dies',                href: '/dies',              icon: Box,       permission: 'dies.view' },
+            { title: 'Preventive Maintenance',     href: '/dies/preventive',   icon: FileText,  permission: 'dies.view' },
+            { title: 'Corrective Maintenance',     href: '/dies/corrective',   icon: FileText,  permission: 'dies.view' },
+            { title: 'Sparepart',                  href: '/dies/sparepart',    icon: Package,   permission: 'dies.view' },
         ],
     },
     {
@@ -112,15 +117,6 @@ const allNavGroups: NavGroup[] = [
         gradient: 'from-pink-500 to-fuchsia-500', accent: '#ec4899', accentRgb: '236,72,153',
         routes: ['/oee'], dashboardRoute: '/oee',
         items: [{ title: 'Dashboard', href: '/oee', icon: BarChart3, permission: 'oee.view' }],
-    },
-    {
-        title: 'Kanban', icon: Package, permission: 'stock.view',
-        gradient: 'from-amber-500 to-yellow-500', accent: '#f59e0b', accentRgb: '245,158,11',
-        routes: ['/products', '/kanbans'], dashboardRoute: '/products',
-        items: [
-            { title: 'Products',     href: '/products', icon: Package, permission: 'stock.view' },
-            { title: 'Scan History', href: '/kanbans',  icon: Scan,    permission: 'stock.view' },
-        ],
     },
     {
         title: 'JIG', icon: Wrench, permission: 'jig.view',
@@ -167,7 +163,9 @@ const logoHref = computed(() => currentSystem.value?.dashboardRoute ?? '/welcome
 const activeHref = computed(() => {
     const url = page.url;
     const items = visibleItems.value;
-    const matched = items.filter(i => url === i.href || url.startsWith(i.href + '/') || url.startsWith(i.href + '?'));
+    const matched = items.filter(i =>
+        url === i.href || url.startsWith(i.href + '/') || url.startsWith(i.href + '?')
+    );
     if (!matched.length) return null;
     return matched.reduce((a, b) => a.href.length >= b.href.length ? a : b).href;
 });

@@ -41,8 +41,8 @@ class WelcomeController extends Controller
             'description' => 'Sistem manajemen perbaikan die dan maintenance',
             'icon'        => 'Wrench',
             'color'       => 'green',
-            'route'       => '/die-shop-dashboard',
-            'permission'  => 'die-shop.view',
+            'route'       => '/dies',
+            'permission'  => 'dies.view',
             'features'    => [
                 'Dashboard Die Shop',
                 'Laporan Perbaikan',
