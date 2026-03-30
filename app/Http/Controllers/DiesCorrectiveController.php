@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Dies;
 use App\Models\DiesCorrective;
 use App\Models\DiesHistorySparepart;
+use App\Models\DiesProcess;
 use App\Models\DiesSparepart;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,32 +17,36 @@ class DiesCorrectiveController extends Controller
 {
     public function index(Request $request)
     {
+        $year = $request->year ?? now()->year;
+
         $query = DiesCorrective::with([
             'dies',
+            'process',
             'spareparts.sparepart',
             'createdBy',
             'closedBy',
-        ])->latest('report_date');
-
-        if ($request->filled('search')) {
-            $query->where(function ($q) use ($request) {
-                $q->where('report_no', 'like', '%' . $request->search . '%')
-                  ->orWhere('pic_name', 'like', '%' . $request->search . '%')
-                  ->orWhereHas('dies', fn($d) => $d->where('no_part', 'like', '%' . $request->search . '%'));
-            });
-        }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('dies_id')) {
-            $query->where('dies_id', $request->dies_id);
-        }
+        ])
+        ->when($request->status, fn($q) => $q->where('status', $request->status))
+        ->when($request->dies_id, fn($q) => $q->where('dies_id', $request->dies_id))
+        ->when($request->month, fn($q) => $q->whereRaw("DATE_FORMAT(report_date, '%Y-%m') = ?", [$year . '-' . $request->month]))
+        ->when(!$request->month, fn($q) => $q->whereYear('report_date', $year))
+        ->when($request->search, fn($q) => $q->where(function ($sq) use ($request) {
+            $sq->where('report_no', 'like', '%' . $request->search . '%')
+               ->orWhere('pic_name', 'like', '%' . $request->search . '%')
+               ->orWhereHas('dies', fn($d) => $d->where('no_part', 'like', '%' . $request->search . '%'));
+        }))
+        ->latest('report_date');
 
         $correctives = $query->paginate(20)->withQueryString();
 
-        $diesList = Dies::orderBy('no_part')
+        $summary = [
+            'open'        => DiesCorrective::where('status', 'open')->count(),
+            'in_progress' => DiesCorrective::where('status', 'in_progress')->count(),
+            'closed'      => DiesCorrective::where('status', 'closed')->count(),
+        ];
+
+        $diesList = Dies::with('processes')
+            ->orderBy('no_part')
             ->get(['id_sap', 'no_part', 'nama_dies', 'line', 'current_stroke']);
 
         $spareparts = DiesSparepart::orderBy('sparepart_name')
@@ -51,33 +56,48 @@ class DiesCorrectiveController extends Controller
             'correctives' => $correctives,
             'diesList'    => $diesList,
             'spareparts'  => $spareparts,
-            'filters'     => $request->only('search', 'status', 'dies_id'),
+            'summary'     => $summary,
+            'filters'     => $request->only('search', 'status', 'dies_id', 'month', 'year') + ['year' => (string) $year],
         ]);
     }
 
     public function store(Request $request)
     {
         $request->validate([
-            'dies_id'               => 'required|exists:dies,id_sap',
-            'report_date'           => 'required|date',
-            'stroke_at_maintenance' => 'required|integer|min:0',
-            'problem_description'   => 'required|string',
-            'cause'                 => 'nullable|string',
-            'repair_action'         => 'required|string',
-            'photos'                => 'nullable|array',
-            'photos.*'              => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'status'                => 'required|in:open,in_progress,closed',
-            'spareparts'                => 'nullable|array',
-            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'     => 'nullable|integer|min:1',
-            'spareparts.*.notes'        => 'nullable|string',
+            'dies_id'                  => 'required|exists:dies,id_sap',
+            'process_id'               => 'required|exists:dies_processes,id',
+            'stroke_at_maintenance'    => 'nullable|integer|min:0',
+            'problem_description'      => 'nullable|string',
+            'cause'                    => 'nullable|string',
+            'repair_action'            => 'nullable|string',
+            'photos_before'            => 'nullable|array',
+            'photos_before.*'          => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'photos_after'             => 'nullable|array',
+            'photos_after.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'spareparts'               => 'nullable|array',
+            'spareparts.*.sparepart_id'=> 'nullable|exists:dies_spareparts,id',
+            'spareparts.*.quantity'    => 'nullable|integer|min:1',
+            'spareparts.*.notes'       => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request) {
             $photos = [];
-            if ($request->hasFile('photos')) {
-                foreach ($request->file('photos') as $photo) {
-                    $photos[] = $photo->store('dies/corrective', 'public');
+
+            if ($request->hasFile('photos_before')) {
+                foreach ($request->file('photos_before') as $photo) {
+                    $photos[] = [
+                        'path' => $photo->store('dies/corrective', 'public'),
+                        'type' => 'before',
+                    ];
+                }
+            }
+
+            if ($request->hasFile('photos_after')) {
+                foreach ($request->file('photos_after') as $photo) {
+                    $photos[] = [
+                        'path' => $photo->store('dies/corrective', 'public'),
+                        'type' => 'after',
+                    ];
                 }
             }
 
@@ -86,20 +106,22 @@ class DiesCorrectiveController extends Controller
             $dd  = now()->format('d');
             $rnd = str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
 
+            $dies = Dies::find($request->dies_id);
+
             $corrective = DiesCorrective::create([
-                'report_no'             => "CM-DIES-{$yy}{$mm}{$dd}-{$rnd}",
-                'dies_id'               => $request->dies_id,
-                'pic_name'              => Auth::user()->name,
-                'report_date'           => $request->report_date,
-                'stroke_at_maintenance' => $request->stroke_at_maintenance,
-                'problem_description'   => $request->problem_description,
-                'cause'                 => $request->cause,
-                'repair_action'         => $request->repair_action,
-                'photos'                => $photos ?: null,
-                'status'                => $request->status,
-                'created_by'            => Auth::id(),
-                'closed_by'             => $request->status === 'closed' ? Auth::id() : null,
-                'closed_at'             => $request->status === 'closed' ? now() : null,
+                'report_no'               => "CM-DIES-{$yy}{$mm}{$dd}-{$rnd}",
+                'dies_id'                 => $request->dies_id,
+                'process_id'              => $request->process_id,
+                'pic_name'                => Auth::user()->name,
+                'report_date'             => now(),
+                'stroke_at_maintenance'   => $request->stroke_at_maintenance ?? $dies?->current_stroke ?? 0,
+                'repair_duration_minutes' => null,
+                'problem_description'     => $request->problem_description,
+                'cause'                   => $request->cause,
+                'repair_action'           => $request->repair_action,
+                'photos'                  => $photos ?: null,
+                'status'                  => 'open',
+                'created_by'              => Auth::id(),
             ]);
 
             if ($request->has('spareparts') && is_array($request->spareparts)) {
@@ -129,41 +151,49 @@ class DiesCorrectiveController extends Controller
     public function update(Request $request, DiesCorrective $diesCorrective)
     {
         $request->validate([
-            'dies_id'               => 'required|exists:dies,id_sap',
-            'report_date'           => 'required|date',
-            'stroke_at_maintenance' => 'required|integer|min:0',
-            'problem_description'   => 'required|string',
-            'cause'                 => 'nullable|string',
-            'repair_action'         => 'required|string',
-            'photos'                => 'nullable|array',
-            'photos.*'              => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'status'                => 'required|in:open,in_progress,closed',
-            'spareparts'                => 'nullable|array',
-            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'     => 'nullable|integer|min:1',
-            'spareparts.*.notes'        => 'nullable|string',
+            'problem_description'      => 'nullable|string',
+            'cause'                    => 'nullable|string',
+            'repair_action'            => 'nullable|string',
+            'photos_before'            => 'nullable|array',
+            'photos_before.*'          => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'photos_after'             => 'nullable|array',
+            'photos_after.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'spareparts'               => 'nullable|array',
+            'spareparts.*.sparepart_id'=> 'nullable|exists:dies_spareparts,id',
+            'spareparts.*.quantity'    => 'nullable|integer|min:1',
+            'spareparts.*.notes'       => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request, $diesCorrective) {
             $photos = $diesCorrective->photos ?? [];
-            if ($request->hasFile('photos')) {
-                foreach ($request->file('photos') as $photo) {
-                    $photos[] = $photo->store('dies/corrective', 'public');
+
+            if ($request->hasFile('photos_before')) {
+                foreach ($request->file('photos_before') as $photo) {
+                    $photos[] = [
+                        'path' => $photo->store('dies/corrective', 'public'),
+                        'type' => 'before',
+                    ];
                 }
             }
 
-            $diesCorrective->update([
-                'dies_id'               => $request->dies_id,
-                'report_date'           => $request->report_date,
-                'stroke_at_maintenance' => $request->stroke_at_maintenance,
-                'problem_description'   => $request->problem_description,
-                'cause'                 => $request->cause,
-                'repair_action'         => $request->repair_action,
-                'photos'                => $photos ?: null,
-                'status'                => $request->status,
-                'closed_by'             => $request->status === 'closed' && !$diesCorrective->closed_by ? Auth::id() : $diesCorrective->closed_by,
-                'closed_at'             => $request->status === 'closed' && !$diesCorrective->closed_at ? now() : $diesCorrective->closed_at,
-            ]);
+            if ($request->hasFile('photos_after')) {
+                foreach ($request->file('photos_after') as $photo) {
+                    $photos[] = [
+                        'path' => $photo->store('dies/corrective', 'public'),
+                        'type' => 'after',
+                    ];
+                }
+            }
+
+            $data = [
+                'status'              => 'in_progress',
+                'problem_description' => $request->problem_description,
+                'cause'               => $request->cause,
+                'repair_action'       => $request->repair_action,
+                'photos'              => $photos ?: null,
+            ];
+
+            $diesCorrective->update($data);
 
             if ($request->has('spareparts') && is_array($request->spareparts)) {
                 foreach ($request->spareparts as $sp) {
@@ -193,11 +223,19 @@ class DiesCorrectiveController extends Controller
     {
         $request->validate(['action' => 'nullable|string']);
 
+        $closedAt = now();
+        $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
+            ? $diesCorrective->report_date
+            : \Carbon\Carbon::parse($diesCorrective->report_date);
+
+        $durationMinutes = (int) $reportDate->diffInMinutes($closedAt);
+
         $diesCorrective->update([
-            'status'    => 'closed',
-            'action'    => $request->action,
-            'closed_by' => Auth::id(),
-            'closed_at' => now(),
+            'status'                  => 'closed',
+            'action'                  => $request->action,
+            'closed_by'               => Auth::id(),
+            'closed_at'               => $closedAt,
+            'repair_duration_minutes' => $durationMinutes,
         ]);
 
         return back()->with('success', 'Laporan corrective berhasil ditutup.');
@@ -212,7 +250,7 @@ class DiesCorrectiveController extends Controller
             }
             if ($diesCorrective->photos) {
                 foreach ($diesCorrective->photos as $photo) {
-                    Storage::disk('public')->delete($photo);
+                    Storage::disk('public')->delete($photo['path']);
                 }
             }
             $diesCorrective->delete();
@@ -226,7 +264,7 @@ class DiesCorrectiveController extends Controller
         $request->validate(['photo' => 'required|string']);
 
         $photos = collect($diesCorrective->photos ?? [])
-            ->reject(fn($p) => $p === $request->photo)
+            ->reject(fn($p) => $p['path'] === $request->photo)
             ->values()->all();
 
         Storage::disk('public')->delete($request->photo);

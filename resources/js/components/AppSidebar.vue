@@ -82,6 +82,7 @@ const allNavGroups: NavGroup[] = [
             { title: 'Preventive Maintenance',     href: '/dies/preventive',   icon: FileText,  permission: 'dies.view' },
             { title: 'Corrective Maintenance',     href: '/dies/corrective',   icon: FileText,  permission: 'dies.view' },
             { title: 'Sparepart',                  href: '/dies/sparepart',    icon: Package,   permission: 'dies.view' },
+            { title: 'History Sparepart', href: '/dies/sparepart/history', icon: History, permission: 'dies.view' },
         ],
     },
     {

@@ -364,7 +364,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('jig.improvement.close');
 
     // ── Dies ──────────────────────────────────────────────────────────────────
-   Route::prefix('dies')->name('dies.')->group(function () {
+    Route::prefix('dies')->name('dies.')->group(function () {
 
     Route::middleware('permission:dies.view')->group(function () {
         Route::get('/', [DiesController::class, 'index'])->name('index');
@@ -392,12 +392,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/import', [DiesController::class, 'import'])->name('import');
         Route::post('/schedule-pm', [DiesDashboardController::class, 'schedulePm'])->name('schedule-pm');
         Route::post('/preventive', [DiesPreventiveController::class, 'store'])->name('preventive.store');
+        Route::post('/preventive/{diesPreventive}/complete', [DiesPreventiveController::class, 'complete'])->name('preventive.complete');
         Route::post('/corrective', [DiesCorrectiveController::class, 'store'])->name('corrective.store');
     });
 
     Route::middleware('permission:dies.edit')->group(function () {
         Route::put('/{idSap}', [DiesController::class, 'update'])->name('update');
         Route::put('/preventive/{diesPreventive}', [DiesPreventiveController::class, 'update'])->name('preventive.update');
+        Route::post('/preventive/{diesPreventive}', [DiesPreventiveController::class, 'update']);
+        Route::post('/preventive/{diesPreventive}/delete-photo', [DiesPreventiveController::class, 'deletePhoto'])->name('preventive.delete-photo-post');
+        Route::post('/preventive/{diesPreventive}/close-nok', [DiesPreventiveController::class, 'closeNok'])->name('preventive.close-nok');
         Route::put('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update'])->name('corrective.update');
         Route::post('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update']);
         Route::post('/corrective/{diesCorrective}/close', [DiesCorrectiveController::class, 'close'])->name('corrective.close');

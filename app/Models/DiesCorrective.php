@@ -1,16 +1,17 @@
 <?php
 namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
-
 class DiesCorrective extends Model
 {
     protected $table = 'dies_corrective';
     protected $fillable = [
         'report_no',
         'dies_id',
+        'process_id',
         'pic_name',
         'report_date',
         'stroke_at_maintenance',
+        'repair_duration_minutes',
         'problem_description',
         'cause',
         'repair_action',
@@ -22,14 +23,29 @@ class DiesCorrective extends Model
         'created_by',
     ];
     protected $casts = [
-        'photos'     => 'array',
-        'report_date'=> 'date',
-        'closed_at'  => 'datetime',
-        'stroke_at_maintenance' => 'integer',
+        'photos'                  => 'array',
+        'report_date'             => 'datetime',
+        'closed_at'               => 'datetime',
+        'stroke_at_maintenance'   => 'integer',
+        'repair_duration_minutes' => 'integer',
     ];
+    public function getRepairDurationAttribute(): string|null
+    {
+        if (!$this->repair_duration_minutes) return null;
+        $h = intdiv($this->repair_duration_minutes, 60);
+        $m = $this->repair_duration_minutes % 60;
+        if ($h > 0 && $m > 0) return "{$h}j {$m}m";
+        if ($h > 0) return "{$h} jam";
+        return "{$m} menit";
+    }
+    protected $appends = ['repair_duration'];
     public function dies()
     {
         return $this->belongsTo(Dies::class, 'dies_id', 'id_sap');
+    }
+    public function process()
+    {
+        return $this->belongsTo(DiesProcess::class, 'process_id');
     }
     public function createdBy()
     {

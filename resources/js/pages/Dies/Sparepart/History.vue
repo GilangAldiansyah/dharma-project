@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
-import { Head, router, usePage } from '@inertiajs/vue3';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
 import {
     History, Search, Filter, Trash2, AlertTriangle, CheckCircle2,
-    Package, Calendar, User, Wrench, ArrowUpCircle, ArrowDownCircle
+    Package, Calendar, User, X, TrendingDown
 } from 'lucide-vue-next';
 
-interface Sparepart { id: number; sparepart_code: string; sparepart_name: string }
+interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; stok: number; unit: string; }
 interface Dies { id_sap: string; no_part: string; nama_dies: string; line: string }
 interface HistoryItem {
     id: number;
@@ -24,7 +24,7 @@ interface HistoryItem {
 }
 
 interface Props {
-    histories: { data: HistoryItem[]; links: any[]; meta: any };
+    histories: { data: HistoryItem[]; links: any[]; meta: any; total?: number; from?: number; to?: number; last_page?: number };
     spareparts: Sparepart[];
     dies: Dies[];
     filters: { tipe?: string; sparepart_id?: string; dies_id?: string };
@@ -34,18 +34,24 @@ const props = defineProps<Props>();
 const page  = usePage();
 const flash = computed(() => (page.props as any).flash);
 
-const filterTipe      = ref(props.filters.tipe        ?? '');
+const filterTipe      = ref(props.filters.tipe         ?? '');
 const filterSparepart = ref(props.filters.sparepart_id ?? '');
-const filterDies      = ref(props.filters.dies_id     ?? '');
+const filterDies      = ref(props.filters.dies_id      ?? '');
 const showFilter      = ref(false);
 const showDelModal    = ref(false);
+const showRegulerModal = ref(false);
 const selectedH       = ref<HistoryItem | null>(null);
 
 const tipeCfg: Record<string, { label: string; badge: string; dot: string }> = {
-    preventive: { label: 'Preventive', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',     dot: 'bg-blue-500' },
-    corrective: { label: 'Corrective', badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',         dot: 'bg-red-500'  },
-    reguler:    { label: 'Reguler',    badge: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',         dot: 'bg-gray-400' },
+    preventive: { label: 'Preventive', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',   dot: 'bg-blue-500' },
+    corrective: { label: 'Corrective', badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',       dot: 'bg-red-500'  },
+    reguler:    { label: 'Reguler',    badge: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',       dot: 'bg-gray-400' },
 };
+
+const totalHistories = computed(() => props.histories.meta?.total ?? props.histories.total ?? 0);
+const fromHistories  = computed(() => props.histories.meta?.from  ?? props.histories.from  ?? 0);
+const toHistories    = computed(() => props.histories.meta?.to    ?? props.histories.to    ?? 0);
+const lastPage       = computed(() => props.histories.meta?.last_page ?? props.histories.last_page ?? 1);
 
 const activeFilterCount = computed(() =>
     [filterTipe.value, filterSparepart.value, filterDies.value].filter(Boolean).length);
@@ -66,6 +72,81 @@ const submitDelete = () => {
         onSuccess: () => { showDelModal.value = false; selectedH.value = null; },
     });
 };
+
+const form = useForm({
+    sparepart_id: '',
+    quantity:     1,
+    notes:        '',
+});
+
+const selectedSp = ref<Sparepart | null>(null);
+const spSearch   = ref('');
+const spOpen     = ref(false);
+
+const filteredSpareparts = computed(() => {
+    const q = spSearch.value.toLowerCase().trim();
+    if (!q) return props.spareparts;
+    return props.spareparts.filter(s =>
+        s.sparepart_name.toLowerCase().includes(q) ||
+        s.sparepart_code.toLowerCase().includes(q)
+    );
+});
+
+const highlightMatch = (text: string, query: string) => {
+    if (!query.trim()) return [{ text, match: false }];
+    const idx = text.toLowerCase().indexOf(query.toLowerCase().trim());
+    if (idx === -1) return [{ text, match: false }];
+    return [
+        { text: text.slice(0, idx),                          match: false },
+        { text: text.slice(idx, idx + query.trim().length),  match: true  },
+        { text: text.slice(idx + query.trim().length),       match: false },
+    ].filter(p => p.text !== '');
+};
+
+const selectSp = (s: Sparepart) => {
+    selectedSp.value  = s;
+    form.sparepart_id = String(s.id);
+    spSearch.value    = s.sparepart_name;
+    spOpen.value      = false;
+};
+const clearSp = () => {
+    selectedSp.value  = null;
+    form.sparepart_id = '';
+    spSearch.value    = '';
+    spOpen.value      = true;
+};
+const closeSpDropdown = () => setTimeout(() => { spOpen.value = false; }, 180);
+
+const openReguler = () => {
+    form.reset();
+    form.quantity    = 1;
+    selectedSp.value = null;
+    spSearch.value   = '';
+    spOpen.value     = false;
+    showRegulerModal.value = true;
+};
+
+const closeReguler = () => {
+    showRegulerModal.value = false;
+    form.reset();
+    form.quantity    = 1;
+    selectedSp.value = null;
+    spSearch.value   = '';
+};
+
+const submitReguler = () => {
+    form.transform(data => ({ ...data, tipe: 'reguler' }))
+        .post('/dies/sparepart/history', {
+            onSuccess: () => closeReguler(),
+        });
+};
+
+const stokSetelah = computed(() => {
+    if (!selectedSp.value) return null;
+    const qty = Number(form.quantity);
+    if (isNaN(qty) || qty < 0) return selectedSp.value.stok;
+    return selectedSp.value.stok - qty;
+});
 </script>
 
 <template>
@@ -77,7 +158,6 @@ const submitDelete = () => {
     ]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
-            <!-- Header -->
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -86,39 +166,46 @@ const submitDelete = () => {
                         </span>
                         History Pemakaian Sparepart
                     </h1>
-                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ histories.meta?.total ?? 0 }} riwayat</p>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ totalHistories }} riwayat</p>
                 </div>
-                <button @click="router.visit('/dies/sparepart')"
-                    class="flex items-center gap-1.5 px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-xl text-xs font-semibold hover:border-orange-400 active:scale-95 transition-all flex-shrink-0">
-                    <Package class="w-3.5 h-3.5" />
-                    <span class="hidden sm:inline">Master Sparepart</span>
-                </button>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <button @click="router.visit('/dies/sparepart')"
+                        class="flex items-center gap-1.5 px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-xl text-xs font-semibold hover:border-orange-400 active:scale-95 transition-all">
+                        <Package class="w-3.5 h-3.5" />
+                        <span class="hidden sm:inline">Master Sparepart</span>
+                    </button>
+                    <button @click="openReguler"
+                        class="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs sm:text-sm font-semibold active:scale-95 transition-all shadow-sm">
+                        <TrendingDown class="w-3.5 h-3.5" />
+                        <span class="hidden sm:inline">Ambil Reguler</span>
+                        <span class="sm:hidden">Ambil</span>
+                    </button>
+                </div>
             </div>
 
-            <!-- Flash -->
             <div v-if="flash?.success"
                 class="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
-            <!-- Summary Chips -->
             <div class="flex gap-2 overflow-x-auto scrollbar-none pb-0.5">
                 <button v-for="[v, c] in Object.entries(tipeCfg)" :key="v"
                     @click="filterTipe = filterTipe === v ? '' : v"
                     :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all flex-shrink-0',
-                        filterTipe === v ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-orange-300']">
+                        filterTipe === v
+                            ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400'
+                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-orange-300']">
                     <span :class="['w-1.5 h-1.5 rounded-full', c.dot]"></span>
                     {{ c.label }}
                     <span class="font-bold">{{ histories.data.filter(x => x.tipe === v).length }}</span>
                 </button>
             </div>
 
-            <!-- Filter -->
             <div class="space-y-2">
                 <div class="flex items-center gap-2">
                     <div class="flex-1 text-sm text-gray-500 dark:text-gray-400">
-                        {{ histories.meta?.total ?? 0 }} riwayat ditemukan
+                        {{ totalHistories }} riwayat ditemukan
                     </div>
                     <button @click="showFilter = !showFilter"
                         :class="['relative flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-sm font-medium transition-colors',
@@ -172,7 +259,6 @@ const submitDelete = () => {
                 </div>
             </div>
 
-            <!-- Desktop Table -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -232,8 +318,8 @@ const submitDelete = () => {
                         </tbody>
                     </table>
                 </div>
-                <div v-if="histories.meta?.last_page > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-                    <p class="text-xs text-gray-500">{{ histories.meta.from }}–{{ histories.meta.to }} dari {{ histories.meta.total }}</p>
+                <div v-if="lastPage > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+                    <p class="text-xs text-gray-500">{{ fromHistories }}–{{ toHistories }} dari {{ totalHistories }}</p>
                     <div class="flex gap-1">
                         <button v-for="link in histories.links" :key="link.label"
                             @click="link.url && router.visit(link.url)"
@@ -246,7 +332,6 @@ const submitDelete = () => {
                 </div>
             </div>
 
-            <!-- Mobile Cards -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="histories.data.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <p class="text-gray-400 text-sm">Tidak ada riwayat pemakaian</p>
@@ -281,7 +366,7 @@ const submitDelete = () => {
                         </div>
                     </div>
                 </div>
-                <div v-if="histories.meta?.last_page > 1" class="flex justify-center gap-1 pt-2">
+                <div v-if="lastPage > 1" class="flex justify-center gap-1 pt-2">
                     <button v-for="link in histories.links" :key="link.label"
                         @click="link.url && router.visit(link.url)"
                         :disabled="!link.url"
@@ -293,7 +378,90 @@ const submitDelete = () => {
             </div>
         </div>
 
-        <!-- Delete Modal -->
+        <div v-if="showRegulerModal"
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
+                <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                    <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <TrendingDown class="w-4 h-4 text-orange-500" /> Ambil Sparepart Reguler
+                    </h2>
+                    <button @click="closeReguler" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        <X class="w-4 h-4" />
+                    </button>
+                </div>
+                <form @submit.prevent="submitReguler" class="p-4 sm:p-5 space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5">Sparepart <span class="text-red-500">*</span></label>
+                        <div class="relative">
+                            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
+                            <input v-model="spSearch" type="text" placeholder="Cari kode atau nama..." autocomplete="off"
+                                @focus="spOpen = true" @blur="closeSpDropdown"
+                                :class="['w-full pl-8 pr-8 py-2.5 border rounded-xl text-sm focus:outline-none transition-colors dark:bg-gray-700',
+                                    selectedSp
+                                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 font-semibold'
+                                        : 'border-gray-200 dark:border-gray-600 focus:border-orange-400']" />
+                            <button v-if="selectedSp" type="button" @click="clearSp"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors">
+                                <X class="w-3.5 h-3.5" />
+                            </button>
+                            <div v-if="spOpen"
+                                class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                <div v-if="filteredSpareparts.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
+                                    Tidak ada hasil untuk "{{ spSearch }}"
+                                </div>
+                                <button v-for="s in filteredSpareparts" :key="s.id" type="button"
+                                    @mousedown.prevent="selectSp(s)"
+                                    :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center justify-between gap-2',
+                                        selectedSp?.id === s.id ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 font-semibold' : 'text-gray-700 dark:text-gray-300']">
+                                    <span>
+                                        <template v-for="(part, pi) in highlightMatch(s.sparepart_name, spSearch)" :key="pi">
+                                            <mark v-if="part.match" class="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-white rounded px-0.5 not-italic">{{ part.text }}</mark>
+                                            <span v-else>{{ part.text }}</span>
+                                        </template>
+                                    </span>
+                                    <span class="text-gray-400 whitespace-nowrap shrink-0">{{ s.stok }} {{ s.unit }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div v-if="selectedSp" class="mt-1.5 flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-xl px-3 py-2">
+                            <p class="text-xs font-bold text-gray-900 dark:text-white truncate mr-2">{{ selectedSp.sparepart_name }}</p>
+                            <p class="text-xs text-gray-500 whitespace-nowrap">Stok: <span class="font-bold text-orange-500">{{ selectedSp.stok }} {{ selectedSp.unit }}</span></p>
+                        </div>
+                        <p v-if="form.errors.sparepart_id" class="text-xs text-red-500 mt-1">{{ form.errors.sparepart_id }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5">Jumlah <span class="text-red-500">*</span></label>
+                        <input v-model.number="form.quantity" type="number" min="1" :max="selectedSp?.stok" required
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400 text-center text-lg font-bold transition-colors" />
+                        <div v-if="selectedSp && stokSetelah !== null" class="flex items-center justify-between mt-2 p-2.5 bg-orange-50 dark:bg-orange-900/20 rounded-xl">
+                            <span class="text-xs text-gray-500">Stok setelah:</span>
+                            <span class="text-sm font-black text-orange-600">{{ stokSetelah }} {{ selectedSp.unit }}</span>
+                        </div>
+                        <p v-if="form.errors.quantity" class="text-xs text-red-500 mt-1">{{ form.errors.quantity }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5">Catatan (opsional)</label>
+                        <input v-model="form.notes" type="text" placeholder="Keterangan..."
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400 transition-colors" />
+                    </div>
+
+                    <div class="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+                        <button type="button" @click="closeReguler"
+                            class="px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">
+                            Batal
+                        </button>
+                        <button type="submit" :disabled="form.processing || !selectedSp"
+                            class="flex-1 py-3 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-xl font-bold text-sm active:scale-95 transition-all">
+                            {{ form.processing ? 'Menyimpan...' : 'Simpan' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div v-if="showDelModal && selectedH" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -317,6 +485,5 @@ const submitDelete = () => {
                 </div>
             </div>
         </div>
-
     </AppLayout>
 </template>

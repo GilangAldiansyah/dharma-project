@@ -122,7 +122,7 @@ class DiesSparepartController extends Controller
         }
 
         $histories  = $query->paginate(20)->withQueryString();
-        $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_name', 'sparepart_code']);
+        $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_name', 'sparepart_code', 'stok', 'unit']);
         $dies       = Dies::orderBy('no_part')->get(['id_sap', 'no_part', 'nama_dies', 'line']);
 
         return Inertia::render('Dies/Sparepart/History', [
@@ -139,7 +139,7 @@ class DiesSparepartController extends Controller
             'tipe'           => 'required|in:preventive,corrective,reguler',
             'maintenance_id' => 'nullable|required_unless:tipe,reguler|integer',
             'sparepart_id'   => 'required|exists:dies_spareparts,id',
-            'dies_id'        => 'nullable|required_if:tipe,reguler|exists:dies,id_sap',
+            'dies_id'        => 'nullable|exists:dies,id_sap',
             'quantity'       => 'required|integer|min:1',
             'notes'          => 'nullable|string',
         ]);
@@ -155,7 +155,7 @@ class DiesSparepartController extends Controller
                 'tipe'           => $request->tipe,
                 'maintenance_id' => $request->tipe !== 'reguler' ? $request->maintenance_id : null,
                 'sparepart_id'   => $request->sparepart_id,
-                'dies_id'        => $request->tipe === 'reguler' ? $request->dies_id : null,
+                'dies_id'        => $request->dies_id ?? null, // ← pakai null kalau tidak dikirim
                 'quantity'       => $request->quantity,
                 'notes'          => $request->notes,
                 'created_by'     => Auth::id(),

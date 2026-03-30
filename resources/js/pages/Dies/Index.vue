@@ -28,7 +28,7 @@ interface Dies {
 }
 
 interface Props {
-    dies: { data: Dies[]; links: any[]; meta: any };
+    dies: { data: Dies[]; links: any[]; meta: any; total?: number; from?: number; to?: number; last_page?: number };
     lines: string[];
     filters: { search?: string; status?: string; line?: string };
 }
@@ -36,6 +36,11 @@ interface Props {
 const props  = defineProps<Props>();
 const page   = usePage();
 const flash  = computed(() => (page.props as any).flash);
+
+const totalDies = computed(() => props.dies.meta?.total    ?? props.dies.total    ?? 0);
+const fromDies  = computed(() => props.dies.meta?.from     ?? props.dies.from     ?? 0);
+const toDies    = computed(() => props.dies.meta?.to       ?? props.dies.to       ?? 0);
+const lastPage  = computed(() => props.dies.meta?.last_page ?? props.dies.last_page ?? 1);
 
 const search       = ref(props.filters.search ?? '');
 const filterStatus = ref(props.filters.status ?? '');
@@ -66,7 +71,6 @@ watch(bstbTotal, (val) => {
         selectedUpdates.value = bstbPreview.value.map((p: any) => p.id_sap);
     }
 }, { immediate: true });
-
 
 const handleBstbFile = (e: Event) => {
     bstbFile.value = (e.target as HTMLInputElement).files?.[0] ?? null;
@@ -280,6 +284,7 @@ const exportExcel = () => {
     XLSX.writeFile(wb, 'Master_Dies.xlsx');
 };
 </script>
+
 <template>
     <Head title="Master Dies" />
     <AppLayout :breadcrumbs="[{ title: 'Dies', href: '/dies' }, { title: 'Master Dies', href: '/dies' }]">
@@ -293,7 +298,7 @@ const exportExcel = () => {
                         </span>
                         Master Dies
                     </h1>
-                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ dies.meta?.total ?? 0 }} dies terdaftar</p>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ totalDies }} dies terdaftar</p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                     <button @click="exportExcel"
@@ -463,8 +468,8 @@ const exportExcel = () => {
                         </tbody>
                     </table>
                 </div>
-                <div v-if="dies.meta?.last_page > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-                    <p class="text-xs text-gray-500">{{ dies.meta.from }}–{{ dies.meta.to }} dari {{ dies.meta.total }} dies</p>
+                <div v-if="lastPage > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+                    <p class="text-xs text-gray-500">{{ fromDies }}–{{ toDies }} dari {{ totalDies }} dies</p>
                     <div class="flex gap-1">
                         <button v-for="link in dies.links" :key="link.label"
                             @click="link.url && router.visit(link.url)"
@@ -541,7 +546,7 @@ const exportExcel = () => {
                         </div>
                     </div>
                 </div>
-                <div v-if="dies.meta?.last_page > 1" class="flex justify-center gap-1 pt-2">
+                <div v-if="lastPage > 1" class="flex justify-center gap-1 pt-2">
                     <button v-for="link in dies.links" :key="link.label"
                         @click="link.url && router.visit(link.url)"
                         :disabled="!link.url" v-html="link.label"
@@ -552,7 +557,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Modal Add -->
         <div v-if="showAddModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -656,7 +660,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Modal Edit -->
         <div v-if="showEditModal && selectedDies" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -757,7 +760,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Modal Import Excel -->
         <div v-if="showImportModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -794,7 +796,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Modal BSTB -->
         <div v-if="showBstbModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-3xl max-h-[92vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -826,8 +827,6 @@ const exportExcel = () => {
                 </div>
 
                 <div class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 space-y-4">
-
-                    <!-- Step 1 -->
                     <div v-if="bstbStep === 'upload'" class="space-y-4">
                         <div class="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4 border border-indigo-100 dark:border-indigo-800 text-xs text-indigo-800 dark:text-indigo-200 space-y-1.5">
                             <p class="font-bold text-sm">Format CSV BSTB yang didukung:</p>
@@ -857,7 +856,6 @@ const exportExcel = () => {
                         </div>
                     </div>
 
-                    <!-- Step 2 -->
                     <div v-if="bstbStep === 'preview'" class="space-y-4">
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <div class="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-100 dark:border-blue-800 text-center">
@@ -980,7 +978,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Modal Delete -->
         <div v-if="showDeleteModal && selectedDies" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>

@@ -3,8 +3,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, usePage } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
 import {
-    Package, Search, Filter, Plus, Eye, Pencil, Trash2,
-    AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle, History
+    Package, Search, Filter, Plus, Pencil, Trash2,
+    AlertTriangle, CheckCircle2, ArrowUpCircle, History, X
 } from 'lucide-vue-next';
 
 interface Sparepart {
@@ -34,15 +34,21 @@ const showAddModal  = ref(false);
 const showEditModal = ref(false);
 const showAdjModal  = ref(false);
 const showDelModal  = ref(false);
-const adjType       = ref<'tambah' | 'kurangi'>('tambah');
 const selectedSp    = ref<Sparepart | null>(null);
 
 const form = ref({ sparepart_code: '', sparepart_name: '', unit: 'pcs', stok: 0, stok_minimum: 0 });
-const adjQty   = ref(1);
+const adjQty   = ref<number>(1);
 const adjNotes = ref('');
 
 const activeFilterCount = computed(() => [filterStok.value].filter(Boolean).length);
 const isLow = (sp: Sparepart) => sp.stok <= sp.stok_minimum;
+
+const totalLabel = computed(() => {
+    const total = props.spareparts.meta?.total ?? 0;
+    const count = props.spareparts.data.length;
+    if (filterStok.value && count > 0) return `${count} item`;
+    return `${total} item`;
+});
 
 let debounce: ReturnType<typeof setTimeout>;
 watch(search, () => {
@@ -54,6 +60,12 @@ watch(filterStok, () => navigate());
 const navigate = () => router.get('/dies/sparepart',
     { search: search.value, filter: filterStok.value },
     { preserveState: true, preserveScroll: true, replace: true });
+
+const clearFilters = () => {
+    filterStok.value = '';
+    search.value = '';
+    showFilter.value = false;
+};
 
 const openAdd = () => {
     form.value = { sparepart_code: '', sparepart_name: '', unit: 'pcs', stok: 0, stok_minimum: 0 };
@@ -72,11 +84,10 @@ const openEdit = (sp: Sparepart) => {
     showEditModal.value = true;
 };
 
-const openAdj = (sp: Sparepart, type: 'tambah' | 'kurangi') => {
+const openAdj = (sp: Sparepart) => {
     selectedSp.value = sp;
-    adjType.value    = type;
-    adjQty.value     = 1;
-    adjNotes.value   = '';
+    adjQty.value   = 1;
+    adjNotes.value = '';
     showAdjModal.value = true;
 };
 
@@ -95,10 +106,14 @@ const submitEdit = () => {
 
 const submitAdj = () => {
     if (!selectedSp.value) return;
+    const qty = Number(adjQty.value);
+    if (!qty || qty < 1) return;
     router.post(`/dies/sparepart/${selectedSp.value.id}/adjust-stok`,
-        { qty: adjQty.value, type: adjType.value, notes: adjNotes.value },
+        { qty, type: 'tambah', notes: adjNotes.value },
         { onSuccess: () => { showAdjModal.value = false; selectedSp.value = null; } });
 };
+
+const clampQty = () => { if (!adjQty.value || adjQty.value < 1) adjQty.value = 1; };
 
 const submitDelete = () => {
     if (!selectedSp.value) return;
@@ -116,7 +131,6 @@ const submitDelete = () => {
     ]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
-            <!-- Header -->
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -125,7 +139,7 @@ const submitDelete = () => {
                         </span>
                         Sparepart Dies
                     </h1>
-                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ spareparts.meta?.total ?? 0 }} item</p>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ totalLabel }}</p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
                     <button @click="router.visit('/dies/sparepart/history')"
@@ -141,7 +155,6 @@ const submitDelete = () => {
                 </div>
             </div>
 
-            <!-- Flash -->
             <div v-if="flash?.success"
                 class="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -153,17 +166,15 @@ const submitDelete = () => {
                 <p class="text-red-800 dark:text-red-200 font-medium text-xs sm:text-sm">{{ flash.error }}</p>
             </div>
 
-            <!-- Low stok alert -->
-            <div v-if="lowStokCount > 0"
+            <div v-if="lowStokCount > 0 && filterStok !== 'low'"
                 class="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
                 <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
                 <p class="text-amber-800 dark:text-amber-200 font-medium text-xs sm:text-sm">
                     {{ lowStokCount }} sparepart memiliki stok di bawah minimum.
                 </p>
-                <button @click="filterStok = 'low'" class="ml-auto text-xs font-bold text-amber-600 hover:underline">Lihat</button>
+                <button @click="filterStok = 'low'" class="ml-auto text-xs font-bold text-amber-600 hover:underline whitespace-nowrap">Lihat</button>
             </div>
 
-            <!-- Search + Filter -->
             <div class="space-y-2">
                 <div class="flex items-center gap-2">
                     <div class="relative flex-1">
@@ -183,8 +194,15 @@ const submitDelete = () => {
                         </span>
                     </button>
                 </div>
+
                 <div v-if="showFilter" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 shadow-sm">
-                    <label class="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Stok</label>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase">Stok</label>
+                        <button v-if="activeFilterCount > 0" @click="clearFilters"
+                            class="flex items-center gap-1 text-xs text-red-500 font-semibold hover:underline">
+                            <X class="w-3 h-3" /> Reset
+                        </button>
+                    </div>
                     <div class="flex flex-wrap gap-2">
                         <button v-for="f in [{ v: '', l: 'Semua' }, { v: 'low', l: 'Stok Menipis' }]" :key="f.v"
                             @click="filterStok = f.v"
@@ -194,9 +212,16 @@ const submitDelete = () => {
                         </button>
                     </div>
                 </div>
+
+                <div v-if="filterStok === 'low'" class="flex items-center gap-2 px-1">
+                    <span class="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-semibold">
+                        <AlertTriangle class="w-3.5 h-3.5" />
+                        Menampilkan sparepart stok menipis
+                    </span>
+                    <button @click="filterStok = ''" class="ml-auto text-xs text-gray-400 hover:text-gray-600 underline">Hapus filter</button>
+                </div>
             </div>
 
-            <!-- Desktop Table -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -214,7 +239,11 @@ const submitDelete = () => {
                             <tr v-if="spareparts.data.length === 0">
                                 <td colspan="6" class="py-16 text-center text-gray-400 text-sm">
                                     <Package class="w-10 h-10 mx-auto mb-2 text-gray-300" />
-                                    Tidak ada data sparepart
+                                    <p>Tidak ada data sparepart</p>
+                                    <button v-if="filterStok || search" @click="clearFilters"
+                                        class="mt-2 text-xs text-orange-500 hover:underline font-semibold">
+                                        Hapus filter
+                                    </button>
                                 </td>
                             </tr>
                             <tr v-for="sp in spareparts.data" :key="sp.id"
@@ -230,27 +259,26 @@ const submitDelete = () => {
                                 </td>
                                 <td class="px-4 py-3 text-center text-xs text-gray-500">{{ sp.unit }}</td>
                                 <td class="px-4 py-3 text-center">
-                                    <span :class="['text-sm font-bold', isLow(sp) ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">
+                                    <span :class="['inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-lg text-sm font-bold',
+                                        isLow(sp)
+                                            ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                                            : 'text-gray-900 dark:text-white']">
                                         {{ sp.stok }}
                                     </span>
                                 </td>
                                 <td class="px-4 py-3 text-center text-xs text-gray-500">{{ sp.stok_minimum }}</td>
                                 <td class="px-4 py-3">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        <button @click="openAdj(sp, 'tambah')"
+                                        <button @click="openAdj(sp)"
                                             class="p-1.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-200 transition-colors" title="Tambah stok">
                                             <ArrowUpCircle class="w-3.5 h-3.5" />
                                         </button>
-                                        <button @click="openAdj(sp, 'kurangi')"
-                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors" title="Kurangi stok">
-                                            <ArrowDownCircle class="w-3.5 h-3.5" />
-                                        </button>
                                         <button @click="openEdit(sp)"
-                                            class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors">
+                                            class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors" title="Edit">
                                             <Pencil class="w-3.5 h-3.5" />
                                         </button>
                                         <button @click="openDelete(sp)"
-                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors">
+                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors" title="Hapus">
                                             <Trash2 class="w-3.5 h-3.5" />
                                         </button>
                                     </div>
@@ -259,8 +287,15 @@ const submitDelete = () => {
                         </tbody>
                     </table>
                 </div>
-                <div v-if="spareparts.meta?.last_page > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-                    <p class="text-xs text-gray-500">{{ spareparts.meta.from }}–{{ spareparts.meta.to }} dari {{ spareparts.meta.total }}</p>
+                <div v-if="spareparts.links && spareparts.links.length > 3" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+                    <p class="text-xs text-gray-500">
+                        <template v-if="spareparts.meta?.from">
+                            {{ spareparts.meta.from }}–{{ spareparts.meta.to }} dari {{ spareparts.meta.total }}
+                        </template>
+                        <template v-else>
+                            {{ spareparts.data.length }} item
+                        </template>
+                    </p>
                     <div class="flex gap-1">
                         <button v-for="link in spareparts.links" :key="link.label"
                             @click="link.url && router.visit(link.url)"
@@ -273,10 +308,14 @@ const submitDelete = () => {
                 </div>
             </div>
 
-            <!-- Mobile Cards -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="spareparts.data.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
+                    <Package class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                     <p class="text-gray-400 text-sm">Tidak ada data sparepart</p>
+                    <button v-if="filterStok || search" @click="clearFilters"
+                        class="mt-2 text-xs text-orange-500 hover:underline font-semibold">
+                        Hapus filter
+                    </button>
                 </div>
                 <div v-for="sp in spareparts.data" :key="sp.id"
                     :class="['bg-white dark:bg-gray-800 rounded-2xl border shadow-sm overflow-hidden',
@@ -285,48 +324,47 @@ const submitDelete = () => {
                         <div class="flex items-start justify-between gap-2 mb-2.5">
                             <div class="min-w-0">
                                 <p class="text-xs font-mono font-bold text-orange-600 dark:text-orange-400">{{ sp.sparepart_code }}</p>
-                                <p class="text-sm font-bold text-gray-900 dark:text-white mt-0.5">{{ sp.sparepart_name }}</p>
+                                <p class="text-sm font-bold text-gray-900 dark:text-white mt-0.5 truncate">{{ sp.sparepart_name }}</p>
                             </div>
                             <span v-if="isLow(sp)"
                                 class="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-full text-xs font-bold flex-shrink-0">
                                 <AlertTriangle class="w-3 h-3" /> Menipis
                             </span>
                         </div>
-                        <div class="flex items-center gap-4 mb-3">
+                        <div class="flex items-center gap-5 mb-3">
                             <div class="text-center">
-                                <p :class="['text-lg font-black', isLow(sp) ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">{{ sp.stok }}</p>
-                                <p class="text-xs text-gray-400">Stok</p>
+                                <p :class="['text-2xl font-black tabular-nums', isLow(sp) ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">{{ sp.stok }}</p>
+                                <p class="text-xs text-gray-400 mt-0.5">Stok</p>
                             </div>
+                            <div class="w-px h-8 bg-gray-100 dark:bg-gray-700"></div>
                             <div class="text-center">
-                                <p class="text-lg font-black text-gray-400">{{ sp.stok_minimum }}</p>
-                                <p class="text-xs text-gray-400">Min.</p>
+                                <p class="text-2xl font-black tabular-nums text-gray-300 dark:text-gray-600">{{ sp.stok_minimum }}</p>
+                                <p class="text-xs text-gray-400 mt-0.5">Min.</p>
                             </div>
+                            <div class="w-px h-8 bg-gray-100 dark:bg-gray-700"></div>
                             <div class="text-center">
                                 <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">{{ sp.unit }}</p>
-                                <p class="text-xs text-gray-400">Satuan</p>
+                                <p class="text-xs text-gray-400 mt-0.5">Satuan</p>
                             </div>
                         </div>
                         <div class="flex gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
-                            <button @click="openAdj(sp, 'tambah')"
+                            <button @click="openAdj(sp)"
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-xl text-xs font-bold hover:bg-emerald-200 active:scale-95 transition-all">
-                                <ArrowUpCircle class="w-3.5 h-3.5" /> Tambah
-                            </button>
-                            <button @click="openAdj(sp, 'kurangi')"
-                                class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold hover:bg-red-200 active:scale-95 transition-all">
-                                <ArrowDownCircle class="w-3.5 h-3.5" /> Kurangi
+                                <ArrowUpCircle class="w-3.5 h-3.5" /> Tambah Stok
                             </button>
                             <button @click="openEdit(sp)"
-                                class="flex items-center justify-center py-2 px-3 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-xl text-xs font-bold hover:bg-amber-200 active:scale-95 transition-all">
+                                class="flex items-center justify-center py-2 px-3.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-xl hover:bg-amber-200 active:scale-95 transition-all">
                                 <Pencil class="w-3.5 h-3.5" />
                             </button>
                             <button @click="openDelete(sp)"
-                                class="flex items-center justify-center py-2 px-3 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold hover:bg-red-200 active:scale-95 transition-all">
+                                class="flex items-center justify-center py-2 px-3.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-200 active:scale-95 transition-all">
                                 <Trash2 class="w-3.5 h-3.5" />
                             </button>
                         </div>
                     </div>
                 </div>
-                <div v-if="spareparts.meta?.last_page > 1" class="flex justify-center gap-1 pt-2">
+
+                <div v-if="spareparts.links && spareparts.links.length > 3" class="flex justify-center gap-1 pt-2">
                     <button v-for="link in spareparts.links" :key="link.label"
                         @click="link.url && router.visit(link.url)"
                         :disabled="!link.url"
@@ -338,7 +376,6 @@ const submitDelete = () => {
             </div>
         </div>
 
-        <!-- Add Modal -->
         <div v-if="showAddModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -387,7 +424,6 @@ const submitDelete = () => {
             </div>
         </div>
 
-        <!-- Edit Modal -->
         <div v-if="showEditModal && selectedSp" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -431,33 +467,42 @@ const submitDelete = () => {
             </div>
         </div>
 
-        <!-- Adjust Stok Modal -->
         <div v-if="showAdjModal && selectedSp" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-4">
-                        <div :class="['w-9 h-9 rounded-xl flex items-center justify-center',
-                            adjType === 'tambah' ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40']">
-                            <ArrowUpCircle v-if="adjType === 'tambah'" class="w-5 h-5 text-emerald-600" />
-                            <ArrowDownCircle v-else class="w-5 h-5 text-red-600" />
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-100 dark:bg-emerald-900/40">
+                            <ArrowUpCircle class="w-5 h-5 text-emerald-600" />
                         </div>
                         <div>
-                            <h3 class="text-base font-bold text-gray-900 dark:text-white">
-                                {{ adjType === 'tambah' ? 'Tambah Stok' : 'Kurangi Stok' }}
-                            </h3>
-                            <p class="text-xs text-gray-400">{{ selectedSp.sparepart_name }} · Stok: {{ selectedSp.stok }} {{ selectedSp.unit }}</p>
+                            <h3 class="text-base font-bold text-gray-900 dark:text-white">Tambah Stok</h3>
+                            <p class="text-xs text-gray-400">{{ selectedSp.sparepart_name }} · Stok saat ini: <span class="font-bold text-gray-600 dark:text-gray-300">{{ selectedSp.stok }} {{ selectedSp.unit }}</span></p>
                         </div>
                     </div>
                     <div class="space-y-3">
                         <div>
-                            <label class="block text-xs font-semibold text-gray-500 mb-1">Jumlah</label>
-                            <input v-model.number="adjQty" type="number" min="1" :max="adjType === 'kurangi' ? selectedSp.stok : undefined"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400" />
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Jumlah Tambah</label>
+                            <div class="flex items-center gap-2">
+                                <button @click="adjQty = Math.max(1, (adjQty || 1) - 1)"
+                                    class="w-10 h-10 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-xl font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200 active:scale-95 transition-all text-lg flex-shrink-0">
+                                    −
+                                </button>
+                                <input v-model.number="adjQty" type="number" min="1"
+                                    @blur="clampQty"
+                                    class="flex-1 text-center px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm font-bold focus:outline-none focus:border-orange-400" />
+                                <button @click="adjQty = (adjQty || 0) + 1"
+                                    class="w-10 h-10 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-xl font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200 active:scale-95 transition-all text-lg flex-shrink-0">
+                                    +
+                                </button>
+                            </div>
+                            <p v-if="adjQty >= 1" class="text-xs text-gray-400 mt-1.5 text-center">
+                                Stok akan menjadi <span class="font-bold text-gray-700 dark:text-gray-200">{{ selectedSp.stok + (adjQty || 0) }} {{ selectedSp.unit }}</span>
+                            </p>
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1">Catatan (opsional)</label>
-                            <input v-model="adjNotes" type="text" placeholder="Keterangan..."
+                            <input v-model="adjNotes" type="text" placeholder="Keterangan pengadaan..."
                                 class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400" />
                         </div>
                     </div>
@@ -466,17 +511,16 @@ const submitDelete = () => {
                             class="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">
                             Batal
                         </button>
-                        <button @click="submitAdj"
+                        <button @click="submitAdj" :disabled="!adjQty || adjQty < 1"
                             :class="['flex-1 py-3 text-white rounded-xl font-bold text-sm active:scale-95 transition-all',
-                                adjType === 'tambah' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700']">
-                            {{ adjType === 'tambah' ? 'Tambah' : 'Kurangi' }}
+                                !adjQty || adjQty < 1 ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700']">
+                            Tambah
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Delete Modal -->
         <div v-if="showDelModal && selectedSp" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -485,7 +529,7 @@ const submitDelete = () => {
                         <AlertTriangle class="w-6 h-6 text-red-600" />
                     </div>
                     <h3 class="text-base font-bold text-gray-900 dark:text-white mb-1">Hapus Sparepart?</h3>
-                    <p class="text-sm text-gray-500 mb-0.5">{{ selectedSp.sparepart_name }}</p>
+                    <p class="text-sm text-gray-700 dark:text-gray-300 font-semibold mb-0.5">{{ selectedSp.sparepart_name }}</p>
                     <p class="text-xs text-gray-400 mb-5">Sparepart tidak dapat dihapus jika sudah memiliki riwayat pemakaian.</p>
                     <div class="flex gap-3">
                         <button @click="showDelModal = false"
