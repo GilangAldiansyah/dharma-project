@@ -42,6 +42,7 @@ class DiesCorrectiveController extends Controller
         $summary = [
             'open'        => DiesCorrective::where('status', 'open')->count(),
             'in_progress' => DiesCorrective::where('status', 'in_progress')->count(),
+            'on_repair'   => DiesCorrective::where('status', 'on_repair')->count(),
             'closed'      => DiesCorrective::where('status', 'closed')->count(),
         ];
 
@@ -64,20 +65,20 @@ class DiesCorrectiveController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'dies_id'                  => 'required|exists:dies,id_sap',
-            'process_id'               => 'required|exists:dies_processes,id',
-            'stroke_at_maintenance'    => 'nullable|integer|min:0',
-            'problem_description'      => 'nullable|string',
-            'cause'                    => 'nullable|string',
-            'repair_action'            => 'nullable|string',
-            'photos_before'            => 'nullable|array',
-            'photos_before.*'          => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'photos_after'             => 'nullable|array',
-            'photos_after.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'spareparts'               => 'nullable|array',
-            'spareparts.*.sparepart_id'=> 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'    => 'nullable|integer|min:1',
-            'spareparts.*.notes'       => 'nullable|string',
+            'dies_id'                   => 'required|exists:dies,id_sap',
+            'process_id'                => 'required|exists:dies_processes,id',
+            'stroke_at_maintenance'     => 'nullable|integer|min:0',
+            'problem_description'       => 'nullable|string',
+            'cause'                     => 'nullable|string',
+            'repair_action'             => 'nullable|string',
+            'photos_before'             => 'nullable|array',
+            'photos_before.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'photos_after'              => 'nullable|array',
+            'photos_after.*'            => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'spareparts'                => 'nullable|array',
+            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
+            'spareparts.*.quantity'     => 'nullable|integer|min:1',
+            'spareparts.*.notes'        => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request) {
@@ -85,19 +86,12 @@ class DiesCorrectiveController extends Controller
 
             if ($request->hasFile('photos_before')) {
                 foreach ($request->file('photos_before') as $photo) {
-                    $photos[] = [
-                        'path' => $photo->store('dies/corrective', 'public'),
-                        'type' => 'before',
-                    ];
+                    $photos[] = ['path' => $photo->store('dies/corrective', 'public'), 'type' => 'before'];
                 }
             }
-
             if ($request->hasFile('photos_after')) {
                 foreach ($request->file('photos_after') as $photo) {
-                    $photos[] = [
-                        'path' => $photo->store('dies/corrective', 'public'),
-                        'type' => 'after',
-                    ];
+                    $photos[] = ['path' => $photo->store('dies/corrective', 'public'), 'type' => 'after'];
                 }
             }
 
@@ -105,7 +99,6 @@ class DiesCorrectiveController extends Controller
             $mm  = now()->format('m');
             $dd  = now()->format('d');
             $rnd = str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
-
             $dies = Dies::find($request->dies_id);
 
             $corrective = DiesCorrective::create([
@@ -116,11 +109,12 @@ class DiesCorrectiveController extends Controller
                 'report_date'             => now(),
                 'stroke_at_maintenance'   => $request->stroke_at_maintenance ?? $dies?->current_stroke ?? 0,
                 'repair_duration_minutes' => null,
+                'machine_duration_minutes'=> null,
                 'problem_description'     => $request->problem_description,
                 'cause'                   => $request->cause,
                 'repair_action'           => $request->repair_action,
                 'photos'                  => $photos ?: null,
-                'status'                  => 'open',
+                'status'                  => 'in_progress',
                 'created_by'              => Auth::id(),
             ]);
 
@@ -129,9 +123,7 @@ class DiesCorrectiveController extends Controller
                     if (empty($sp['sparepart_id'])) continue;
                     $sparepart = DiesSparepart::findOrFail($sp['sparepart_id']);
                     $qty = (int) $sp['quantity'];
-                    if ($sparepart->stok < $qty) {
-                        throw new \Exception("Stok {$sparepart->sparepart_name} tidak mencukupi.");
-                    }
+                    if ($sparepart->stok < $qty) throw new \Exception("Stok {$sparepart->sparepart_name} tidak mencukupi.");
                     DiesHistorySparepart::create([
                         'tipe'           => 'corrective',
                         'maintenance_id' => $corrective->id,
@@ -151,17 +143,17 @@ class DiesCorrectiveController extends Controller
     public function update(Request $request, DiesCorrective $diesCorrective)
     {
         $request->validate([
-            'problem_description'      => 'nullable|string',
-            'cause'                    => 'nullable|string',
-            'repair_action'            => 'nullable|string',
-            'photos_before'            => 'nullable|array',
-            'photos_before.*'          => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'photos_after'             => 'nullable|array',
-            'photos_after.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
-            'spareparts'               => 'nullable|array',
-            'spareparts.*.sparepart_id'=> 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'    => 'nullable|integer|min:1',
-            'spareparts.*.notes'       => 'nullable|string',
+            'problem_description'       => 'nullable|string',
+            'cause'                     => 'nullable|string',
+            'repair_action'             => 'nullable|string',
+            'photos_before'             => 'nullable|array',
+            'photos_before.*'           => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'photos_after'              => 'nullable|array',
+            'photos_after.*'            => 'image|mimes:jpg,jpeg,png,webp|max:3072',
+            'spareparts'                => 'nullable|array',
+            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
+            'spareparts.*.quantity'     => 'nullable|integer|min:1',
+            'spareparts.*.notes'        => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request, $diesCorrective) {
@@ -169,40 +161,28 @@ class DiesCorrectiveController extends Controller
 
             if ($request->hasFile('photos_before')) {
                 foreach ($request->file('photos_before') as $photo) {
-                    $photos[] = [
-                        'path' => $photo->store('dies/corrective', 'public'),
-                        'type' => 'before',
-                    ];
+                    $photos[] = ['path' => $photo->store('dies/corrective', 'public'), 'type' => 'before'];
                 }
             }
-
             if ($request->hasFile('photos_after')) {
                 foreach ($request->file('photos_after') as $photo) {
-                    $photos[] = [
-                        'path' => $photo->store('dies/corrective', 'public'),
-                        'type' => 'after',
-                    ];
+                    $photos[] = ['path' => $photo->store('dies/corrective', 'public'), 'type' => 'after'];
                 }
             }
 
-            $data = [
-                'status'              => 'in_progress',
+            $diesCorrective->update([
                 'problem_description' => $request->problem_description,
                 'cause'               => $request->cause,
                 'repair_action'       => $request->repair_action,
                 'photos'              => $photos ?: null,
-            ];
-
-            $diesCorrective->update($data);
+            ]);
 
             if ($request->has('spareparts') && is_array($request->spareparts)) {
                 foreach ($request->spareparts as $sp) {
                     if (empty($sp['sparepart_id'])) continue;
                     $sparepart = DiesSparepart::findOrFail($sp['sparepart_id']);
                     $qty = (int) $sp['quantity'];
-                    if ($sparepart->stok < $qty) {
-                        throw new \Exception("Stok {$sparepart->sparepart_name} tidak mencukupi.");
-                    }
+                    if ($sparepart->stok < $qty) throw new \Exception("Stok {$sparepart->sparepart_name} tidak mencukupi.");
                     DiesHistorySparepart::create([
                         'tipe'           => 'corrective',
                         'maintenance_id' => $diesCorrective->id,
@@ -217,6 +197,24 @@ class DiesCorrectiveController extends Controller
         });
 
         return back()->with('success', 'Laporan corrective berhasil diperbarui.');
+    }
+
+    public function offMachine(Request $request, DiesCorrective $diesCorrective)
+    {
+        $offAt = now();
+        $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
+            ? $diesCorrective->report_date
+            : \Carbon\Carbon::parse($diesCorrective->report_date);
+
+        $machineDuration = (int) $reportDate->diffInMinutes($offAt);
+
+        $diesCorrective->update([
+            'status'                   => 'on_repair',
+            'off_machine_at'           => $offAt,
+            'machine_duration_minutes' => $machineDuration,
+        ]);
+
+        return back()->with('success', 'Dies berhasil dicatat turun dari mesin.');
     }
 
     public function close(Request $request, DiesCorrective $diesCorrective)

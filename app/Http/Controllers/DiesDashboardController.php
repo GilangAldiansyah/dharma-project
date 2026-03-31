@@ -4,11 +4,11 @@ namespace App\Http\Controllers;
 use App\Models\Dies;
 use App\Models\DiesPreventive;
 use App\Models\DiesCorrective;
+use App\Models\DiesProcess;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
 class DiesDashboardController extends Controller
@@ -43,10 +43,10 @@ class DiesDashboardController extends Controller
                 'last_mtc_date', 'freq_maintenance', 'freq_maintenance_day',
             ])
             ->map(function ($d) {
-                $pct        = $d->std_stroke > 0 ? round(($d->current_stroke / $d->std_stroke) * 100, 2) : 0;
-                $remaining  = max(0, $d->std_stroke - $d->current_stroke);
-                $fpd        = $d->forecast_per_day ?? 0;
-                $daysLeft   = $fpd > 0 ? ceil($remaining / $fpd) : null;
+                $pct       = $d->std_stroke > 0 ? round(($d->current_stroke / $d->std_stroke) * 100, 2) : 0;
+                $remaining = max(0, $d->std_stroke - $d->current_stroke);
+                $fpd       = $d->forecast_per_day ?? 0;
+                $daysLeft  = $fpd > 0 ? ceil($remaining / $fpd) : null;
                 $estMtcDate = $daysLeft !== null ? now()->addDays($daysLeft)->toDateString() : null;
                 $statusMtc  = $this->getStatusMtc($pct, $d->last_mtc_date, $d->freq_maintenance_day);
 
@@ -131,10 +131,41 @@ class DiesDashboardController extends Controller
             ->orderBy('month')
             ->get();
 
-        // Users with role pic_dies for PIC selection
         $picList = User::whereHas('roles', fn($q) => $q->where('name', 'pic_dies'))
             ->orderBy('name')
             ->get(['id', 'name']);
+
+        $cmPeriod = request('cm_period', '6');
+
+        $cmRankingQuery = DiesCorrective::select(
+                'dies_id',
+                'process_id',
+                DB::raw('COUNT(*) as cm_count'),
+                DB::raw('MAX(report_date) as last_cm_date')
+            )
+            ->groupBy('dies_id', 'process_id')
+            ->orderByDesc('cm_count')
+            ->limit(10);
+
+        if ($cmPeriod !== 'all') {
+            $cmRankingQuery->where('report_date', '>=', now()->subMonths((int)$cmPeriod)->startOfMonth());
+        }
+
+        $cmRanking = $cmRankingQuery->get()->map(function ($row) {
+            $dies    = Dies::find($row->dies_id, ['id_sap', 'no_part', 'nama_dies', 'line']);
+            $process = DiesProcess::find($row->process_id, ['id', 'process_name', 'tonase']);
+            return [
+                'dies_id'      => $row->dies_id,
+                'no_part'      => $dies?->no_part ?? $row->dies_id,
+                'nama_dies'    => $dies?->nama_dies ?? '-',
+                'line'         => $dies?->line ?? '-',
+                'process_id'   => $row->process_id,
+                'process_name' => $process?->process_name ?? '-',
+                'tonase'       => $process?->tonase ?? null,
+                'cm_count'     => (int)$row->cm_count,
+                'last_cm_date' => $row->last_cm_date,
+            ];
+        });
 
         return Inertia::render('Dies/Dashboard', [
             'summary' => [
@@ -150,6 +181,8 @@ class DiesDashboardController extends Controller
             'recentCm'    => $recentCm,
             'strokeTrend' => $strokeTrend,
             'picList'     => $picList,
+            'cmRanking'   => $cmRanking,
+            'cmPeriod'    => $cmPeriod,
         ]);
     }
 

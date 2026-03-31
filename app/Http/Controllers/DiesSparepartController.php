@@ -97,6 +97,16 @@ class DiesSparepartController extends Controller
         DB::transaction(function () use ($request, $diesSparepart) {
             if ($request->type === 'tambah') {
                 $diesSparepart->increment('stok', $request->qty);
+
+                DiesHistorySparepart::create([
+                    'tipe'           => 'masuk',
+                    'maintenance_id' => null,
+                    'sparepart_id'   => $diesSparepart->id,
+                    'dies_id'        => null,
+                    'quantity'       => $request->qty,
+                    'notes'          => $request->notes,
+                    'created_by'     => Auth::id(),
+                ]);
             } else {
                 $diesSparepart->decrement('stok', $request->qty);
             }
@@ -105,12 +115,61 @@ class DiesSparepartController extends Controller
         return back()->with('success', 'Stok berhasil disesuaikan.');
     }
 
+    public function bulkUpdate(Request $request)
+    {
+        $request->validate([
+            'ids'          => 'required|array|min:1',
+            'ids.*'        => 'required|exists:dies_spareparts,id',
+            'stok_tambah'  => 'nullable|integer|min:1',
+            'stok_minimum' => 'nullable|integer|min:0',
+            'notes'        => 'nullable|string',
+        ]);
+
+        if (!$request->filled('stok_tambah') && !$request->filled('stok_minimum') && $request->stok_minimum !== 0) {
+            return back()->with('error', 'Isi minimal salah satu nilai yang ingin diubah.');
+        }
+
+        DB::transaction(function () use ($request) {
+            $spareparts = DiesSparepart::whereIn('id', $request->ids)->get();
+
+            foreach ($spareparts as $sp) {
+                if ($request->filled('stok_tambah') && $request->stok_tambah > 0) {
+                    $sp->increment('stok', $request->stok_tambah);
+
+                    DiesHistorySparepart::create([
+                        'tipe'           => 'masuk',
+                        'maintenance_id' => null,
+                        'sparepart_id'   => $sp->id,
+                        'dies_id'        => null,
+                        'quantity'       => $request->stok_tambah,
+                        'notes'          => $request->notes,
+                        'created_by'     => Auth::id(),
+                    ]);
+                }
+
+                if ($request->has('stok_minimum') && $request->stok_minimum !== null) {
+                    $sp->update(['stok_minimum' => $request->stok_minimum]);
+                }
+            }
+        });
+
+        return back()->with('success', 'Bulk update berhasil untuk ' . count($request->ids) . ' sparepart.');
+    }
+
     public function historyIndex(Request $request)
     {
         $query = DiesHistorySparepart::with(['sparepart', 'dies', 'createdBy'])->latest();
 
         if ($request->filled('tipe')) {
             $query->where('tipe', $request->tipe);
+        }
+
+        if ($request->filled('flow')) {
+            if ($request->flow === 'masuk') {
+                $query->where('tipe', 'masuk');
+            } elseif ($request->flow === 'keluar') {
+                $query->whereIn('tipe', ['preventive', 'corrective', 'reguler']);
+            }
         }
 
         if ($request->filled('sparepart_id')) {
@@ -129,7 +188,7 @@ class DiesSparepartController extends Controller
             'histories'  => $histories,
             'spareparts' => $spareparts,
             'dies'       => $dies,
-            'filters'    => $request->only('tipe', 'sparepart_id', 'dies_id'),
+            'filters'    => $request->only('tipe', 'sparepart_id', 'dies_id', 'flow'),
         ]);
     }
 
@@ -155,7 +214,7 @@ class DiesSparepartController extends Controller
                 'tipe'           => $request->tipe,
                 'maintenance_id' => $request->tipe !== 'reguler' ? $request->maintenance_id : null,
                 'sparepart_id'   => $request->sparepart_id,
-                'dies_id'        => $request->dies_id ?? null, // ← pakai null kalau tidak dikirim
+                'dies_id'        => $request->dies_id ?? null,
                 'quantity'       => $request->quantity,
                 'notes'          => $request->notes,
                 'created_by'     => Auth::id(),
@@ -170,10 +229,14 @@ class DiesSparepartController extends Controller
     public function historyDestroy(DiesHistorySparepart $history)
     {
         DB::transaction(function () use ($history) {
-            $history->sparepart->increment('stok', $history->quantity);
+            if ($history->tipe === 'masuk') {
+                $history->sparepart->decrement('stok', $history->quantity);
+            } else {
+                $history->sparepart->increment('stok', $history->quantity);
+            }
             $history->delete();
         });
 
-        return back()->with('success', 'Riwayat pemakaian berhasil dihapus dan stok dikembalikan.');
+        return back()->with('success', 'Riwayat berhasil dihapus dan stok disesuaikan.');
     }
 }

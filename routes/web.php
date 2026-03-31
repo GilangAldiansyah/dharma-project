@@ -402,6 +402,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/preventive/{diesPreventive}', [DiesPreventiveController::class, 'update']);
         Route::post('/preventive/{diesPreventive}/delete-photo', [DiesPreventiveController::class, 'deletePhoto'])->name('preventive.delete-photo-post');
         Route::post('/preventive/{diesPreventive}/close-nok', [DiesPreventiveController::class, 'closeNok'])->name('preventive.close-nok');
+        Route::post('/corrective/{diesCorrective}/off-machine', [DiesCorrectiveController::class, 'offMachine'])->name('corrective.off-machine');
         Route::put('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update'])->name('corrective.update');
         Route::post('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update']);
         Route::post('/corrective/{diesCorrective}/close', [DiesCorrectiveController::class, 'close'])->name('corrective.close');
@@ -419,6 +420,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::post('/sparepart', [DiesSparepartController::class, 'store'])->name('sparepart.store');
         Route::put('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'update'])->name('sparepart.update');
+        Route::post('/sparepart/bulk-update', [DiesSparepartController::class, 'bulkUpdate'])->name('sparepart.bulk-update');
         Route::post('/sparepart/{diesSparepart}/adjust-stok', [DiesSparepartController::class, 'adjustStok'])->name('sparepart.adjust-stok');
         Route::delete('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'destroy'])->name('sparepart.destroy');
     });
