@@ -403,6 +403,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/preventive/{diesPreventive}/delete-photo', [DiesPreventiveController::class, 'deletePhoto'])->name('preventive.delete-photo-post');
         Route::post('/preventive/{diesPreventive}/close-nok', [DiesPreventiveController::class, 'closeNok'])->name('preventive.close-nok');
         Route::post('/corrective/{diesCorrective}/off-machine', [DiesCorrectiveController::class, 'offMachine'])->name('corrective.off-machine');
+        Route::post('/corrective/{diesCorrective}/repair-start', [DiesCorrectiveController::class, 'repairStart'])->name('corrective.repair-start');
+        Route::post('/corrective/{diesCorrective}/repair-pause', [DiesCorrectiveController::class, 'repairPause'])->name('corrective.repair-pause');
         Route::put('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update'])->name('corrective.update');
         Route::post('/corrective/{diesCorrective}', [DiesCorrectiveController::class, 'update']);
         Route::post('/corrective/{diesCorrective}/close', [DiesCorrectiveController::class, 'close'])->name('corrective.close');

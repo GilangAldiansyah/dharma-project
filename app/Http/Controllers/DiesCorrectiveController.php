@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Dies;
 use App\Models\DiesCorrective;
+use App\Models\DiesCorrectiveRepairSession;
 use App\Models\DiesHistorySparepart;
 use App\Models\DiesProcess;
 use App\Models\DiesSparepart;
@@ -25,6 +26,7 @@ class DiesCorrectiveController extends Controller
             'spareparts.sparepart',
             'createdBy',
             'closedBy',
+            'repairSessions',
         ])
         ->when($request->status, fn($q) => $q->where('status', $request->status))
         ->when($request->dies_id, fn($q) => $q->where('dies_id', $request->dies_id))
@@ -217,23 +219,91 @@ class DiesCorrectiveController extends Controller
         return back()->with('success', 'Dies berhasil dicatat turun dari mesin.');
     }
 
+    public function repairStart(Request $request, DiesCorrective $diesCorrective)
+    {
+        if ($diesCorrective->status !== 'on_repair') {
+            return back()->with('error', 'Status tidak valid untuk memulai repair.');
+        }
+
+        $activeSession = $diesCorrective->repairSessions()->whereNull('ended_at')->first();
+        if ($activeSession) {
+            return back()->with('error', 'Sesi repair sedang berjalan.');
+        }
+
+        DiesCorrectiveRepairSession::create([
+            'corrective_id' => $diesCorrective->id,
+            'started_at'    => now(),
+            'ended_at'      => null,
+            'created_by'    => Auth::id(),
+        ]);
+
+        $diesCorrective->update(['repair_started_at' => now()]);
+
+        return back()->with('success', 'Repair dimulai.');
+    }
+
+    public function repairPause(Request $request, DiesCorrective $diesCorrective)
+    {
+        if ($diesCorrective->status !== 'on_repair') {
+            return back()->with('error', 'Status tidak valid.');
+        }
+
+        $activeSession = $diesCorrective->repairSessions()->whereNull('ended_at')->first();
+        if (!$activeSession) {
+            return back()->with('error', 'Tidak ada sesi repair yang berjalan.');
+        }
+
+        $endedAt = now();
+        $duration = (int) $activeSession->started_at->diffInMinutes($endedAt);
+
+        $activeSession->update([
+            'ended_at'         => $endedAt,
+            'duration_minutes' => $duration,
+        ]);
+
+        $totalMinutes = $diesCorrective->repairSessions()
+            ->whereNotNull('ended_at')
+            ->sum('duration_minutes');
+
+        $diesCorrective->update(['repair_duration_minutes' => $totalMinutes]);
+
+        return back()->with('success', 'Repair dijeda.');
+    }
+
     public function close(Request $request, DiesCorrective $diesCorrective)
     {
         $request->validate(['action' => 'nullable|string']);
 
-        $closedAt = now();
-        $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
-            ? $diesCorrective->report_date
-            : \Carbon\Carbon::parse($diesCorrective->report_date);
+        $activeSession = $diesCorrective->repairSessions()->whereNull('ended_at')->first();
+        if ($activeSession) {
+            $endedAt  = now();
+            $duration = (int) $activeSession->started_at->diffInMinutes($endedAt);
+            $activeSession->update(['ended_at' => $endedAt, 'duration_minutes' => $duration]);
+        }
 
-        $durationMinutes = (int) $reportDate->diffInMinutes($closedAt);
+        $repairMinutes = $diesCorrective->repairSessions()
+            ->whereNotNull('ended_at')
+            ->sum('duration_minutes');
+
+        $machineMinutes = $diesCorrective->machine_duration_minutes ?? 0;
+
+        if (!$diesCorrective->off_machine_at) {
+            $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
+                ? $diesCorrective->report_date
+                : \Carbon\Carbon::parse($diesCorrective->report_date);
+            $machineMinutes = (int) $reportDate->diffInMinutes(now());
+        }
+
+        $totalMinutes = $repairMinutes + $machineMinutes;
 
         $diesCorrective->update([
-            'status'                  => 'closed',
-            'action'                  => $request->action,
-            'closed_by'               => Auth::id(),
-            'closed_at'               => $closedAt,
-            'repair_duration_minutes' => $durationMinutes,
+            'status'                   => 'closed',
+            'action'                   => $request->action,
+            'closed_by'                => Auth::id(),
+            'closed_at'                => now(),
+            'machine_duration_minutes' => $diesCorrective->machine_duration_minutes ?? $machineMinutes,
+            'off_machine_at'           => $diesCorrective->off_machine_at ?? now(),
+            'repair_duration_minutes'  => $totalMinutes ?: $diesCorrective->repair_duration_minutes,
         ]);
 
         return back()->with('success', 'Laporan corrective berhasil ditutup.');
@@ -246,6 +316,7 @@ class DiesCorrectiveController extends Controller
                 $history->sparepart?->increment('stok', $history->quantity);
                 $history->delete();
             }
+            $diesCorrective->repairSessions()->delete();
             if ($diesCorrective->photos) {
                 foreach ($diesCorrective->photos as $photo) {
                     Storage::disk('public')->delete($photo['path']);

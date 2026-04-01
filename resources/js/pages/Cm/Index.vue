@@ -34,7 +34,7 @@ interface Props {
     reports:    CmReport[];
     jigs:       Jig[];
     spareparts: Sparepart[];
-    summary:    { open: number; in_progress: number; closed: number };
+    summary: { open: number; in_progress: number; closed: number; total_repair_minutes: number };
     isLeader:   boolean;
     authId:     number;
     filters:    { status?: string; jig_id?: any; month?: string; year?: string };
@@ -475,6 +475,15 @@ const fmtDatetime = (d: string | null) => {
     return new Date(d).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+const fmtMinutes = (minutes: number): string => {
+    if (!minutes) return '0m';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0 && m > 0) return `${h}j ${m}m`;
+    if (h > 0) return `${h}j`;
+    return `${m}m`;
+};
+
 const statusCfg: Record<string, { label: string; badge: string; cardBorder: string; icon: any }> = {
     open:        { label: 'Open',        badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',                 cardBorder: 'border-l-red-400',     icon: AlertCircle  },
     in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',         cardBorder: 'border-l-amber-400',   icon: Clock        },
@@ -526,31 +535,35 @@ const activeFilterCount = computed(() => {
                 <p class="text-emerald-800 dark:text-emerald-200 font-medium text-xs sm:text-sm">{{ flash.success }}</p>
             </div>
 
-            <div class="grid grid-cols-3 gap-2 sm:gap-3">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 <div class="text-center p-3 sm:p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                     <p class="text-xs text-red-500 font-semibold flex items-center justify-center gap-1">
-                        <AlertCircle class="w-3 h-3" /><span class="hidden sm:inline">Open</span>
+                        <AlertCircle class="w-3 h-3" /> Open
                     </p>
                     <p class="text-2xl sm:text-3xl font-black text-red-600 mt-0.5">{{ summary.open }}</p>
-                    <p class="text-xs text-red-500 sm:hidden font-semibold">Open</p>
                 </div>
                 <div class="text-center p-3 sm:p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800">
                     <p class="text-xs text-amber-600 font-semibold flex items-center justify-center gap-1">
-                        <Clock class="w-3 h-3" /><span class="hidden sm:inline">In Progress</span>
+                        <Clock class="w-3 h-3" /> In Progress
                     </p>
                     <p class="text-2xl sm:text-3xl font-black text-amber-600 mt-0.5">{{ summary.in_progress }}</p>
-                    <p class="text-xs text-amber-600 sm:hidden font-semibold">Progress</p>
                 </div>
                 <div class="text-center p-3 sm:p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800">
                     <p class="text-xs text-emerald-600 font-semibold flex items-center justify-center gap-1">
-                        <CheckCircle2 class="w-3 h-3" /><span class="hidden sm:inline">Closed</span>
+                        <CheckCircle2 class="w-3 h-3" /> Closed
                     </p>
                     <p class="text-2xl sm:text-3xl font-black text-emerald-600 mt-0.5">{{ summary.closed }}</p>
-                    <p class="text-xs text-emerald-600 sm:hidden font-semibold">Closed</p>
+                </div>
+                <div class="text-center p-3 sm:p-4 rounded-2xl bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800">
+                    <p class="text-xs text-violet-600 font-semibold flex items-center justify-center gap-1">
+                        <Timer class="w-3 h-3" /> Total Repair
+                    </p>
+                    <p class="text-lg sm:text-2xl font-black text-violet-600 mt-0.5">
+                        {{ summary.total_repair_minutes ? fmtMinutes(summary.total_repair_minutes) : '—' }}
+                    </p>
                 </div>
             </div>
 
-            <!-- Month + Year Filter Bar -->
             <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-3 shadow-sm space-y-2.5">
                 <div class="flex items-center justify-between gap-3">
                     <div class="flex items-center gap-1.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">

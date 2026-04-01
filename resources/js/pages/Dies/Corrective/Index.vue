@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onUnmounted } from 'vue';
 import {
     Wrench, Search, Filter, Plus, Pencil, Trash2,
     AlertTriangle, CheckCircle2, X, Download, Camera,
     Upload, Package, AlertCircle, Clock, Loader2,
-    Timer, ChevronUp, ChevronDown, Layers, FileText, ArrowDownToLine
+    Timer, ChevronUp, ChevronDown, Layers, FileText,
+    ArrowDownToLine, Play, Pause, History
 } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
@@ -15,6 +16,7 @@ interface DiesMini { id_sap: string; no_part: string; nama_dies: string; line: s
 interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; unit: string; stok: number }
 interface HistorySp { id: number; quantity: number; notes: string | null; sparepart: Sparepart | null }
 interface Photo { path: string; type: 'before' | 'after' }
+interface RepairSession { id: number; started_at: string; ended_at: string | null; duration_minutes: number | null }
 interface Corrective {
     id: number; report_no: string; dies_id: string; process_id: number | null; pic_name: string;
     report_date: string; stroke_at_maintenance: number; repair_duration_minutes: number | null;
@@ -22,6 +24,7 @@ interface Corrective {
     repair_duration: string | null;
     machine_duration: string | null;
     off_machine_at: string | null;
+    repair_started_at: string | null;
     problem_description: string | null; cause: string | null;
     repair_action: string | null; action: string | null;
     photos: Photo[] | null; status: string;
@@ -29,6 +32,7 @@ interface Corrective {
     dies: DiesMini | null;
     process: DiesProcess | null;
     spareparts: HistorySp[];
+    repair_sessions: RepairSession[];
     created_by: { id: number; name: string } | null;
     closed_by: { id: number; name: string } | null;
 }
@@ -69,6 +73,7 @@ const showFormModal       = ref(false);
 const showDetailModal     = ref(false);
 const showCloseModal      = ref(false);
 const showOffMachineModal = ref(false);
+const showSessionsModal   = ref(false);
 const isEdit              = ref(false);
 const selectedCm          = ref<Corrective | null>(null);
 const lightboxSrc         = ref<string | null>(null);
@@ -78,13 +83,44 @@ const photoPickerMode     = ref<'add' | 'edit'>('add');
 
 const statusCfg: Record<string, { label: string; badge: string; dot: string; cardBorder: string; icon: any }> = {
     in_progress: { label: 'In Progress', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400', dot: 'bg-amber-400',   cardBorder: 'border-l-amber-400',   icon: Clock        },
-    on_repair:   { label: 'Di Bengkel',   badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',     dot: 'bg-blue-400',    cardBorder: 'border-l-blue-400',    icon: Wrench       },
+    on_repair:   { label: 'In Dies Shop',  badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',     dot: 'bg-blue-400',    cardBorder: 'border-l-blue-400',    icon: Wrench       },
     closed:      { label: 'Closed',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', dot: 'bg-emerald-500', cardBorder: 'border-l-emerald-400', icon: CheckCircle2 },
 };
+
+const hasActiveSession = (c: Corrective) => c.repair_sessions?.some(s => !s.ended_at) ?? false;
 
 const canClose = (c: Corrective) => c.status === 'in_progress' || c.status === 'on_repair';
 
 const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterMonth.value].filter(Boolean).length);
+
+const totalMachineDurationMinutes = computed(() =>
+    props.correctives.data.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0)
+);
+
+const totalRepairDurationMinutes = computed(() =>
+    props.correctives.data.reduce((acc, c) => acc + (c.repair_duration_minutes ?? 0), 0)
+);
+
+const avgMachineDurationMinutes = computed(() => {
+    const withMachine = props.correctives.data.filter(c => c.machine_duration_minutes);
+    if (!withMachine.length) return 0;
+    return Math.round(withMachine.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0) / withMachine.length);
+});
+
+const avgRepairDurationMinutes = computed(() => {
+    const withRepair = props.correctives.data.filter(c => c.repair_duration_minutes);
+    if (!withRepair.length) return 0;
+    return Math.round(withRepair.reduce((acc, c) => acc + (c.repair_duration_minutes ?? 0), 0) / withRepair.length);
+});
+
+const fmtMinutes = (minutes: number): string => {
+    if (!minutes) return '0m';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0 && m > 0) return `${h}j ${m}m`;
+    if (h > 0) return `${h} jam`;
+    return `${m} menit`;
+};
 
 let debounce: ReturnType<typeof setTimeout>;
 watch(search, () => { clearTimeout(debounce); debounce = setTimeout(() => navigate(), 400); });
@@ -108,6 +144,44 @@ const fmtDatetime = (d: string | null) => {
         hour: '2-digit', minute: '2-digit'
     });
 };
+
+const fmtDuration = (minutes: number | null) => {
+    if (!minutes) return null;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0 && m > 0) return `${h}j ${m}m`;
+    if (h > 0) return `${h} jam`;
+    return `${m} menit`;
+};
+
+const liveTimers = ref<Record<number, string>>({});
+let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+const updateLiveTimers = () => {
+    const now = Date.now();
+    props.correctives.data.forEach(c => {
+        const active = c.repair_sessions?.find(s => !s.ended_at);
+        if (active) {
+            const accumulated = c.repair_duration_minutes ?? 0;
+            const sessionElapsed = Math.floor((now - new Date(active.started_at).getTime()) / 60000);
+            const total = accumulated + sessionElapsed;
+            const h = Math.floor(total / 60);
+            const m = total % 60;
+            liveTimers.value[c.id] = h > 0 ? `${h}j ${m}m` : `${m}m`;
+        }
+    });
+};
+
+watch(() => props.correctives.data, () => {
+    if (timerInterval) clearInterval(timerInterval);
+    const hasActive = props.correctives.data.some(c => hasActiveSession(c));
+    if (hasActive) {
+        updateLiveTimers();
+        timerInterval = setInterval(updateLiveTimers, 60000);
+    }
+}, { immediate: true });
+
+onUnmounted(() => { if (timerInterval) clearInterval(timerInterval); });
 
 const diesSearch      = ref('');
 const diesOpen        = ref(false);
@@ -172,6 +246,7 @@ const closeFormDiesDropdown = () => { setTimeout(() => { formDiesOpen.value = fa
 const availableProcesses  = computed(() => selectedFormDiesObj.value?.processes ?? []);
 const processOpen         = ref(false);
 const selectedProcessObj  = computed(() => availableProcesses.value.find(p => p.id === form.process_id) ?? null);
+const selectedProcessIndex = computed(() => availableProcesses.value.findIndex(p => p.id === form.process_id));
 
 watch(() => form.dies_id, () => { form.process_id = null; });
 
@@ -331,6 +406,7 @@ const openEdit = (c: Corrective) => {
 };
 
 const openDetail = (c: Corrective) => { selectedCm.value = c; showDetailModal.value = true; };
+const openSessions = (c: Corrective) => { selectedCm.value = c; showSessionsModal.value = true; };
 
 const closeFormModal = () => {
     showFormModal.value = false;
@@ -379,6 +455,14 @@ const submitOffMachine = () => {
     });
 };
 
+const submitRepairStart = (c: Corrective) => {
+    router.post(`/dies/corrective/${c.id}/repair-start`, {}, { preserveScroll: true });
+};
+
+const submitRepairPause = (c: Corrective) => {
+    router.post(`/dies/corrective/${c.id}/repair-pause`, {}, { preserveScroll: true });
+};
+
 const closeForm = useForm({ action: '' });
 const openClose  = (c: Corrective) => { selectedCm.value = c; closeForm.reset(); showCloseModal.value = true; };
 const submitClose = () => {
@@ -399,7 +483,7 @@ const submitDelete = () => {
 
 const exportExcel = () => {
     const rows = [
-        ['No Part', 'Nama Dies', 'Line', 'Proses', 'PIC', 'Tanggal', 'Stroke', 'Durasi Perbaikan Di atas Mesin', 'Durasi Total', 'Problem', 'Cause', 'Tindakan', 'Status', 'Ditutup Oleh', 'Tanggal Tutup'],
+        ['No Part', 'Nama Dies', 'Line', 'Proses', 'PIC', 'Tanggal', 'Stroke', 'Durasi di Mesin', 'Durasi Repair', 'Problem', 'Cause', 'Tindakan', 'Status', 'Ditutup Oleh', 'Tanggal Tutup'],
         ...props.correctives.data.map(c => [
             c.dies?.no_part ?? c.dies_id,
             c.dies?.nama_dies ?? '',
@@ -438,7 +522,6 @@ const exportExcel = () => {
     ]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
-            <!-- Header -->
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
                     <span class="flex items-center justify-center w-9 h-9 bg-orange-500 rounded-xl flex-shrink-0">
@@ -464,32 +547,60 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- Flash -->
             <div v-if="flash?.success"
                 class="flex items-center gap-2.5 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <p class="text-emerald-800 dark:text-emerald-200 text-xs font-medium">{{ flash.success }}</p>
             </div>
 
-            <!-- Summary Cards -->
-            <div class="grid grid-cols-3 gap-2">
-                <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 text-center">
-                    <p class="text-xs text-amber-500 font-semibold mb-0.5 flex items-center justify-center gap-1">
-                        <Clock class="w-3 h-3" /> In Progress
-                    </p>
-                    <p class="text-2xl font-black text-amber-600">{{ summary.in_progress }}</p>
+            <div class="flex gap-2.5 overflow-x-auto scrollbar-hide pb-0.5">
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-amber-200 dark:bg-amber-800/60 flex items-center justify-center flex-shrink-0">
+                        <Clock class="w-4 h-4 text-amber-800 dark:text-amber-300" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-amber-800 dark:text-amber-400 leading-none mb-1">In Progress</p>
+                        <p class="text-xl font-black text-amber-700 dark:text-amber-300 leading-none">{{ summary.in_progress }}</p>
+                    </div>
                 </div>
-                <div class="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 text-center">
-                    <p class="text-xs text-blue-500 font-semibold mb-0.5 flex items-center justify-center gap-1">
-                        <Wrench class="w-3 h-3" /> Di Bengkel
-                    </p>
-                    <p class="text-2xl font-black text-blue-600">{{ summary.on_repair }}</p>
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/50 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-blue-200 dark:bg-blue-800/60 flex items-center justify-center flex-shrink-0">
+                        <Wrench class="w-4 h-4 text-blue-800 dark:text-blue-300" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-blue-800 dark:text-blue-400 leading-none mb-1">In Dies Shop</p>
+                        <p class="text-xl font-black text-blue-700 dark:text-blue-300 leading-none">{{ summary.on_repair }}</p>
+                    </div>
                 </div>
-                <div class="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-center">
-                    <p class="text-xs text-emerald-500 font-semibold mb-0.5 flex items-center justify-center gap-1">
-                        <CheckCircle2 class="w-3 h-3" /> Closed
-                    </p>
-                    <p class="text-2xl font-black text-emerald-600">{{ summary.closed }}</p>
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700/50 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-green-200 dark:bg-green-800/60 flex items-center justify-center flex-shrink-0">
+                        <CheckCircle2 class="w-4 h-4 text-green-800 dark:text-green-300" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-green-800 dark:text-green-400 leading-none mb-1">Closed</p>
+                        <p class="text-xl font-black text-green-700 dark:text-green-300 leading-none">{{ summary.closed }}</p>
+                    </div>
+                </div>
+                <div class="w-px bg-gray-200 dark:bg-gray-700 self-stretch flex-shrink-0 mx-0.5"></div>
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center flex-shrink-0">
+                        <ArrowDownToLine class="w-4 h-4 text-orange-700 dark:text-orange-400" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Di Mesin</p>
+                        <p class="text-sm font-black text-orange-600 dark:text-orange-400 leading-none">{{ totalMachineDurationMinutes ? fmtMinutes(totalMachineDurationMinutes) : '—' }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ avgMachineDurationMinutes ? fmtMinutes(avgMachineDurationMinutes) : '—' }}</p>
+                    </div>
+                </div>
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center flex-shrink-0">
+                        <Timer class="w-4 h-4 text-violet-700 dark:text-violet-400" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Repair</p>
+                        <p class="text-sm font-black text-violet-600 dark:text-violet-400 leading-none">{{ totalRepairDurationMinutes ? fmtMinutes(totalRepairDurationMinutes) : '—' }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ avgRepairDurationMinutes ? fmtMinutes(avgRepairDurationMinutes) : '—' }}</p>
+                    </div>
                 </div>
             </div>
 
@@ -610,7 +721,7 @@ const exportExcel = () => {
                             class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
                             <td class="px-4 py-3">
                                 <p class="text-xs font-bold text-gray-900 dark:text-white">{{ c.dies?.no_part ?? c.dies_id }}</p>
-                                <p class="text-xs text-gray-400 line-clamp-1">{{ c.dies?.nama_dies }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{{ c.dies?.nama_dies }}</p>
                                 <div class="flex items-center gap-1 mt-1">
                                     <span class="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded font-semibold">{{ c.dies?.line }}</span>
                                     <span v-if="c.process" class="text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded font-semibold flex items-center gap-0.5">
@@ -630,7 +741,15 @@ const exportExcel = () => {
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full text-xs font-bold">
                                         <ArrowDownToLine class="w-2.5 h-2.5" /> {{ c.machine_duration }}
                                     </span>
-                                    <span v-if="c.repair_duration"
+                                    <span v-if="c.status === 'on_repair'"
+                                        :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold',
+                                            hasActiveSession(c)
+                                                ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 animate-pulse'
+                                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400']">
+                                        <Timer class="w-2.5 h-2.5" />
+                                        {{ hasActiveSession(c) ? (liveTimers[c.id] ?? 'Berjalan...') : (c.repair_duration ?? 'Belum mulai') }}
+                                    </span>
+                                    <span v-else-if="c.repair_duration"
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 rounded-full text-xs font-bold">
                                         <Timer class="w-2.5 h-2.5" /> {{ c.repair_duration }}
                                     </span>
@@ -638,7 +757,7 @@ const exportExcel = () => {
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
                                         <Package class="w-2.5 h-2.5" /> {{ c.spareparts.length }} SP
                                     </span>
-                                    <span v-if="!c.machine_duration && !c.repair_duration && !c.spareparts?.length" class="text-xs text-gray-300">—</span>
+                                    <span v-if="!c.machine_duration && c.status !== 'on_repair' && !c.repair_duration && !c.spareparts?.length" class="text-xs text-gray-300">—</span>
                                 </div>
                             </td>
                             <td class="px-4 py-3 text-center">
@@ -661,6 +780,20 @@ const exportExcel = () => {
                                         class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-lg text-xs font-semibold hover:bg-blue-200 transition-colors">
                                         <ArrowDownToLine class="w-3 h-3" /> Turun
                                     </button>
+                                    <template v-if="c.status === 'on_repair'">
+                                        <button v-if="!hasActiveSession(c)" @click="submitRepairStart(c)"
+                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 transition-colors">
+                                            <Play class="w-3 h-3" /> Start
+                                        </button>
+                                        <button v-else @click="submitRepairPause(c)"
+                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-semibold hover:bg-amber-600 transition-colors">
+                                            <Pause class="w-3 h-3" /> Pause
+                                        </button>
+                                        <button v-if="c.repair_sessions?.length" @click="openSessions(c)"
+                                            class="p-1.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg hover:bg-gray-200 transition-colors" title="Riwayat Sesi">
+                                            <History class="w-3.5 h-3.5" />
+                                        </button>
+                                    </template>
                                     <button v-if="canClose(c)" @click="openClose(c)"
                                         class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors">
                                         <CheckCircle2 class="w-3 h-3" /> Close
@@ -698,7 +831,7 @@ const exportExcel = () => {
                         <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="min-w-0">
                                 <p class="text-sm font-bold text-gray-900 dark:text-white leading-tight">{{ c.dies?.no_part ?? c.dies_id }}</p>
-                                <p class="text-xs text-gray-400 line-clamp-1">{{ c.dies?.nama_dies }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{{ c.dies?.nama_dies }}</p>
                                 <div class="flex items-center gap-1 mt-1 flex-wrap">
                                     <span class="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded font-semibold">{{ c.dies?.line }}</span>
                                     <span v-if="c.process" class="text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded font-semibold flex items-center gap-0.5">
@@ -716,7 +849,15 @@ const exportExcel = () => {
                                         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full text-xs font-bold">
                                         <ArrowDownToLine class="w-2.5 h-2.5" /> {{ c.machine_duration }}
                                     </span>
-                                    <span v-if="c.repair_duration"
+                                    <span v-if="c.status === 'on_repair'"
+                                        :class="['inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold',
+                                            hasActiveSession(c)
+                                                ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 animate-pulse'
+                                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400']">
+                                        <Timer class="w-2.5 h-2.5" />
+                                        {{ hasActiveSession(c) ? (liveTimers[c.id] ?? '...') : (c.repair_duration ?? '-') }}
+                                    </span>
+                                    <span v-else-if="c.repair_duration"
                                         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 rounded-full text-xs font-bold">
                                         <Timer class="w-2.5 h-2.5" /> {{ c.repair_duration }}
                                     </span>
@@ -734,12 +875,25 @@ const exportExcel = () => {
                         </div>
                         <p v-if="c.problem_description" class="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mb-2.5">{{ c.problem_description }}</p>
 
-                        <!-- Action buttons -->
                         <div class="flex items-center gap-1.5 pt-2 border-t border-gray-100 dark:border-gray-700">
                             <button v-if="c.status === 'in_progress'" @click="openOffMachine(c)"
                                 class="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 active:scale-95 transition-all">
                                 <ArrowDownToLine class="w-3.5 h-3.5" /> Turun
                             </button>
+                            <template v-if="c.status === 'on_repair'">
+                                <button v-if="!hasActiveSession(c)" @click="submitRepairStart(c)"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-bold hover:bg-violet-700 active:scale-95 transition-all">
+                                    <Play class="w-3.5 h-3.5" /> Start
+                                </button>
+                                <button v-else @click="submitRepairPause(c)"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 active:scale-95 transition-all">
+                                    <Pause class="w-3.5 h-3.5" /> Pause
+                                </button>
+                                <button v-if="c.repair_sessions?.length" @click="openSessions(c)"
+                                    class="p-1.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg hover:bg-gray-200 transition-colors">
+                                    <History class="w-3.5 h-3.5" />
+                                </button>
+                            </template>
                             <button v-if="canClose(c)" @click="openClose(c)"
                                 class="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 active:scale-95 transition-all">
                                 <CheckCircle2 class="w-3.5 h-3.5" /> Close
@@ -788,7 +942,6 @@ const exportExcel = () => {
                 </div>
                 <form @submit.prevent="submitForm" class="overflow-y-auto flex-1 px-4 sm:px-6 py-4 space-y-4">
 
-                    <!-- Identifikasi (Add only) -->
                     <div v-if="!isEdit" class="space-y-3">
                         <h3 class="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
                             <AlertCircle class="w-3.5 h-3.5" /> Identifikasi Dies
@@ -820,9 +973,12 @@ const exportExcel = () => {
                                     </button>
                                 </div>
                             </div>
-                            <div v-if="selectedFormDiesObj" class="mt-1.5 flex items-center gap-2 text-xs text-gray-500">
-                                <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 rounded font-semibold">{{ selectedFormDiesObj.line }}</span>
-                                <span>Stroke: <span class="font-bold text-gray-700 dark:text-gray-300">{{ selectedFormDiesObj.current_stroke.toLocaleString() }}</span></span>
+                            <div v-if="selectedFormDiesObj" class="mt-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800/50 rounded-xl">
+                                <p class="text-xs font-bold text-orange-700 dark:text-orange-300">{{ selectedFormDiesObj.nama_dies }}</p>
+                                <div class="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                    <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 rounded font-semibold">{{ selectedFormDiesObj.line }}</span>
+                                    <span>Stroke: <span class="font-bold text-gray-700 dark:text-gray-300">{{ selectedFormDiesObj.current_stroke.toLocaleString() }}</span></span>
+                                </div>
                             </div>
                         </div>
                         <div>
@@ -835,7 +991,11 @@ const exportExcel = () => {
                                         'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-purple-400']">
                                     <span class="flex items-center gap-2">
                                         <Layers class="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                        {{ selectedProcessObj ? selectedProcessObj.process_name : (form.dies_id ? 'Pilih proses...' : 'Pilih dies dulu') }}
+                                        <span v-if="selectedProcessObj">
+                                            {{ selectedProcessObj.process_name }}
+                                            <span class="ml-1 text-purple-400 font-normal text-xs">({{ selectedProcessIndex + 1 }}/{{ availableProcesses.length }})</span>
+                                        </span>
+                                        <span v-else>{{ form.dies_id ? 'Pilih proses...' : 'Pilih dies dulu' }}</span>
                                     </span>
                                     <div class="flex items-center gap-1">
                                         <button v-if="form.process_id" type="button" @click.stop="form.process_id = null"
@@ -847,11 +1007,14 @@ const exportExcel = () => {
                                 </button>
                                 <div v-if="processOpen && form.dies_id" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
                                     <div v-if="availableProcesses.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada proses</div>
-                                    <button v-for="p in availableProcesses" :key="p.id" type="button"
+                                    <button v-for="(p, idx) in availableProcesses" :key="p.id" type="button"
                                         @mousedown.prevent="form.process_id = p.id; processOpen = false"
                                         :class="['w-full text-left px-3 py-2.5 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors flex items-center justify-between',
                                             form.process_id === p.id ? 'bg-purple-50 dark:bg-purple-900/20' : '']">
-                                        <span class="text-xs font-semibold text-gray-800 dark:text-gray-200">{{ p.process_name }}</span>
+                                        <span class="flex items-center gap-2">
+                                            <span class="text-xs font-bold text-purple-400 w-8 flex-shrink-0">({{ idx + 1 }}/{{ availableProcesses.length }})</span>
+                                            <span class="text-xs font-semibold text-gray-800 dark:text-gray-200">{{ p.process_name }}</span>
+                                        </span>
                                         <span v-if="p.tonase" class="text-xs text-gray-400">{{ p.tonase }} ton</span>
                                     </button>
                                 </div>
@@ -859,11 +1022,10 @@ const exportExcel = () => {
                         </div>
                     </div>
 
-                    <!-- Dies info (Edit mode) -->
                     <div v-if="isEdit && selectedCm" class="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                         <div class="flex-1 min-w-0">
                             <p class="text-sm font-bold text-gray-900 dark:text-white">{{ selectedCm.dies?.no_part ?? selectedCm.dies_id }}</p>
-                            <p class="text-xs text-gray-400 line-clamp-1">{{ selectedCm.dies?.nama_dies }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{{ selectedCm.dies?.nama_dies }}</p>
                         </div>
                         <div class="flex items-center gap-1 flex-shrink-0">
                             <span class="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 rounded font-semibold">{{ selectedCm.dies?.line }}</span>
@@ -871,7 +1033,6 @@ const exportExcel = () => {
                         </div>
                     </div>
 
-                    <!-- Detail Kerusakan -->
                     <div class="space-y-3">
                         <h3 class="text-xs font-bold text-gray-400 uppercase">Detail Kerusakan & Tindakan</h3>
                         <div>
@@ -891,13 +1052,11 @@ const exportExcel = () => {
                         </div>
                     </div>
 
-                    <!-- Foto -->
                     <div class="space-y-3">
                         <h3 class="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
                             <Camera class="w-3.5 h-3.5" /> Foto Dokumentasi
                         </h3>
                         <div class="grid grid-cols-2 gap-3">
-                            <!-- Before -->
                             <div>
                                 <p class="text-xs font-bold text-red-500 mb-2 flex items-center gap-1.5">
                                     <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span> Before
@@ -929,7 +1088,6 @@ const exportExcel = () => {
                                 <input :id="`cam-${isEdit ? 'edit' : 'add'}-before`" type="file" accept="image/*" capture="environment" class="hidden" @change="(e) => handleFileInput(e, 'before')" />
                                 <input :id="`gal-${isEdit ? 'edit' : 'add'}-before`" type="file" accept="image/*" class="hidden" @change="(e) => handleFileInput(e, 'before')" />
                             </div>
-                            <!-- After -->
                             <div>
                                 <p class="text-xs font-bold text-emerald-600 mb-2 flex items-center gap-1.5">
                                     <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> After
@@ -967,7 +1125,6 @@ const exportExcel = () => {
                         </p>
                     </div>
 
-                    <!-- Sparepart -->
                     <div>
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
@@ -1027,7 +1184,6 @@ const exportExcel = () => {
                         </div>
                     </div>
 
-                    <!-- Submit -->
                     <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-4 border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
                         <div class="flex gap-3">
                             <button type="button" @click="closeFormModal"
@@ -1097,13 +1253,23 @@ const exportExcel = () => {
                                 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ fmtDatetime(selectedCm.off_machine_at) }}</span>
                             </div>
                             <div v-if="selectedCm.machine_duration" class="flex justify-between gap-2">
-                                <span class="text-gray-400 flex items-center gap-1"><Timer class="w-3 h-3" /> Durasi Perbaikan di atas Mesin</span>
+                                <span class="text-gray-400 flex items-center gap-1"><Timer class="w-3 h-3" /> Durasi di Mesin</span>
                                 <span class="font-black text-orange-600 dark:text-orange-400">{{ selectedCm.machine_duration }}</span>
                             </div>
                         </template>
-                        <div v-if="selectedCm.repair_duration" class="flex justify-between gap-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                            <span class="text-gray-400 flex items-center gap-1"><Timer class="w-3 h-3" /> Durasi Total</span>
-                            <span class="font-black text-violet-600 dark:text-violet-400">{{ selectedCm.repair_duration }}</span>
+                        <div v-if="selectedCm.repair_duration_minutes || selectedCm.repair_sessions?.length" class="pt-2 border-t border-gray-200 dark:border-gray-600 space-y-1">
+                            <div class="flex justify-between gap-2">
+                                <span class="text-gray-400 flex items-center gap-1"><Timer class="w-3 h-3" /> Total Repair</span>
+                                <span class="font-black text-violet-600 dark:text-violet-400">
+                                    {{ selectedCm.repair_duration ?? (hasActiveSession(selectedCm) ? (liveTimers[selectedCm.id] ?? 'Berjalan...') : '-') }}
+                                </span>
+                            </div>
+                            <div v-if="selectedCm.repair_sessions?.length" class="flex justify-between gap-2">
+                                <span class="text-gray-400">Sesi repair</span>
+                                <button @click="openSessions(selectedCm)" class="text-violet-500 font-semibold hover:underline flex items-center gap-1">
+                                    <History class="w-3 h-3" /> {{ selectedCm.repair_sessions.length }} sesi
+                                </button>
+                            </div>
                         </div>
                         <div v-if="selectedCm.status === 'closed'" class="flex justify-between gap-2">
                             <span class="text-gray-400">Ditutup</span>
@@ -1130,8 +1296,7 @@ const exportExcel = () => {
 
                     <div v-if="selectedCm.photos?.filter(p => p.type === 'before').length">
                         <p class="text-xs font-bold text-red-500 uppercase mb-2 flex items-center gap-1.5">
-                            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
-                            Before
+                            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span> Before
                         </p>
                         <div class="grid grid-cols-3 gap-2">
                             <div v-for="(ph, idx) in selectedCm.photos.filter(p => p.type === 'before')" :key="idx"
@@ -1143,8 +1308,7 @@ const exportExcel = () => {
                     </div>
                     <div v-if="selectedCm.photos?.filter(p => p.type === 'after').length">
                         <p class="text-xs font-bold text-emerald-600 uppercase mb-2 flex items-center gap-1.5">
-                            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
-                            After
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> After
                         </p>
                         <div class="grid grid-cols-3 gap-2">
                             <div v-for="(ph, idx) in selectedCm.photos.filter(p => p.type === 'after')" :key="idx"
@@ -1181,6 +1345,57 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- ====== MODAL REPAIR SESSIONS ====== -->
+        <div v-if="showSessionsModal && selectedCm"
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[85vh] flex flex-col">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                        <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <History class="w-4 h-4 text-violet-500" /> Riwayat Sesi Repair
+                        </h2>
+                        <button @click="showSessionsModal = false" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                            <X class="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+                <div class="overflow-y-auto flex-1 p-4 sm:p-5 space-y-2">
+                    <div class="mb-3 p-3 bg-violet-50 dark:bg-violet-900/20 rounded-xl border border-violet-100 dark:border-violet-800">
+                        <p class="text-xs font-bold text-gray-800 dark:text-white">{{ selectedCm.dies?.no_part }} · {{ selectedCm.dies?.nama_dies }}</p>
+                        <p class="text-xs text-violet-600 dark:text-violet-400 font-semibold mt-1 flex items-center gap-1">
+                            <Timer class="w-3 h-3" />
+                            Total repair: {{ selectedCm.repair_duration ?? (hasActiveSession(selectedCm) ? (liveTimers[selectedCm.id] ?? '-') : '-') }}
+                        </p>
+                    </div>
+                    <div v-if="!selectedCm.repair_sessions?.length" class="py-8 text-center text-xs text-gray-400">
+                        Belum ada sesi repair
+                    </div>
+                    <div v-for="(s, idx) in selectedCm.repair_sessions" :key="s.id"
+                        :class="['p-3 rounded-xl border text-xs', !s.ended_at ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-700' : 'bg-gray-50 dark:bg-gray-700/50 border-gray-100 dark:border-gray-700']">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="font-bold text-gray-700 dark:text-gray-200">Sesi {{ idx + 1 }}</span>
+                            <span v-if="!s.ended_at" class="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 rounded-full text-xs font-bold animate-pulse">
+                                <Play class="w-2.5 h-2.5" /> Berjalan
+                            </span>
+                            <span v-else class="font-bold text-gray-600 dark:text-gray-300">{{ fmtDuration(s.duration_minutes) }}</span>
+                        </div>
+                        <div class="space-y-0.5 text-gray-500">
+                            <p class="flex items-center gap-1.5"><Play class="w-3 h-3 text-emerald-500" /> {{ fmtDatetime(s.started_at) }}</p>
+                            <p v-if="s.ended_at" class="flex items-center gap-1.5"><Pause class="w-3 h-3 text-amber-500" /> {{ fmtDatetime(s.ended_at) }}</p>
+                            <p v-else class="flex items-center gap-1.5 text-violet-500 font-medium"><Timer class="w-3 h-3 animate-pulse" /> Sedang berjalan...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-shrink-0 p-4 border-t border-gray-100 dark:border-gray-700">
+                    <button @click="showSessionsModal = false"
+                        class="w-full py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-semibold active:scale-95 transition-all">
+                        Tutup
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- ====== MODAL TURUN MESIN ====== -->
         <div v-if="showOffMachineModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
@@ -1205,7 +1420,7 @@ const exportExcel = () => {
                     </div>
                     <p class="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 rounded-xl p-3">
                         <AlertCircle class="w-3.5 h-3.5 flex-shrink-0" />
-                        Durasi di mesin dihitung otomatis. Status berubah ke <strong>Repair di Bengkel</strong>.
+                        Durasi di mesin dihitung otomatis. Status berubah ke <strong>Repair di Bengkel</strong>. Timer repair bisa dimulai setelah ini.
                     </p>
                     <div class="flex gap-3">
                         <button type="button" @click="showOffMachineModal = false"
@@ -1247,7 +1462,9 @@ const exportExcel = () => {
                             </span>
                         </div>
                         <p class="text-xs text-violet-500 font-semibold mt-1.5 flex items-center gap-1">
-                            <Timer class="w-3 h-3" /> Durasi total dihitung otomatis saat ditutup
+                            <Timer class="w-3 h-3" />
+                            Repair: {{ selectedCm.repair_duration ?? (hasActiveSession(selectedCm) ? (liveTimers[selectedCm.id] ?? 'Berjalan...') : 'Belum ada sesi') }}
+                            <span v-if="hasActiveSession(selectedCm)" class="text-amber-500">(sesi aktif akan otomatis ditutup)</span>
                         </p>
                     </div>
                     <div>
@@ -1282,7 +1499,7 @@ const exportExcel = () => {
                     </div>
                     <h3 class="text-base font-bold text-gray-900 dark:text-white mb-1">Hapus Laporan?</h3>
                     <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ selectedCm.dies?.no_part ?? selectedCm.dies_id }}</p>
-                    <p class="text-xs text-gray-400 mt-1 mb-5">Foto dan sparepart terkait akan ikut dihapus.</p>
+                    <p class="text-xs text-gray-400 mt-1 mb-5">Foto, sparepart, dan riwayat sesi repair akan ikut dihapus.</p>
                     <div class="flex gap-3">
                         <button @click="showDelModal = false"
                             class="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">
@@ -1297,7 +1514,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- Lightbox -->
         <Teleport to="body">
             <div v-if="lightboxSrc" class="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                 @click="lightboxSrc = null">
@@ -1308,7 +1524,6 @@ const exportExcel = () => {
             </div>
         </Teleport>
 
-        <!-- Photo Picker -->
         <Teleport to="body">
             <div v-if="showPhotoPicker"
                 class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-end justify-center p-4"

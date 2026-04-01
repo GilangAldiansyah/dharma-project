@@ -1,9 +1,13 @@
 <?php
+
 namespace App\Models;
+
 use Illuminate\Database\Eloquent\Model;
+
 class DiesCorrective extends Model
 {
     protected $table = 'dies_corrective';
+
     protected $fillable = [
         'report_no',
         'dies_id',
@@ -19,20 +23,24 @@ class DiesCorrective extends Model
         'action',
         'photos',
         'status',
+        'repair_started_at',
         'closed_by',
         'closed_at',
         'off_machine_at',
         'created_by',
     ];
+
     protected $casts = [
         'photos'                   => 'array',
         'report_date'              => 'datetime',
         'closed_at'                => 'datetime',
         'off_machine_at'           => 'datetime',
+        'repair_started_at'        => 'datetime',
         'stroke_at_maintenance'    => 'integer',
         'repair_duration_minutes'  => 'integer',
         'machine_duration_minutes' => 'integer',
     ];
+
     protected $appends = ['repair_duration', 'machine_duration'];
 
     public function getRepairDurationAttribute(): string|null
@@ -59,21 +67,30 @@ class DiesCorrective extends Model
     {
         return $this->belongsTo(Dies::class, 'dies_id', 'id_sap');
     }
+
     public function process()
     {
         return $this->belongsTo(DiesProcess::class, 'process_id');
     }
+
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
     public function closedBy()
     {
         return $this->belongsTo(User::class, 'closed_by');
     }
+
     public function spareparts()
     {
         return $this->hasMany(DiesHistorySparepart::class, 'maintenance_id')
             ->where('tipe', 'corrective');
+    }
+
+    public function repairSessions()
+    {
+        return $this->hasMany(DiesCorrectiveRepairSession::class, 'corrective_id')->orderBy('started_at');
     }
 }

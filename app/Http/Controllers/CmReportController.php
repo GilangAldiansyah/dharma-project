@@ -21,26 +21,33 @@ class CmReportController extends Controller
 
         $year = $request->year ?? now()->year;
 
-        $reports = CmReport::with([
-            'jig:id,name,type,line',
-            'pic:id,name',
-            'closedBy:id,name',
-            'spareparts.sparepart:id,name,satuan',
-        ])
-        ->when($request->status, fn($q) => $q->where('status', $request->status))
-        ->when($request->jig_id, fn($q) => $q->where('jig_id', $request->jig_id))
-        ->when($request->month, fn($q) => $q->whereRaw("DATE_FORMAT(report_date, '%Y-%m') = ?", [$year . '-' . $request->month]))
-        ->when(!$request->month, fn($q) => $q->whereYear('report_date', $year))
-        ->latest('report_date')
-        ->get()
-        ->map(fn($r) => array_merge($r->toArray(), [
-            'repair_duration' => $r->repair_duration,
-        ]));
+        $baseQuery = CmReport::query()
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->jig_id, fn($q) => $q->where('jig_id', $request->jig_id))
+            ->when($request->month,  fn($q) => $q->whereRaw("DATE_FORMAT(report_date, '%Y-%m') = ?", [$year . '-' . $request->month]))
+            ->when(!$request->month, fn($q) => $q->whereYear('report_date', $year));
+
+        $reports = (clone $baseQuery)
+            ->with([
+                'jig:id,name,type,line',
+                'pic:id,name',
+                'closedBy:id,name',
+                'spareparts.sparepart:id,name,satuan',
+            ])
+            ->latest('report_date')
+            ->get()
+            ->map(fn($r) => array_merge($r->toArray(), [
+                'repair_duration' => $r->repair_duration,
+            ]));
 
         $summary = [
-            'open'        => CmReport::where('status', 'open')->count(),
-            'in_progress' => CmReport::where('status', 'in_progress')->count(),
-            'closed'      => CmReport::where('status', 'closed')->count(),
+            'open'                 => (clone $baseQuery)->where('status', 'open')->count(),
+            'in_progress'          => (clone $baseQuery)->where('status', 'in_progress')->count(),
+            'closed'               => (clone $baseQuery)->where('status', 'closed')->count(),
+            'total_repair_minutes' => (int) (clone $baseQuery)
+                                        ->whereNotNull('closed_at')
+                                        ->selectRaw('SUM(TIMESTAMPDIFF(MINUTE, report_date, closed_at)) as total')
+                                        ->value('total'),
         ];
 
         $jigs = Jig::select('id', 'name', 'type', 'line')

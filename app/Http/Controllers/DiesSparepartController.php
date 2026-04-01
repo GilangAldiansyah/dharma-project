@@ -30,10 +30,12 @@ class DiesSparepartController extends Controller
 
         $spareparts   = $query->orderBy('sparepart_name')->paginate(20)->withQueryString();
         $lowStokCount = DiesSparepart::whereRaw('stok <= stok_minimum')->count();
+        $totalCount   = DiesSparepart::count();
 
         return Inertia::render('Dies/Sparepart/Index', [
             'spareparts'   => $spareparts,
             'lowStokCount' => $lowStokCount,
+            'totalCount'   => $totalCount,
             'filters'      => $request->only('search', 'filter'),
         ]);
     }
@@ -63,10 +65,11 @@ class DiesSparepartController extends Controller
             ],
             'sparepart_name' => 'required|string',
             'unit'           => 'required|string',
+            'stok'           => 'required|integer|min:0',
             'stok_minimum'   => 'required|integer|min:0',
         ]);
 
-        $diesSparepart->update($request->only('sparepart_code', 'sparepart_name', 'unit', 'stok_minimum'));
+        $diesSparepart->update($request->only('sparepart_code', 'sparepart_name', 'unit', 'stok', 'stok_minimum'));
 
         return back()->with('success', 'Sparepart berhasil diperbarui.');
     }
@@ -118,42 +121,41 @@ class DiesSparepartController extends Controller
     public function bulkUpdate(Request $request)
     {
         $request->validate([
-            'ids'          => 'required|array|min:1',
-            'ids.*'        => 'required|exists:dies_spareparts,id',
-            'stok_tambah'  => 'nullable|integer|min:1',
-            'stok_minimum' => 'nullable|integer|min:0',
-            'notes'        => 'nullable|string',
+            'items'              => 'required|array|min:1',
+            'items.*.id'         => 'required|exists:dies_spareparts,id',
+            'items.*.stok_tambah'=> 'nullable|integer|min:0',
+            'items.*.stok_minimum'=> 'nullable|integer|min:0',
+            'notes'              => 'nullable|string',
         ]);
 
-        if (!$request->filled('stok_tambah') && !$request->filled('stok_minimum') && $request->stok_minimum !== 0) {
-            return back()->with('error', 'Isi minimal salah satu nilai yang ingin diubah.');
-        }
-
         DB::transaction(function () use ($request) {
-            $spareparts = DiesSparepart::whereIn('id', $request->ids)->get();
+            foreach ($request->items as $item) {
+                $sp = DiesSparepart::find($item['id']);
 
-            foreach ($spareparts as $sp) {
-                if ($request->filled('stok_tambah') && $request->stok_tambah > 0) {
-                    $sp->increment('stok', $request->stok_tambah);
+                $stokTambah   = isset($item['stok_tambah'])   ? (int) $item['stok_tambah']   : 0;
+                $stokMinimum  = isset($item['stok_minimum'])  ? (int) $item['stok_minimum']  : null;
+
+                if ($stokTambah > 0) {
+                    $sp->increment('stok', $stokTambah);
 
                     DiesHistorySparepart::create([
                         'tipe'           => 'masuk',
                         'maintenance_id' => null,
                         'sparepart_id'   => $sp->id,
                         'dies_id'        => null,
-                        'quantity'       => $request->stok_tambah,
-                        'notes'          => $request->notes,
+                        'quantity'       => $stokTambah,
+                        'notes'          => $request->notes ?? null,
                         'created_by'     => Auth::id(),
                     ]);
                 }
 
-                if ($request->has('stok_minimum') && $request->stok_minimum !== null) {
-                    $sp->update(['stok_minimum' => $request->stok_minimum]);
+                if ($stokMinimum !== null) {
+                    $sp->update(['stok_minimum' => $stokMinimum]);
                 }
             }
         });
 
-        return back()->with('success', 'Bulk update berhasil untuk ' . count($request->ids) . ' sparepart.');
+        return back()->with('success', 'Stok dan minimum stok berhasil diperbarui secara massal.');
     }
 
     public function historyIndex(Request $request)

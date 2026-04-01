@@ -221,10 +221,18 @@ const createCmBarChart = () => {
                     padding: 10,
                     cornerRadius: 8,
                     callbacks: {
-                        title: (items) => props.cmRanking[items[0].dataIndex]?.no_part ?? '',
+                        title: (items) => {
+                            const r = props.cmRanking[items[0].dataIndex];
+                            return r ? `${r.no_part} — ${r.nama_dies}` : '';
+                        },
                         label: (ctx) => {
                             const r = props.cmRanking[ctx.dataIndex];
-                            return [`  CM: ${ctx.parsed.x}x`, `  Proses: ${r?.process_name ?? '-'}`, `  Line: ${r?.line ?? '-'}`];
+                            return [
+                                `  CM: ${ctx.parsed.x}x`,
+                                `  Proses: ${r?.process_name ?? '-'}`,
+                                `  Line: ${r?.line ?? '-'}`,
+                                r?.last_cm_date ? `  Last: ${r.last_cm_date}` : '',
+                            ].filter(Boolean);
                         },
                     },
                 },
