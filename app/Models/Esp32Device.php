@@ -11,6 +11,7 @@ class Esp32Device extends Model
 {
     protected $fillable = [
         'device_id',
+        'active_part_id',
         'line_id',
         'area_id',
         'counter_a',
@@ -39,27 +40,27 @@ class Esp32Device extends Model
     ];
 
     protected $casts = [
-        'relay_status'        => 'boolean',
-        'error_b'             => 'boolean',
-        'reset_requested'     => 'boolean',
-        'stop_operation'      => 'boolean',
-        'line_stop_requested' => 'boolean',
-        'pause_requested'     => 'boolean',
-        'resume_requested'    => 'boolean',
-        'is_paused'           => 'boolean',
-        'last_update'         => 'datetime',
+        'relay_status'          => 'boolean',
+        'error_b'               => 'boolean',
+        'reset_requested'       => 'boolean',
+        'stop_operation'        => 'boolean',
+        'line_stop_requested'   => 'boolean',
+        'pause_requested'       => 'boolean',
+        'resume_requested'      => 'boolean',
+        'is_paused'             => 'boolean',
+        'last_update'           => 'datetime',
         'production_started_at' => 'datetime',
-        'paused_at'           => 'datetime',
-        'total_pause_seconds' => 'integer',
-        'counter_a'           => 'integer',
-        'counter_b'           => 'integer',
-        'reject'              => 'integer',
-        'cycle_time'          => 'integer',
-        'max_count'           => 'integer',
-        'max_stroke'          => 'integer',
-        'loading_time'        => 'integer',
-        'schedule_breaks'     => 'array',
-        'schedules'           => 'array'
+        'paused_at'             => 'datetime',
+        'total_pause_seconds'   => 'integer',
+        'counter_a'             => 'integer',
+        'counter_b'             => 'integer',
+        'reject'                => 'integer',
+        'cycle_time'            => 'integer',
+        'max_count'             => 'integer',
+        'max_stroke'            => 'integer',
+        'loading_time'          => 'integer',
+        'schedule_breaks'       => 'array',
+        'schedules'             => 'array',
     ];
 
     protected $appends = [
@@ -89,6 +90,11 @@ class Esp32Device extends Model
     public function productionHistories(): HasMany
     {
         return $this->hasMany(Esp32ProductionHistory::class, 'device_id', 'device_id');
+    }
+
+    public function parts(): HasMany
+    {
+        return $this->hasMany(Esp32Part::class, 'device_id', 'device_id');
     }
 
     public function getHasCounterBAttribute(): bool
@@ -123,8 +129,7 @@ class Esp32Device extends Model
         if (!$this->production_started_at || $this->cycle_time == 0) return 0;
 
         $productionStarted = Carbon::parse($this->production_started_at);
-        $actualCounter = (int) $this->counter_a;
-
+        $actualCounter     = (int) $this->counter_a;
         $totalPauseSeconds = (int) $this->total_pause_seconds;
 
         if ($this->is_paused && $this->paused_at) {
@@ -138,24 +143,22 @@ class Esp32Device extends Model
                 ->orderBy('logged_at', 'asc')
                 ->first();
 
-            if ($completionLog) {
-                $completionTime = Carbon::parse($completionLog->logged_at);
-            } else {
-                $completionTime = Carbon::parse($this->last_update);
-            }
+            $completionTime    = $completionLog
+                ? Carbon::parse($completionLog->logged_at)
+                : Carbon::parse($this->last_update);
 
-            $actualTimeSeconds = $completionTime->timestamp - $productionStarted->timestamp;
-            $netTimeSeconds = $actualTimeSeconds - $totalPauseSeconds;
+            $actualTimeSeconds   = $completionTime->timestamp - $productionStarted->timestamp;
+            $netTimeSeconds      = $actualTimeSeconds - $totalPauseSeconds;
             $expectedTimeSeconds = $this->max_count * $this->cycle_time;
 
             return (int)($netTimeSeconds - $expectedTimeSeconds);
         }
 
-        $lastUpdate = Carbon::parse($this->last_update);
-        $elapsedSeconds = $lastUpdate->timestamp - $productionStarted->timestamp;
-        $netElapsedSeconds = $elapsedSeconds - $totalPauseSeconds;
-        $expectedCounter = floor($netElapsedSeconds / $this->cycle_time);
-        $counterDiff = $expectedCounter - $actualCounter;
+        $lastUpdate          = Carbon::parse($this->last_update);
+        $elapsedSeconds      = $lastUpdate->timestamp - $productionStarted->timestamp;
+        $netElapsedSeconds   = $elapsedSeconds - $totalPauseSeconds;
+        $expectedCounter     = floor($netElapsedSeconds / $this->cycle_time);
+        $counterDiff         = $expectedCounter - $actualCounter;
 
         return (int)($counterDiff * $this->cycle_time);
     }
@@ -170,126 +173,111 @@ class Esp32Device extends Model
         return $this->counter_a >= $this->max_count;
     }
 
-    public function getScheduleBreaksFormattedAttribute()
+    public function getActiveSchedule(): array
     {
-        return $this->schedule_breaks ?? [];
-    }
+        $schedules = $this->schedules;
 
-public function getActiveSchedule(): array
-{
-    $schedules = $this->schedules;
+        if (empty($schedules)) {
+            return [
+                'shift'  => null,
+                'start'  => $this->schedule_start_time ? substr($this->schedule_start_time, 0, 5) : '07:00',
+                'end'    => $this->schedule_end_time ? substr($this->schedule_end_time, 0, 5) : '16:00',
+                'breaks' => $this->schedule_breaks ?? [],
+            ];
+        }
 
-    if (empty($schedules)) {
-        return [
-            'shift'  => null,
-            'start'  => $this->schedule_start_time ? substr($this->schedule_start_time, 0, 5) : '07:00',
-            'end'    => $this->schedule_end_time ? substr($this->schedule_end_time, 0, 5) : '16:00',
-            'breaks' => $this->schedule_breaks ?? [],
-        ];
-    }
+        $referenceTime    = $this->production_started_at
+            ? Carbon::parse($this->production_started_at)
+            : Carbon::parse($this->last_update);
 
-    $referenceTime = $this->production_started_at
-        ? Carbon::parse($this->production_started_at)
-        : Carbon::parse($this->last_update);
+        $referenceMinutes = ($referenceTime->hour * 60) + $referenceTime->minute;
 
-    $referenceMinutes = ($referenceTime->hour * 60) + $referenceTime->minute;
+        foreach ($schedules as $schedule) {
+            $startParts   = explode(':', $schedule['start']);
+            $endParts     = explode(':', $schedule['end']);
+            $startMinutes = ((int)$startParts[0] * 60) + (int)$startParts[1];
+            $endMinutes   = ((int)$endParts[0] * 60) + (int)$endParts[1];
 
-    foreach ($schedules as $schedule) {
-        $startParts   = explode(':', $schedule['start']);
-        $endParts     = explode(':', $schedule['end']);
-        $startMinutes = ((int)$startParts[0] * 60) + (int)$startParts[1];
-        $endMinutes   = ((int)$endParts[0] * 60) + (int)$endParts[1];
-
-        if ($endMinutes <= $startMinutes) {
-            if ($referenceMinutes >= $startMinutes || $referenceMinutes < $endMinutes) {
-                return $schedule;
-            }
-        } else {
-            if ($referenceMinutes >= $startMinutes && $referenceMinutes < $endMinutes) {
-                return $schedule;
+            if ($endMinutes <= $startMinutes) {
+                if ($referenceMinutes >= $startMinutes || $referenceMinutes < $endMinutes) {
+                    return $schedule;
+                }
+            } else {
+                if ($referenceMinutes >= $startMinutes && $referenceMinutes < $endMinutes) {
+                    return $schedule;
+                }
             }
         }
-    }
 
-    return $schedules[0];
-}
+        return $schedules[0];
+    }
 
     public function autoStartLineOperation(): ?LineOperation
     {
-        if (!$this->line_id) {
-            return null;
-        }
+        if (!$this->line_id) return null;
 
-        $line = $this->line;
-
+        $line             = $this->line;
         $currentOperation = $line->currentOperation;
 
-        if ($currentOperation) {
-            return $currentOperation;
-        }
+        if ($currentOperation) return $currentOperation;
 
         $operation = LineOperation::create([
-            'line_id' => $this->line_id,
+            'line_id'          => $this->line_id,
             'operation_number' => LineOperation::generateOperationNumber(),
-            'started_at' => now(),
-            'started_by' => 'System (Auto-started from ESP32: ' . $this->device_id . ')',
-            'status' => 'running',
-            'notes' => 'Operation otomatis dibuat dari ESP32 device: ' . $this->device_id,
+            'started_at'       => now(),
+            'started_by'       => 'System (Auto-started from ESP32: ' . $this->device_id . ')',
+            'status'           => 'running',
+            'notes'            => 'Operation otomatis dibuat dari ESP32 device: ' . $this->device_id,
         ]);
 
         $line->update([
-            'status' => 'operating',
+            'status'               => 'operating',
             'last_operation_start' => now(),
         ]);
 
         return $operation;
     }
 
-  public function autoStopLineOperation(): void
-{
-    if (!$this->line_id) {
-        return;
+    public function autoStopLineOperation(): void
+    {
+        if (!$this->line_id) return;
+
+        $line = Line::with('currentOperation')->find($this->line_id);
+        if (!$line) return;
+
+        $currentOperation = $line->currentOperation;
+
+        if (!$currentOperation) {
+            $line->update(['status' => 'stopped']);
+            return;
+        }
+
+        $totalPauseMinutes = $currentOperation->total_pause_minutes ?? 0;
+        if ($currentOperation->status === 'paused' && $currentOperation->paused_at) {
+            $pauseDurationSeconds = $currentOperation->paused_at->diffInSeconds(now());
+            $totalPauseMinutes   += $pauseDurationSeconds / 60;
+        }
+
+        $currentOperation->update([
+            'stopped_at'         => now(),
+            'stopped_by'         => 'System (Auto-stopped from ESP32: ' . $this->device_id . ')',
+            'status'             => 'stopped',
+            'total_pause_minutes'=> $totalPauseMinutes,
+            'paused_at'          => null,
+            'notes'              => ($currentOperation->notes ? $currentOperation->notes . "\n" : '') .
+                                    'Operation otomatis dihentikan dari ESP32 device (counter reset to 0)',
+        ]);
+
+        $currentOperation->refresh();
+
+        if ($currentOperation->started_at && $currentOperation->stopped_at) {
+            $totalSeconds    = $currentOperation->started_at->diffInSeconds($currentOperation->stopped_at);
+            $pauseSeconds    = ($currentOperation->total_pause_minutes ?? 0) * 60;
+            $netSeconds      = max(0, $totalSeconds - $pauseSeconds);
+            $currentOperation->duration_minutes = $netSeconds / 60;
+            $currentOperation->save();
+        }
+
+        $line->autoArchiveAndReset('Auto-reset from ESP32 device: ' . $this->device_id . ' (counter reset to 0)');
     }
-
-    $line = Line::with('currentOperation')->find($this->line_id);
-
-    if (!$line) {
-        return;
-    }
-
-    $currentOperation = $line->currentOperation;
-
-    if (!$currentOperation) {
-        $line->update(['status' => 'stopped']);
-        return;
-    }
-
-    $totalPauseMinutes = $currentOperation->total_pause_minutes ?? 0;
-    if ($currentOperation->status === 'paused' && $currentOperation->paused_at) {
-        $pauseDurationSeconds = $currentOperation->paused_at->diffInSeconds(now());
-        $totalPauseMinutes += $pauseDurationSeconds / 60;
-    }
-
-    $currentOperation->update([
-        'stopped_at' => now(),
-        'stopped_by' => 'System (Auto-stopped from ESP32: ' . $this->device_id . ')',
-        'status' => 'stopped',
-        'total_pause_minutes' => $totalPauseMinutes,
-        'paused_at' => null,
-        'notes' => ($currentOperation->notes ? $currentOperation->notes . "\n" : '') .
-                'Operation otomatis dihentikan dari ESP32 device (counter reset to 0)',
-    ]);
-
-    $currentOperation->refresh();
-
-    if ($currentOperation->started_at && $currentOperation->stopped_at) {
-        $totalSeconds = $currentOperation->started_at->diffInSeconds($currentOperation->stopped_at);
-        $pauseSeconds = ($currentOperation->total_pause_minutes ?? 0) * 60;
-        $netSeconds = max(0, $totalSeconds - $pauseSeconds);
-        $currentOperation->duration_minutes = $netSeconds / 60;
-        $currentOperation->save();
-    }
-
-    $line->autoArchiveAndReset('Auto-reset from ESP32 device: ' . $this->device_id . ' (counter reset to 0)');
-}
 }

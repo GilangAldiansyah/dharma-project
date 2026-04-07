@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Esp32Device;
 use App\Models\Esp32Log;
+use App\Models\Esp32Part;
 use App\Models\Esp32ProductionHistory;
 use App\Models\Line;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class ESP32ApiController extends Controller
                 'device_id'           => 'required|string|max:100',
                 'counter_a'           => 'required|integer',
                 'counter_b'           => 'nullable|integer',
+                'part_id'             => 'nullable|string|max:100',
                 'relay_status'        => 'nullable|boolean',
                 'error_B'             => 'nullable|boolean',
                 'stop_operation'      => 'nullable|boolean',
@@ -34,15 +36,25 @@ class ESP32ApiController extends Controller
             $oldDevice = Esp32Device::where('device_id', $validated['device_id'])->first();
 
             if (!$oldDevice) {
+                $partId   = $validated['part_id'] ?? null;
+                $partData = $this->resolvePartData($validated['device_id'], $partId, null);
+
+                if ($partId) {
+                    Esp32Part::where('device_id', $validated['device_id'])
+                        ->where('part_id', $partId)
+                        ->update(['production_started_at' => now()]);
+                }
+
                 $device = Esp32Device::create([
                     'device_id'             => $validated['device_id'],
+                    'active_part_id'        => $partId,
                     'counter_a'             => $validated['counter_a'],
                     'counter_b'             => $validated['counter_b'] ?? 0,
                     'reject'                => 0,
-                    'cycle_time'            => 3,
-                    'max_count'             => 100,
-                    'max_stroke'            => 0,
-                    'loading_time'          => 300,
+                    'cycle_time'            => $partData['cycle_time'],
+                    'max_count'             => $partData['max_count'],
+                    'max_stroke'            => $partData['max_stroke'],
+                    'loading_time'          => $partData['max_count'] * $partData['cycle_time'],
                     'production_started_at' => now(),
                     'relay_status'          => $validated['relay_status'] ?? false,
                     'error_b'               => $validated['error_B'] ?? false,
@@ -59,13 +71,14 @@ class ESP32ApiController extends Controller
 
                 Esp32Log::create([
                     'device_id'             => $validated['device_id'],
+                    'part_id'               => $partId,
                     'counter_a'             => $validated['counter_a'],
                     'counter_b'             => $validated['counter_b'] ?? 0,
                     'reject'                => 0,
-                    'cycle_time'            => 3,
-                    'max_count'             => 100,
-                    'max_stroke'            => 0,
-                    'loading_time'          => 300,
+                    'cycle_time'            => $partData['cycle_time'],
+                    'max_count'             => $partData['max_count'],
+                    'max_stroke'            => $partData['max_stroke'],
+                    'loading_time'          => $partData['max_count'] * $partData['cycle_time'],
                     'production_started_at' => $device->production_started_at,
                     'relay_status'          => $validated['relay_status'] ?? false,
                     'error_b'               => $validated['error_B'] ?? false,
@@ -88,6 +101,7 @@ class ESP32ApiController extends Controller
                 $oldDevice->update([
                     'counter_a'             => 0,
                     'counter_b'             => 0,
+                    'active_part_id'        => null,
                     'relay_status'          => $validated['relay_status'] ?? $oldDevice->relay_status,
                     'error_b'               => $validated['error_B'] ?? $oldDevice->error_b,
                     'stop_operation'        => false,
@@ -99,11 +113,15 @@ class ESP32ApiController extends Controller
                     'reset_requested'       => false,
                 ]);
 
+                Esp32Part::where('device_id', $validated['device_id'])
+                    ->update(['production_started_at' => null]);
+
                 $oldDevice->refresh();
                 $oldDevice->autoStopLineOperation();
 
                 Esp32Log::create([
                     'device_id'             => $validated['device_id'],
+                    'part_id'               => null,
                     'counter_a'             => 0,
                     'counter_b'             => 0,
                     'reject'                => $oldDevice->reject,
@@ -134,9 +152,9 @@ class ESP32ApiController extends Controller
 
                 if ($line) {
                     $line->update([
-                        'status'              => 'maintenance',
-                        'last_line_stop'      => now(),
-                        'pending_line_stop'   => true,
+                        'status'            => 'maintenance',
+                        'last_line_stop'    => now(),
+                        'pending_line_stop' => true,
                     ]);
 
                     try {
@@ -160,7 +178,7 @@ class ESP32ApiController extends Controller
 
                 return response()->json([
                     'success'        => true,
-                    'message'        => "Line stop triggered for {$validated['device_id']}, awaiting confirmation from web",
+                    'message'        => "Line stop triggered for {$validated['device_id']}",
                     'new_max_count'  => $oldDevice->max_count,
                     'new_cycle_time' => $oldDevice->cycle_time,
                     'reset_counter'  => false,
@@ -172,16 +190,12 @@ class ESP32ApiController extends Controller
 
                 if ($line) {
                     $currentOperation = $line->currentOperation;
-
                     if ($currentOperation && $currentOperation->status === 'running') {
                         $currentOperation->pause('ESP32: ' . $oldDevice->device_id);
                         $line->update(['status' => 'paused']);
 
                         if (!$oldDevice->is_paused) {
-                            $oldDevice->update([
-                                'is_paused' => true,
-                                'paused_at' => now(),
-                            ]);
+                            $oldDevice->update(['is_paused' => true, 'paused_at' => now()]);
                         }
                     }
                 }
@@ -207,7 +221,6 @@ class ESP32ApiController extends Controller
 
                 if ($line) {
                     $currentOperation = $line->currentOperation;
-
                     if ($currentOperation && $currentOperation->status === 'paused') {
                         $currentOperation->resume('ESP32: ' . $oldDevice->device_id);
                         $line->update(['status' => 'operating']);
@@ -239,17 +252,18 @@ class ESP32ApiController extends Controller
                 ], 200);
             }
 
-            $resetRequested = $oldDevice->reset_requested ?? false;
+            $incomingPartId  = $validated['part_id'] ?? null;
+            $currentPartId   = $oldDevice->active_part_id;
+            $partChanged     = $incomingPartId !== null && $incomingPartId !== $currentPartId;
+            $resetRequested  = $oldDevice->reset_requested ?? false;
 
             $counterChanged = $oldDevice->counter_a != $validated['counter_a'] ||
-            $oldDevice->counter_b != ($validated['counter_b'] ?? 0);
-
-            $errorChanged = $oldDevice->error_b != ($validated['error_B'] ?? false);
+                              $oldDevice->counter_b != ($validated['counter_b'] ?? 0);
+            $errorChanged   = $oldDevice->error_b != ($validated['error_B'] ?? false);
 
             $secondsSinceLastUpdate = now()->diffInSeconds(Carbon::parse($oldDevice->last_update));
-            $isDuplicate = !$counterChanged && !$errorChanged && $secondsSinceLastUpdate < 3;
-
-            $shouldLog = ($counterChanged || $errorChanged) && !$isDuplicate;
+            $isDuplicate            = !$counterChanged && !$errorChanged && $secondsSinceLastUpdate < 3;
+            $shouldLog              = ($counterChanged || $errorChanged) && !$isDuplicate;
 
             $productionStartedAt = $oldDevice->production_started_at;
             $totalPauseSeconds   = $oldDevice->total_pause_seconds;
@@ -257,9 +271,39 @@ class ESP32ApiController extends Controller
             $pausedAt            = $oldDevice->paused_at;
             $lastUpdate          = $oldDevice->last_update;
 
+            if ($partChanged) {
+                $this->saveProductionHistory($oldDevice);
+                $oldDevice->refresh();
+
+                $partData = $this->resolvePartData($validated['device_id'], $incomingPartId, $oldDevice);
+
+                Esp32Part::where('device_id', $validated['device_id'])
+                    ->where('part_id', $incomingPartId)
+                    ->update(['production_started_at' => now()]);
+
+                $productionStartedAt = now();
+                $totalPauseSeconds   = 0;
+                $isPaused            = false;
+                $pausedAt            = null;
+                $lastUpdate          = now();
+
+                $oldDevice->update([
+                    'active_part_id' => $incomingPartId,
+                    'max_count'      => $partData['max_count'],
+                    'max_stroke'     => $partData['max_stroke'],
+                    'cycle_time'     => $partData['cycle_time'],
+                    'loading_time'   => $partData['max_count'] * $partData['cycle_time'],
+                ]);
+            } else {
+                $partData = [
+                    'max_count'  => $oldDevice->max_count,
+                    'max_stroke' => $oldDevice->max_stroke,
+                    'cycle_time' => $oldDevice->cycle_time,
+                ];
+            }
+
             if ($counterChanged) {
                 $lastUpdate = now();
-
                 if ($isPaused) {
                     $pauseDuration      = now()->timestamp - Carbon::parse($pausedAt)->timestamp;
                     $totalPauseSeconds += $pauseDuration;
@@ -268,11 +312,13 @@ class ESP32ApiController extends Controller
                 }
             }
 
-            if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0) {
+            if ($oldDevice->counter_a > 0 && $validated['counter_a'] == 0 && !$partChanged) {
                 $this->saveProductionHistory($oldDevice);
-
                 $oldDevice->refresh();
                 $oldDevice->autoStopLineOperation();
+
+                Esp32Part::where('device_id', $validated['device_id'])
+                    ->update(['production_started_at' => null]);
 
                 $productionStartedAt = now();
                 $totalPauseSeconds   = 0;
@@ -282,20 +328,30 @@ class ESP32ApiController extends Controller
             } elseif ($oldDevice->counter_a == 0 && $validated['counter_a'] > 0) {
                 $oldDevice->autoStartLineOperation();
 
-                if ($oldDevice->cycle_time > 0) {
-                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time + $totalPauseSeconds);
-                } else {
-                    $productionStartedAt = now();
+                if ($incomingPartId) {
+                    Esp32Part::where('device_id', $validated['device_id'])
+                        ->where('part_id', $incomingPartId)
+                        ->update(['production_started_at' => now()]);
                 }
+
+                $effectiveCycleTime  = $partData['cycle_time'];
+                $productionStartedAt = $effectiveCycleTime > 0
+                    ? now()->subSeconds($validated['counter_a'] * $effectiveCycleTime + $totalPauseSeconds)
+                    : now();
                 $lastUpdate = now();
             } elseif (!$productionStartedAt && $validated['counter_a'] > 0) {
                 $oldDevice->autoStartLineOperation();
 
-                if ($oldDevice->cycle_time > 0) {
-                    $productionStartedAt = now()->subSeconds($validated['counter_a'] * $oldDevice->cycle_time + $totalPauseSeconds);
-                } else {
-                    $productionStartedAt = now();
+                if ($incomingPartId) {
+                    Esp32Part::where('device_id', $validated['device_id'])
+                        ->where('part_id', $incomingPartId)
+                        ->update(['production_started_at' => now()]);
                 }
+
+                $effectiveCycleTime  = $partData['cycle_time'];
+                $productionStartedAt = $effectiveCycleTime > 0
+                    ? now()->subSeconds($validated['counter_a'] * $effectiveCycleTime + $totalPauseSeconds)
+                    : now();
                 $lastUpdate = now();
             } elseif (!$productionStartedAt) {
                 $productionStartedAt = now();
@@ -317,13 +373,14 @@ class ESP32ApiController extends Controller
             if ($shouldLog) {
                 Esp32Log::create([
                     'device_id'             => $validated['device_id'],
+                    'part_id'               => $incomingPartId ?? $currentPartId,
                     'counter_a'             => $validated['counter_a'],
                     'counter_b'             => $validated['counter_b'] ?? $oldDevice->counter_b,
                     'reject'                => $oldDevice->reject,
-                    'cycle_time'            => $oldDevice->cycle_time,
-                    'max_count'             => $oldDevice->max_count,
-                    'max_stroke'            => $oldDevice->max_stroke,
-                    'loading_time'          => $oldDevice->loading_time,
+                    'cycle_time'            => $partData['cycle_time'],
+                    'max_count'             => $partData['max_count'],
+                    'max_stroke'            => $partData['max_stroke'],
+                    'loading_time'          => $partData['max_count'] * $partData['cycle_time'],
                     'production_started_at' => $productionStartedAt,
                     'relay_status'          => $validated['relay_status'] ?? $oldDevice->relay_status,
                     'error_b'               => $validated['error_B'] ?? $oldDevice->error_b,
@@ -350,34 +407,59 @@ class ESP32ApiController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors'  => $e->errors()
+                'errors'  => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             Log::error('ESP32 POST Error', [
                 'message' => $e->getMessage(),
-                'trace'   => $e->getTraceAsString()
+                'trace'   => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Internal Server Error'
+                'message' => 'Internal Server Error',
             ], 500);
         }
     }
 
-    private function saveProductionHistory(Esp32Device $device)
+    private function resolvePartData(string $deviceId, ?string $partId, ?Esp32Device $device): array
     {
-        if (!$device->production_started_at || $device->counter_a == 0) {
-            return;
-        }
+        $defaults = [
+            'max_count'  => $device?->max_count  ?? 100,
+            'max_stroke' => $device?->max_stroke  ?? 0,
+            'cycle_time' => $device?->cycle_time  ?? 3,
+        ];
 
-        $productionStarted = Carbon::parse($device->production_started_at);
+        if (!$partId) return $defaults;
+
+        $part = Esp32Part::firstOrCreate(
+            ['device_id' => $deviceId, 'part_id' => $partId],
+            [
+                'part_name'  => $partId,
+                'max_count'  => $defaults['max_count'],
+                'max_stroke' => $defaults['max_stroke'],
+                'cycle_time' => $defaults['cycle_time'],
+            ]
+        );
+
+        return [
+            'max_count'  => $part->max_count,
+            'max_stroke' => $part->max_stroke,
+            'cycle_time' => $part->cycle_time,
+        ];
+    }
+
+    private function saveProductionHistory(Esp32Device $device): void
+    {
+        if (!$device->production_started_at || $device->counter_a == 0) return;
+
+        $productionStarted  = Carbon::parse($device->production_started_at);
         $productionFinished = Carbon::parse($device->last_update);
 
-        $actualTimeSeconds = $productionFinished->timestamp - $productionStarted->timestamp;
-        $netTimeSeconds = $actualTimeSeconds - $device->total_pause_seconds;
+        $actualTimeSeconds   = $productionFinished->timestamp - $productionStarted->timestamp;
+        $netTimeSeconds      = $actualTimeSeconds - $device->total_pause_seconds;
         $expectedTimeSeconds = $device->counter_a * $device->cycle_time;
-        $delaySeconds = $netTimeSeconds - $expectedTimeSeconds;
+        $delaySeconds        = $netTimeSeconds - $expectedTimeSeconds;
 
         if (abs($delaySeconds) <= $device->cycle_time) {
             $completionStatus = 'on_time';
@@ -387,37 +469,42 @@ class ESP32ApiController extends Controller
             $completionStatus = 'ahead';
         }
 
+        $partName = null;
+        if ($device->active_part_id) {
+            $part     = Esp32Part::where('device_id', $device->device_id)
+                            ->where('part_id', $device->active_part_id)
+                            ->first();
+            $partName = $part?->part_name ?? $device->active_part_id;
+        }
+
         Esp32ProductionHistory::create([
-            'device_id' => $device->device_id,
-            'total_counter_a' => $device->counter_a,
-            'total_counter_b' => $device->counter_b,
-            'total_reject' => $device->reject,
-            'cycle_time' => $device->cycle_time,
-            'max_count' => $device->max_count,
-            'max_stroke' => $device->max_stroke,
-            'expected_time_seconds' => $expectedTimeSeconds,
-            'actual_time_seconds' => $netTimeSeconds,
-            'delay_seconds' => $delaySeconds,
-            'production_started_at' => $productionStarted,
+            'device_id'              => $device->device_id,
+            'part_id'                => $device->active_part_id,
+            'part_name'              => $partName,
+            'total_counter_a'        => $device->counter_a,
+            'total_counter_b'        => $device->counter_b,
+            'total_reject'           => $device->reject,
+            'cycle_time'             => $device->cycle_time,
+            'max_count'              => $device->max_count,
+            'max_stroke'             => $device->max_stroke,
+            'expected_time_seconds'  => $expectedTimeSeconds,
+            'actual_time_seconds'    => $netTimeSeconds,
+            'delay_seconds'          => $delaySeconds,
+            'production_started_at'  => $productionStarted,
             'production_finished_at' => $productionFinished,
-            'completion_status' => $completionStatus,
+            'completion_status'      => $completionStatus,
         ]);
     }
 
     public function getStatus()
     {
         try {
-            $devices = Esp32Device::orderBy('last_update', 'desc')->get();
-
             return response()->json([
                 'success' => true,
-                'data' => $devices
+                'data'    => Esp32Device::orderBy('last_update', 'desc')->get(),
             ], 200);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch devices'
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'Failed to fetch devices'], 500);
         }
     }
 
@@ -429,15 +516,9 @@ class ESP32ApiController extends Controller
                 ->limit(100)
                 ->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $logs
-            ], 200);
+            return response()->json(['success' => true, 'data' => $logs], 200);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch history'
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'Failed to fetch history'], 500);
         }
     }
 
@@ -448,43 +529,39 @@ class ESP32ApiController extends Controller
                 ->orderBy('last_update', 'desc')
                 ->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $devices
-            ], 200);
+            return response()->json(['success' => true, 'data' => $devices], 200);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch device list'
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'Failed to fetch device list'], 500);
         }
     }
 
-    private function autoStopIdleDevices()
+    private function autoStopIdleDevices(): void
     {
         Esp32Device::where('counter_a', '>', 0)
             ->whereNotNull('production_started_at')
             ->where('last_update', '<=', now()->subHour(2))
             ->each(function ($device) {
                 $this->saveProductionHistory($device);
-
                 $device->update([
                     'counter_a'             => 0,
                     'counter_b'             => 0,
                     'reject'                => 0,
+                    'active_part_id'        => null,
                     'production_started_at' => null,
                     'is_paused'             => false,
                     'paused_at'             => null,
                     'total_pause_seconds'   => 0,
                     'reset_requested'       => true,
                 ]);
+
+                Esp32Part::where('device_id', $device->device_id)
+                    ->update(['production_started_at' => null]);
             });
     }
 
-    private function checkLineSchedules()
+    private function checkLineSchedules(): void
     {
         $scheduleService = app(\App\Services\LineScheduleService::class);
-
         Line::where('is_archived', false)
             ->whereIn('status', ['operating', 'paused'])
             ->each(fn($line) => $scheduleService->checkAndApplySchedule($line));

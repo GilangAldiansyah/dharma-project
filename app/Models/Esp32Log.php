@@ -1,14 +1,12 @@
 <?php
-
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Model;
 use App\Helpers\DateHelper;
-
 class Esp32Log extends Model
 {
     protected $fillable = [
         'device_id',
+        'part_id',
         'counter_a',
         'counter_b',
         'reject',
@@ -25,7 +23,6 @@ class Esp32Log extends Model
         'logged_at',
         'shift',
     ];
-
     protected $casts = [
         'relay_status' => 'boolean',
         'error_b' => 'boolean',
@@ -35,9 +32,7 @@ class Esp32Log extends Model
         'paused_at' => 'datetime',
         'total_pause_seconds' => 'integer',
     ];
-
     protected $appends = ['has_counter_b', 'shift_label'];
-
     protected static function booted()
     {
         static::creating(function ($log) {
@@ -46,17 +41,14 @@ class Esp32Log extends Model
             }
         });
     }
-
     public function getHasCounterBAttribute(): bool
     {
         return $this->counter_b > 0 || $this->max_stroke > 0;
     }
-
     public function getShiftLabelAttribute(): string
     {
         return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
     }
-
     public function scopeByShift($query, int $shift)
     {
         return $query->where('shift', $shift);

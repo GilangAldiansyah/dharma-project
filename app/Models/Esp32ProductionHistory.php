@@ -10,6 +10,8 @@ class Esp32ProductionHistory extends Model
 {
     protected $fillable = [
         'device_id',
+        'part_id',
+        'part_name',
         'total_counter_a',
         'total_counter_b',
         'total_reject',
@@ -22,17 +24,16 @@ class Esp32ProductionHistory extends Model
         'production_started_at',
         'production_finished_at',
         'completion_status',
-        'shift', // ← TAMBAHAN
+        'shift',
     ];
 
     protected $casts = [
-        'production_started_at' => 'datetime',
+        'production_started_at'  => 'datetime',
         'production_finished_at' => 'datetime',
     ];
 
-    protected $appends = ['shift_label']; // ← TAMBAHAN
+    protected $appends = ['shift_label'];
 
-    // ← TAMBAHAN: Auto-detect shift saat create
     protected static function booted()
     {
         static::creating(function ($history) {
@@ -47,7 +48,6 @@ class Esp32ProductionHistory extends Model
         return $this->belongsTo(Esp32Device::class, 'device_id', 'device_id');
     }
 
-    // ← TAMBAHAN: Accessor untuk shift label
     public function getShiftLabelAttribute(): string
     {
         return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
@@ -65,19 +65,15 @@ class Esp32ProductionHistory extends Model
 
     private function formatTime(int $seconds): string
     {
-        $hours = floor($seconds / 3600);
+        $hours   = floor($seconds / 3600);
         $minutes = floor(($seconds % 3600) / 60);
-        $secs = $seconds % 60;
+        $secs    = $seconds % 60;
 
-        if ($hours > 0) {
-            return "{$hours}h {$minutes}m {$secs}s";
-        } elseif ($minutes > 0) {
-            return "{$minutes}m {$secs}s";
-        }
+        if ($hours > 0)   return "{$hours}h {$minutes}m {$secs}s";
+        if ($minutes > 0) return "{$minutes}m {$secs}s";
         return "{$secs}s";
     }
 
-    // ← TAMBAHAN: Scope untuk filter by shift
     public function scopeByShift($query, int $shift)
     {
         return $query->where('shift', $shift);

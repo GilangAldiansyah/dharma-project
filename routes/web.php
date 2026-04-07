@@ -135,6 +135,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/esp32/monitor/update-settings', [ESP32Controller::class, 'updateSettings'])->name('esp32.update-settings');
         Route::post('/esp32/monitor/update-history-ng', [ESP32Controller::class, 'updateHistoryNg'])->name('esp32.update-history-ng');
         Route::post('/esp32/monitor/update-schedule', [ESP32Controller::class, 'updateSchedule'])->name('esp32.update-schedule');
+        Route::post('/esp32/monitor/update-part-settings', [ESP32Controller::class, 'updatePartSettings']);
     });
 
     // ── Materials ─────────────────────────────────────────────────────────────

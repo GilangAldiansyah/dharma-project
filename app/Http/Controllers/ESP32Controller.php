@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Esp32Device;
 use App\Models\Esp32Log;
 use App\Models\Esp32ProductionHistory;
+use App\Models\Esp32Part;
 use App\Models\Area;
 use App\Models\Line;
 use Illuminate\Http\Request;
@@ -18,7 +19,7 @@ class ESP32Controller extends Controller
         $areaId = $request->input('area');
 
         $devices = Esp32Device::query()
-            ->with(['area', 'line'])
+            ->with(['area', 'line', 'parts'])
             ->when($search, function ($query, $search) {
                 $query->where('device_id', 'like', "%{$search}%");
             })
@@ -51,7 +52,7 @@ class ESP32Controller extends Controller
     public function detail($deviceId, Request $request)
     {
         $device = Esp32Device::where('device_id', $deviceId)
-            ->with(['area', 'line'])
+            ->with(['area', 'line', 'parts'])
             ->firstOrFail();
 
         $device->active_schedule = $device->getActiveSchedule();
@@ -89,13 +90,13 @@ class ESP32Controller extends Controller
     public function updateSettings(Request $request)
     {
         $validated = $request->validate([
-            'device_id'    => 'required|string|exists:esp32_devices,device_id',
-            'max_count'    => 'required|integer|min:0',
-            'max_stroke'   => 'nullable|integer|min:0',
-            'reject'       => 'required|integer|min:0',
-            'cycle_time'   => 'required|integer|min:0',
-            'area_id'      => 'nullable|integer|exists:areas,id',
-            'line_id'      => 'nullable|integer|exists:lines,id',
+            'device_id'     => 'required|string|exists:esp32_devices,device_id',
+            'max_count'     => 'required|integer|min:0',
+            'max_stroke'    => 'nullable|integer|min:0',
+            'reject'        => 'required|integer|min:0',
+            'cycle_time'    => 'required|integer|min:0',
+            'area_id'       => 'nullable|integer|exists:areas,id',
+            'line_id'       => 'nullable|integer|exists:lines,id',
             'new_area_name' => 'nullable|string|max:255',
             'reset_counter' => 'nullable|boolean',
         ]);
@@ -121,17 +122,20 @@ class ESP32Controller extends Controller
                 $device->autoStopLineOperation();
             }
 
+            Esp32Part::where('device_id', $validated['device_id'])
+                ->update(['production_started_at' => null]);
+
             $device->update([
-                'counter_a'            => 0,
-                'counter_b'            => 0,
-                'reject'               => 0,
-                'area_id'              => $areaId,
-                'line_id'              => $lineId,
+                'counter_a'             => 0,
+                'counter_b'             => 0,
+                'reject'                => 0,
+                'area_id'               => $areaId,
+                'line_id'               => $lineId,
                 'production_started_at' => null,
-                'is_paused'            => false,
-                'paused_at'            => null,
-                'total_pause_seconds'  => 0,
-                'reset_requested'      => true,
+                'is_paused'             => false,
+                'paused_at'             => null,
+                'total_pause_seconds'   => 0,
+                'reset_requested'       => true,
             ]);
 
             return back()->with('success', 'Counter berhasil direset ke 0');
@@ -148,12 +152,12 @@ class ESP32Controller extends Controller
         }
 
         $updateData = [
-            'max_count'            => $validated['max_count'],
-            'reject'               => $validated['reject'],
-            'cycle_time'           => $validated['cycle_time'],
-            'loading_time'         => $loadingTime,
-            'area_id'              => $areaId,
-            'line_id'              => $lineId,
+            'max_count'             => $validated['max_count'],
+            'reject'                => $validated['reject'],
+            'cycle_time'            => $validated['cycle_time'],
+            'loading_time'          => $loadingTime,
+            'area_id'               => $areaId,
+            'line_id'               => $lineId,
             'production_started_at' => $productionStartedAt,
         ];
 
@@ -164,6 +168,39 @@ class ESP32Controller extends Controller
         $device->update($updateData);
 
         return back()->with('success', 'Settings berhasil diupdate');
+    }
+
+    public function updatePartSettings(Request $request)
+    {
+        $validated = $request->validate([
+            'device_id'  => 'required|string|exists:esp32_devices,device_id',
+            'part_id'    => 'required|string',
+            'part_name'  => 'required|string|max:255',
+            'max_count'  => 'required|integer|min:0',
+            'max_stroke' => 'required|integer|min:0',
+            'cycle_time' => 'required|integer|min:0',
+        ]);
+
+        Esp32Part::where('device_id', $validated['device_id'])
+            ->where('part_id', $validated['part_id'])
+            ->update([
+                'part_name'  => $validated['part_name'],
+                'max_count'  => $validated['max_count'],
+                'max_stroke' => $validated['max_stroke'],
+                'cycle_time' => $validated['cycle_time'],
+            ]);
+
+        $device = Esp32Device::where('device_id', $validated['device_id'])->first();
+        if ($device && $device->active_part_id === $validated['part_id']) {
+            $device->update([
+                'max_count'    => $validated['max_count'],
+                'max_stroke'   => $validated['max_stroke'],
+                'cycle_time'   => $validated['cycle_time'],
+                'loading_time' => $validated['max_count'] * $validated['cycle_time'],
+            ]);
+        }
+
+        return back()->with('success', 'Part settings berhasil diupdate');
     }
 
     public function updateHistoryNg(Request $request)

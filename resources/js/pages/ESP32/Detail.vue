@@ -48,6 +48,7 @@ interface Device {
 interface Log {
     id: number;
     device_id: string;
+    part_id: string | null;
     counter_a: number;
     counter_b: number;
     reject: number;
@@ -70,6 +71,8 @@ interface Log {
 interface ProductionHistory {
     id: number;
     device_id: string;
+    part_id: string | null;
+    part_name: string | null;
     total_counter_a: number;
     total_counter_b: number;
     total_reject: number;
@@ -118,7 +121,6 @@ const props = defineProps<Props>();
 const autoRefresh = ref(true);
 let refreshInterval: number | null = null;
 const showScheduleModal = ref(false);
-
 const showEditNgModal = ref(false);
 const editingHistory = ref<ProductionHistory | null>(null);
 const editNgValue = ref(0);
@@ -146,11 +148,9 @@ const schedules = ref<Array<{
 const newBreakStart = ref('');
 const newBreakEnd = ref('');
 const expandedShift = ref<number | null>(0);
-
 const activeHistoryTab = ref<'history' | 'logs'>('history');
 const historyDate = ref(props.filters?.history_date || '');
 const historyShift = ref(props.filters?.history_shift || '');
-
 const getCurrentTotalPauseSeconds = computed(() => {
     let totalPause = props.device.total_pause_seconds;
     if (props.device.is_paused && props.device.paused_at) {
@@ -178,43 +178,28 @@ const parseTimeToDate = (timeStr: string, baseDate: Date = new Date()) => {
 
 const getTimelineData = computed(() => {
     if (!props.device.production_started_at) return null;
-
     const activeSchedule = props.device.active_schedule;
     if (!activeSchedule) return null;
-
     const actualStartTime = new Date(props.device.production_started_at);
     const baseDate = new Date(actualStartTime);
     baseDate.setHours(0, 0, 0, 0);
-
     const clampPct = (val: number) => Math.max(0, Math.min(val, 100));
-
     let scheduleStart = parseTimeToDate(activeSchedule.start, baseDate);
     let scheduleEnd = parseTimeToDate(activeSchedule.end, baseDate);
-
     if (scheduleEnd <= scheduleStart) {
         scheduleEnd = new Date(scheduleEnd.getTime() + 24 * 60 * 60 * 1000);
     }
-
     const totalDuration = scheduleEnd.getTime() - scheduleStart.getTime();
-    const currentTime = new Date();
     const lastUpdateTime = new Date(props.device.last_update);
     const isActive = isDeviceActive.value;
-    const effectiveCurrentTime = isActive ? lastUpdateTime : lastUpdateTime;
-    const actualElapsed = Math.floor((currentTime.getTime() - actualStartTime.getTime()) / 1000);
+    const effectiveCurrentTime = lastUpdateTime;
+    const actualElapsed = Math.floor((new Date().getTime() - actualStartTime.getTime()) / 1000);
     const netElapsed = actualElapsed - getCurrentTotalPauseSeconds.value;
     const expectedDuration = props.device.loading_time;
-
-    const productionStartPercentage = clampPct(
-        ((actualStartTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
-    );
-    const currentPercentage = clampPct(
-        ((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
-    );
-    const lastActivityPercentage = clampPct(
-        ((lastUpdateTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100
-    );
+    const productionStartPercentage = clampPct(((actualStartTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100);
+    const currentPercentage = clampPct(((effectiveCurrentTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100);
+    const lastActivityPercentage = clampPct(((lastUpdateTime.getTime() - scheduleStart.getTime()) / totalDuration) * 100);
     const barWidth = currentPercentage - productionStartPercentage;
-
     const processedBreaks = (activeSchedule.breaks ?? []).map(brk => {
         const breakStart = parseTimeToDate(brk.start, baseDate);
         let breakEnd = parseTimeToDate(brk.end, baseDate);
@@ -227,9 +212,8 @@ const getTimelineData = computed(() => {
             endTime: breakEnd,
         };
     });
-
     return {
-        scheduleStart, scheduleEnd, actualStartTime, currentTime, lastUpdateTime, isActive,
+        scheduleStart, scheduleEnd, actualStartTime, lastUpdateTime, isActive,
         actualElapsed, netElapsed, productionStartPercentage, currentPercentage,
         lastActivityPercentage, barWidth, expectedDuration,
         breaks: processedBreaks,
@@ -239,10 +223,7 @@ const getTimelineData = computed(() => {
 });
 
 const usedShiftNumbers = computed(() => schedules.value.map(s => s.shift));
-
-const availableShiftsToAdd = computed(() => {
-    return [1, 2, 3].filter(n => !usedShiftNumbers.value.includes(n));
-});
+const availableShiftsToAdd = computed(() => [1, 2, 3].filter(n => !usedShiftNumbers.value.includes(n)));
 
 const formatTimeOnly = (date: Date) => date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
@@ -255,10 +236,7 @@ const getShiftBadgeColor = (shift: number) => {
     }
 };
 
-const getShiftLabel = (shift: number | null) => {
-    if (!shift) return 'Shift';
-    return `Shift ${shift}`;
-};
+const getShiftLabel = (shift: number | null) => shift ? `Shift ${shift}` : 'Shift';
 
 const refreshData = () => {
     router.reload({
@@ -307,15 +285,11 @@ const adaptRefreshInterval = () => {
         is_paused: props.device.is_paused,
         total_pause_seconds: props.device.total_pause_seconds,
     });
-    if (previousDeviceData.value === currentData) { noChangeCount.value++; } else { noChangeCount.value = 0; }
+    if (previousDeviceData.value === currentData) noChangeCount.value++;
+    else noChangeCount.value = 0;
     previousDeviceData.value = currentData;
-    const timeSinceActivity = Date.now() - lastActivityTime.value;
-    const isUserIdle = timeSinceActivity > 60000;
-    let newInterval = 5000;
-    if (isUserIdle) { newInterval = 30000; }
-    else if (noChangeCount.value === 0) { newInterval = 5000; }
-    else if (noChangeCount.value < 3) { newInterval = 10000; }
-    else { newInterval = 15000; }
+    const isUserIdle = Date.now() - lastActivityTime.value > 60000;
+    let newInterval = isUserIdle ? 30000 : noChangeCount.value === 0 ? 5000 : noChangeCount.value < 3 ? 10000 : 15000;
     if (currentRefreshInterval.value !== newInterval) {
         currentRefreshInterval.value = newInterval;
         if (refreshInterval && autoRefresh.value) {
@@ -360,7 +334,7 @@ const formatTime = (seconds: number) => {
 const formatDelayTime = (seconds: number, isCompleted: boolean, cycleTime: number) => {
     if (Math.abs(seconds) <= cycleTime) return 'Tepat Waktu';
     const formatted = formatTime(seconds);
-    if (isCompleted) { return seconds > 0 ? `+${formatted}` : `-${formatted}`; }
+    if (isCompleted) return seconds > 0 ? `+${formatted}` : `-${formatted}`;
     return seconds > 0 ? `Delay ${formatted}` : `Cepat ${formatted}`;
 };
 
@@ -439,37 +413,27 @@ const getDelayStatus = (log: Log) => {
     const cycleTime = log.cycle_time || props.device.cycle_time;
     const productionStartedAt = log.production_started_at || props.device.production_started_at;
     const maxCount = log.max_count || props.device.max_count;
-
     if (!productionStartedAt || cycleTime === 0 || log.counter_a === 0) {
         return { text: 'N/A', class: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
     }
-
     const productionStarted = new Date(productionStartedAt);
     const logTime = new Date(log.logged_at);
     const elapsedSeconds = Math.floor((logTime.getTime() - productionStarted.getTime()) / 1000);
-
     if (elapsedSeconds < 0) {
         return { text: 'Future Log', class: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
     }
-
     const totalPauseAtLogTime = log.total_pause_seconds || 0;
     const netElapsedSeconds = elapsedSeconds - totalPauseAtLogTime;
     const actualCounter = log.counter_a;
     const isCompleted = actualCounter >= maxCount;
-
     if (isCompleted) {
-        const actualTime = netElapsedSeconds;
-        const expectedTime = maxCount * cycleTime;
-        const delaySeconds = actualTime - expectedTime;
+        const delaySeconds = netElapsedSeconds - (maxCount * cycleTime);
         if (Math.abs(delaySeconds) <= cycleTime) return { text: 'Tepat Waktu', class: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' };
         else if (delaySeconds > 0) return { text: `+${formatTime(delaySeconds)}`, class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' };
         else return { text: `-${formatTime(Math.abs(delaySeconds))}`, class: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' };
     }
-
     const expectedCounter = Math.floor(netElapsedSeconds / cycleTime);
-    const counterDiff = expectedCounter - actualCounter;
-    const delaySeconds = counterDiff * cycleTime;
-
+    const delaySeconds = (expectedCounter - actualCounter) * cycleTime;
     if (Math.abs(delaySeconds) <= cycleTime) return { text: 'Tepat Waktu', class: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' };
     else if (delaySeconds > 0) return { text: `Delay ${formatTime(delaySeconds)}`, class: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' };
     else return { text: `Cepat ${formatTime(Math.abs(delaySeconds))}`, class: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' };
@@ -489,12 +453,8 @@ const getHistoryStatusText = (history: ProductionHistory) => {
 
 const toggleAutoRefresh = () => {
     autoRefresh.value = !autoRefresh.value;
-    if (autoRefresh.value) {
-        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
-    } else if (refreshInterval) {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
-    }
+    if (autoRefresh.value) refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
+    else if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
 };
 
 onMounted(() => {
@@ -508,9 +468,7 @@ onMounted(() => {
         is_paused: props.device.is_paused,
         total_pause_seconds: props.device.total_pause_seconds,
     });
-    if (autoRefresh.value) {
-        refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
-    }
+    if (autoRefresh.value) refreshInterval = window.setInterval(refreshData, currentRefreshInterval.value);
     window.addEventListener('mousemove', resetActivity);
     window.addEventListener('keydown', resetActivity);
     window.addEventListener('click', resetActivity);
@@ -523,7 +481,6 @@ onUnmounted(() => {
     window.removeEventListener('click', resetActivity);
 });
 </script>
-
 <template>
     <Head :title="`Detail - ${device.device_id}`" />
     <AppLayout :breadcrumbs="[
@@ -547,16 +504,14 @@ onUnmounted(() => {
                 </div>
                 <div class="flex gap-3">
                     <button @click="openScheduleModal" class="px-4 py-2.5 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium flex items-center gap-2">
-                        <Clock class="w-4 h-4" />
-                        Schedule
+                        <Clock class="w-4 h-4" />Schedule
                     </button>
                     <button @click="toggleAutoRefresh" :class="['px-4 py-2.5 rounded-xl transition-all duration-300 font-medium flex items-center gap-2', autoRefresh ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-lg' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300']">
                         <RefreshCw :class="['w-4 h-4', autoRefresh ? 'animate-spin' : '']" />
                         {{ autoRefresh ? `Auto (${currentRefreshInterval / 1000}s)` : 'Manual' }}
                     </button>
                     <button @click="refreshData" class="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-300 font-medium flex items-center gap-2">
-                        <RefreshCw class="w-4 h-4" />
-                        Refresh
+                        <RefreshCw class="w-4 h-4" />Refresh
                     </button>
                 </div>
             </div>
@@ -633,8 +588,7 @@ onUnmounted(() => {
                                         </div>
                                     </div>
                                 </div>
-                                <div class="absolute top-0 h-full w-1 bg-green-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                    :style="{ left: `${getTimelineData.productionStartPercentage}%` }">
+                                <div class="absolute top-0 h-full w-1 bg-green-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10" :style="{ left: `${getTimelineData.productionStartPercentage}%` }">
                                     <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
                                         <div class="bg-green-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
                                             <div class="font-medium">Actual Start</div>
@@ -643,8 +597,7 @@ onUnmounted(() => {
                                         </div>
                                     </div>
                                 </div>
-                                <div v-if="!getTimelineData.isActive" class="absolute top-0 h-full w-1 bg-red-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                    :style="{ left: `${getTimelineData.lastActivityPercentage}%` }">
+                                <div v-if="!getTimelineData.isActive" class="absolute top-0 h-full w-1 bg-red-600 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10" :style="{ left: `${getTimelineData.lastActivityPercentage}%` }">
                                     <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
                                         <div class="bg-red-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
                                             <div class="font-medium">Last Activity</div>
@@ -654,8 +607,7 @@ onUnmounted(() => {
                                     </div>
                                 </div>
                                 <template v-for="(brk, idx) in getTimelineData.breaks" :key="`break-marker-${idx}`">
-                                    <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                        :style="{ left: `${brk.startPercentage}%` }">
+                                    <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10" :style="{ left: `${brk.startPercentage}%` }">
                                         <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
                                             <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
                                                 <div class="font-medium">Break {{ idx + 1 }} Start</div>
@@ -664,8 +616,7 @@ onUnmounted(() => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10"
-                                        :style="{ left: `${brk.endPercentage}%` }">
+                                    <div class="absolute top-0 h-full w-1 bg-orange-500 rounded-full cursor-pointer hover:w-1.5 transition-all group/marker z-10" :style="{ left: `${brk.endPercentage}%` }">
                                         <div class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover/marker:opacity-100 transition-opacity z-20 pointer-events-none">
                                             <div class="bg-orange-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-xl">
                                                 <div class="font-medium">Break {{ idx + 1 }} End</div>
@@ -711,24 +662,18 @@ onUnmounted(() => {
 
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <div class="flex border-b border-gray-200 dark:border-gray-700">
-                    <button @click="activeHistoryTab = 'history'"
-                        :class="['flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2',
-                            activeHistoryTab === 'history' ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 border-b-2 border-purple-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50']">
+                    <button @click="activeHistoryTab = 'history'" :class="['flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2', activeHistoryTab === 'history' ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 border-b-2 border-purple-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50']">
                         <History class="w-5 h-5" /> Production History
                     </button>
-                    <button @click="activeHistoryTab = 'logs'"
-                        :class="['flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2',
-                            activeHistoryTab === 'logs' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50']">
+                    <button @click="activeHistoryTab = 'logs'" :class="['flex-1 px-6 py-4 font-semibold transition-all flex items-center justify-center gap-2', activeHistoryTab === 'logs' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50']">
                         <Database class="w-5 h-5" /> History Logs
                     </button>
                 </div>
 
                 <div v-show="activeHistoryTab === 'history'" class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <input v-model="historyDate" type="date" @change="filterHistory"
-                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all" />
-                        <select v-model="historyShift" @change="filterHistory"
-                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all">
+                        <input v-model="historyDate" type="date" @change="filterHistory" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all" />
+                        <select v-model="historyShift" @change="filterHistory" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 dark:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all">
                             <option value="">Semua Shift</option>
                             <option v-for="shift in shifts" :key="shift.value" :value="shift.value">{{ shift.label }}</option>
                         </select>
@@ -741,6 +686,7 @@ onUnmounted(() => {
                                     <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Started</th>
                                     <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Finished</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Shift</th>
+                                    <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Part Name</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Total Count</th>
                                     <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Total Stroke</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">NG</th>
@@ -762,6 +708,14 @@ onUnmounted(() => {
                                     <td class="px-6 py-4 text-center">
                                         <span :class="['px-3 py-1.5 rounded-full text-xs font-semibold', getShiftBadgeColor(history.shift)]">{{ history.shift_label }}</span>
                                     </td>
+                                    <!-- sel Part Name -->
+                                    <td class="px-6 py-4">
+                                        <div v-if="history.part_name" class="space-y-0.5">
+                                            <div v-if="history.part_id" class="text-xs text-gray-400 font-mono">{{ history.part_id }}</div>
+                                        </div>
+                                        <div v-else-if="history.part_id" class="text-sm font-mono text-gray-600 dark:text-gray-300">{{ history.part_id }}</div>
+                                        <span v-else class="text-xs text-gray-400">-</span>
+                                    </td>
                                     <td class="px-6 py-4 text-center">
                                         <div class="text-lg font-bold text-blue-600">{{ history.total_counter_a }}</div>
                                         <div class="text-xs text-gray-500 dark:text-gray-400">/ {{ history.max_count }}</div>
@@ -775,30 +729,21 @@ onUnmounted(() => {
                                             <div class="text-[10px] text-gray-400 group-hover:text-orange-500 transition-colors">edit</div>
                                         </button>
                                     </td>
-                                    <td class="px-6 py-4 text-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        {{ formatTime(history.expected_time_seconds) }}
-                                    </td>
-                                    <td class="px-6 py-4 text-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        {{ formatTime(history.actual_time_seconds) }}
-                                    </td>
+                                    <td class="px-6 py-4 text-center text-sm font-medium text-gray-700 dark:text-gray-300">{{ formatTime(history.expected_time_seconds) }}</td>
+                                    <td class="px-6 py-4 text-center text-sm font-medium text-gray-700 dark:text-gray-300">{{ formatTime(history.actual_time_seconds) }}</td>
                                     <td class="px-6 py-4 text-center">
-                                        <span :class="['px-4 py-2 rounded-lg text-xs font-bold', getHistoryStatusClass(history.completion_status)]">
-                                            {{ getHistoryStatusText(history) }}
-                                        </span>
+                                        <span :class="['px-4 py-2 rounded-lg text-xs font-bold', getHistoryStatusClass(history.completion_status)]">{{ getHistoryStatusText(history) }}</span>
                                     </td>
                                 </tr>
                                 <tr v-if="productionHistories.data.length === 0">
-                                    <td :colspan="device.has_counter_b ? 9 : 8" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-                                        Tidak ada data production history
-                                    </td>
+                                    <td :colspan="device.has_counter_b ? 10 : 9" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">Tidak ada data production history</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
                     <div v-if="productionHistories.last_page > 1" class="mt-6 flex justify-center gap-2">
                         <button v-for="page in productionHistories.last_page" :key="page" @click="goToHistoryPage(page)"
-                            :class="['px-4 py-2 rounded-lg font-medium transition-all',
-                                page === productionHistories.current_page ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600']">
+                            :class="['px-4 py-2 rounded-lg font-medium transition-all', page === productionHistories.current_page ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600']">
                             {{ page }}
                         </button>
                     </div>
@@ -811,6 +756,7 @@ onUnmounted(() => {
                                 <tr>
                                     <th class="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Shift</th>
+                                    <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Part</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">{{ device.has_counter_b ? 'Counter A' : 'Counter' }}</th>
                                     <th v-if="device.has_counter_b" class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stroke</th>
                                     <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Expected</th>
@@ -831,6 +777,10 @@ onUnmounted(() => {
                                     </td>
                                     <td class="px-6 py-4 text-center">
                                         <span :class="['px-3 py-1.5 rounded-full text-xs font-semibold', getShiftBadgeColor(log.shift)]">{{ log.shift_label }}</span>
+                                    </td>
+                                    <td class="px-6 py-4 text-center">
+                                        <span v-if="log.part_id" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">{{ log.part_id }}</span>
+                                        <span v-else class="text-xs text-gray-400">-</span>
                                     </td>
                                     <td class="px-6 py-4 text-center">
                                         <div class="text-lg font-bold text-blue-600">{{ log.counter_a }}</div>
@@ -861,7 +811,7 @@ onUnmounted(() => {
                                     </td>
                                 </tr>
                                 <tr v-if="logs.data.length === 0">
-                                    <td :colspan="device.has_counter_b ? 9 : 8" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">Belum ada history log</td>
+                                    <td :colspan="device.has_counter_b ? 10 : 9" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">Belum ada history log</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -894,6 +844,9 @@ onUnmounted(() => {
                 <h3 class="text-lg font-bold mb-4 text-gray-900 dark:text-white">Edit NG</h3>
                 <div v-if="editingHistory" class="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl text-xs text-gray-500 dark:text-gray-400 space-y-1">
                     <div>{{ formatDateTimeStacked(editingHistory.production_started_at).date }} {{ formatDateTimeStacked(editingHistory.production_started_at).time }}</div>
+                    <div v-if="editingHistory.part_name || editingHistory.part_id">
+                        Part: <span class="font-bold text-gray-700 dark:text-gray-300">{{ editingHistory.part_name || editingHistory.part_id }}</span>
+                    </div>
                     <div>Count: <span class="font-bold text-gray-700 dark:text-gray-300">{{ editingHistory.total_counter_a }} / {{ editingHistory.max_count }}</span></div>
                     <div>NG Saat Ini: <span class="font-bold text-red-600">{{ editingHistory.total_reject }}</span></div>
                 </div>
@@ -914,29 +867,20 @@ onUnmounted(() => {
             <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-[640px] shadow-2xl max-h-[90vh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-5">
                     <h3 class="text-xl font-bold text-gray-900 dark:text-white">Production Schedule — {{ device.device_id }}</h3>
-                    <button v-if="availableShiftsToAdd.length > 0" @click="addShift"
-                        class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold flex items-center gap-2 hover:shadow-lg transition-all text-sm">
+                    <button v-if="availableShiftsToAdd.length > 0" @click="addShift" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold flex items-center gap-2 hover:shadow-lg transition-all text-sm">
                         <Plus class="w-4 h-4" /> Tambah Shift {{ availableShiftsToAdd[0] }}
                     </button>
                 </div>
-
                 <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
                     <p class="text-sm text-blue-800 dark:text-blue-300">Set jadwal per shift. Timeline akan otomatis menyesuaikan shift yang aktif berdasarkan waktu mulai produksi.</p>
                 </div>
-
                 <div class="space-y-4">
                     <div v-for="(schedule, shiftIndex) in schedules" :key="schedule.shift" class="border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden">
                         <div class="flex items-center justify-between px-4 py-3 cursor-pointer"
-                            :class="[
-                                schedule.shift === 1 ? 'bg-blue-50 dark:bg-blue-900/20' :
-                                schedule.shift === 2 ? 'bg-purple-50 dark:bg-purple-900/20' :
-                                'bg-orange-50 dark:bg-orange-900/20'
-                            ]"
+                            :class="[schedule.shift === 1 ? 'bg-blue-50 dark:bg-blue-900/20' : schedule.shift === 2 ? 'bg-purple-50 dark:bg-purple-900/20' : 'bg-orange-50 dark:bg-orange-900/20']"
                             @click="expandedShift = expandedShift === shiftIndex ? null : shiftIndex">
                             <div class="flex items-center gap-3">
-                                <span :class="['px-3 py-1 rounded-full text-sm font-bold', getShiftBadgeColor(schedule.shift)]">
-                                    Shift {{ schedule.shift }}
-                                </span>
+                                <span :class="['px-3 py-1 rounded-full text-sm font-bold', getShiftBadgeColor(schedule.shift)]">Shift {{ schedule.shift }}</span>
                                 <span v-if="schedule.start && schedule.end" class="text-sm font-medium text-gray-600 dark:text-gray-400">
                                     {{ schedule.start }} — {{ schedule.end }}
                                     <span v-if="schedule.breaks.length > 0" class="ml-2 text-xs text-orange-500">({{ schedule.breaks.length }} break)</span>
@@ -944,69 +888,56 @@ onUnmounted(() => {
                                 <span v-else class="text-sm text-gray-400 italic">Belum diset</span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button v-if="schedules.length > 1" @click.stop="removeShift(shiftIndex)"
-                                    class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
+                                <button v-if="schedules.length > 1" @click.stop="removeShift(shiftIndex)" class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
                                     <Trash2 class="w-4 h-4" />
                                 </button>
                                 <span class="text-gray-400 text-sm">{{ expandedShift === shiftIndex ? '▲' : '▼' }}</span>
                             </div>
                         </div>
-
                         <div v-show="expandedShift === shiftIndex" class="p-4 space-y-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">Start Time</label>
-                                    <input v-model="schedule.start" type="time"
-                                        class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                                    <input v-model="schedule.start" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">End Time</label>
-                                    <input v-model="schedule.end" type="time"
-                                        class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
+                                    <input v-model="schedule.end" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
                                 </div>
                             </div>
-
                             <div>
                                 <h5 class="font-semibold text-gray-700 dark:text-gray-300 mb-2 text-sm">Break Times</h5>
                                 <div class="flex gap-2 mb-3">
                                     <div class="flex-1">
                                         <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-400">Break Start</label>
-                                        <input v-model="newBreakStart" type="time"
-                                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
+                                        <input v-model="newBreakStart" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
                                     </div>
                                     <div class="flex-1">
                                         <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-400">Break End</label>
-                                        <input v-model="newBreakEnd" type="time"
-                                            class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
+                                        <input v-model="newBreakEnd" type="time" class="w-full border-2 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 dark:bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm" />
                                     </div>
                                     <div class="flex items-end">
-                                        <button @click="addBreak(shiftIndex)"
-                                            class="px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold flex items-center gap-1 text-sm">
+                                        <button @click="addBreak(shiftIndex)" class="px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold flex items-center gap-1 text-sm">
                                             <Plus class="w-3.5 h-3.5" /> Add
                                         </button>
                                     </div>
                                 </div>
                                 <div class="space-y-2">
-                                    <div v-for="(brk, brkIdx) in schedule.breaks" :key="brkIdx"
-                                        class="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700 rounded-xl">
+                                    <div v-for="(brk, brkIdx) in schedule.breaks" :key="brkIdx" class="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700 rounded-xl">
                                         <div class="flex items-center gap-2">
                                             <div class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ brkIdx + 1 }}</div>
                                             <span class="font-semibold text-sm text-gray-900 dark:text-white">{{ brk.start }} — {{ brk.end }}</span>
                                         </div>
-                                        <button @click="removeBreak(shiftIndex, brkIdx)"
-                                            class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
+                                        <button @click="removeBreak(shiftIndex, brkIdx)" class="p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-all">
                                             <Trash2 class="w-3.5 h-3.5" />
                                         </button>
                                     </div>
-                                    <div v-if="schedule.breaks.length === 0" class="text-center py-4 text-sm text-gray-400">
-                                        Belum ada break time
-                                    </div>
+                                    <div v-if="schedule.breaks.length === 0" class="text-center py-4 text-sm text-gray-400">Belum ada break time</div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-
                 <div class="flex gap-2 mt-6">
                     <button @click="saveSchedule" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Simpan Schedule</button>
                     <button @click="showScheduleModal = false" class="flex-1 bg-gray-600 text-white px-4 py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all">Batal</button>
