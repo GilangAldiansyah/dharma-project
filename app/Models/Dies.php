@@ -1,15 +1,12 @@
 <?php
-
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Dies extends Model
 {
     protected $primaryKey = 'id_sap';
-    protected $keyType = 'string';
-    public $incrementing = false;
+    protected $keyType    = 'string';
+    public $incrementing  = false;
 
     protected $fillable = [
         'id_sap',
@@ -19,27 +16,18 @@ class Dies extends Model
         'kategori',
         'status',
         'is_common',
-        'std_stroke',
-        'freq_maintenance',
-        'freq_maintenance_day',
         'cav',
         'forecast_per_day',
-        'current_stroke',
         'total_stroke',
-        'last_mtc_date',
         'bstb_updated_at',
     ];
 
     protected $casts = [
-        'is_common'            => 'boolean',
-        'std_stroke'           => 'integer',
-        'freq_maintenance_day' => 'integer',
-        'cav'                  => 'integer',
-        'forecast_per_day'     => 'integer',
-        'current_stroke'       => 'integer',
-        'total_stroke'         => 'integer',
-        'last_mtc_date'        => 'date',
-        'bstb_updated_at'      => 'datetime',
+        'is_common'       => 'boolean',
+        'cav'             => 'integer',
+        'forecast_per_day'=> 'integer',
+        'total_stroke'    => 'integer',
+        'bstb_updated_at' => 'datetime',
     ];
 
     public function processes()

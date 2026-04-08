@@ -5,9 +5,21 @@ import { ref, computed, watch } from 'vue';
 import {
     Plus, Search, Filter, Upload, Trash2, Eye, Pencil,
     AlertTriangle, CheckCircle2, X, Loader2, Download,
-    FileText
+    FileText, ChevronDown, ChevronUp
 } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
+
+interface DiesProcess {
+    id: number;
+    dies_id: string;
+    process_name: string;
+    tonase: number | null;
+    std_stroke: number;
+    current_stroke: number;
+    last_mtc_date: string | null;
+    pct: number;
+    remaining: number;
+}
 
 interface Dies {
     id_sap: string;
@@ -17,20 +29,37 @@ interface Dies {
     kategori: string | null;
     status: string;
     is_common: boolean;
-    std_stroke: number;
-    current_stroke: number;
-    total_stroke: number;
     forecast_per_day: number;
-    last_mtc_date: string | null;
     bstb_updated_at: string | null;
     preventives_count: number;
     correctives_count: number;
+    processes: DiesProcess[];
+}
+
+interface BstbProcess {
+    id: number;
+    process_name: string;
+    old_stroke: number;
+    add_qty: number;
+    new_stroke: number;
+    std_stroke: number;
+}
+
+interface BstbPreviewItem {
+    id_sap: string;
+    no_part: string;
+    nama_dies: string;
+    line: string;
+    desc: string;
+    qty: number;
+    processes: BstbProcess[];
 }
 
 interface Props {
     dies: { data: Dies[]; links: any[]; meta: any; total?: number; from?: number; to?: number; last_page?: number };
     lines: string[];
     filters: { search?: string; status?: string; line?: string };
+    totalProcesses: number;
 }
 
 const props  = defineProps<Props>();
@@ -54,21 +83,33 @@ const showBstbModal   = ref(false);
 const selectedDies    = ref<Dies | null>(null);
 const importFile      = ref<File | null>(null);
 const isImporting     = ref(false);
+const expandedRows    = ref<Set<string>>(new Set());
 
 const bstbFile        = ref<File | null>(null);
 const bstbUploading   = ref(false);
 const bstbConfirming  = ref(false);
 const bstbStep        = ref<'upload' | 'preview'>('upload');
 const selectedUpdates = ref<string[]>([]);
-const bstbPreview  = computed(() => (page.props as any).bstb_preview   ?? []);
-const bstbNotFound = computed(() => (page.props as any).bstb_not_found ?? []);
-const bstbNoChange = computed(() => (page.props as any).bstb_no_change ?? 0);
-const bstbTotal    = computed(() => (page.props as any).bstb_total     ?? 0);
+
+const bstbPreviewRaw = computed<BstbPreviewItem[]>(() => (page.props as any).bstb_preview ?? []);
+const bstbNotFound   = computed(() => (page.props as any).bstb_not_found ?? []);
+const bstbNoChange   = computed(() => (page.props as any).bstb_no_change ?? 0);
+const bstbTotal      = computed(() => (page.props as any).bstb_total     ?? 0);
+
+const editablePreview = ref<BstbPreviewItem[]>([]);
+
+watch(bstbPreviewRaw, (val) => {
+    editablePreview.value = JSON.parse(JSON.stringify(val));
+}, { immediate: true, deep: true });
+
+const recalcNewStroke = (item: BstbPreviewItem, proc: BstbProcess) => {
+    proc.new_stroke = proc.old_stroke + (proc.add_qty ?? 0);
+};
 
 watch(bstbTotal, (val) => {
     if (val > 0 && bstbStep.value === 'upload') {
         bstbStep.value        = 'preview';
-        selectedUpdates.value = bstbPreview.value.map((p: any) => p.id_sap);
+        selectedUpdates.value = bstbPreviewRaw.value.map((p) => p.id_sap);
     }
 }, { immediate: true });
 
@@ -85,11 +126,10 @@ const uploadBstb = () => {
         forceFormData: true,
         onSuccess: () => {
             bstbUploading.value = false;
-            const preview = (page.props as any).bstb_preview ?? [];
-            const total   = (page.props as any).bstb_total   ?? 0;
+            const total = (page.props as any).bstb_total ?? 0;
             if (total > 0) {
                 bstbStep.value        = 'preview';
-                selectedUpdates.value = preview.map((p: any) => p.id_sap);
+                selectedUpdates.value = ((page.props as any).bstb_preview ?? []).map((p: any) => p.id_sap);
             }
         },
         onError: () => { bstbUploading.value = false; },
@@ -97,17 +137,26 @@ const uploadBstb = () => {
 };
 
 const confirmBstb = () => {
-    if (selectedUpdates.value.length === 0) return;
+    const payload = editablePreview.value
+        .filter(item => selectedUpdates.value.includes(item.id_sap))
+        .map(item => ({
+            id_sap: item.id_sap,
+            processes: item.processes.map(p => ({
+                id:      p.id,
+                add_qty: p.add_qty,
+            })),
+        }));
+
+    if (payload.length === 0) return;
     bstbConfirming.value = true;
-    router.post('/dies/import-bstb-confirm', {
-        updates: selectedUpdates.value,
-    }, {
+    router.post('/dies/import-bstb-confirm', { updates: payload }, {
         onSuccess: () => {
             bstbConfirming.value  = false;
             showBstbModal.value   = false;
             bstbFile.value        = null;
             bstbStep.value        = 'upload';
             selectedUpdates.value = [];
+            editablePreview.value = [];
         },
         onError: () => { bstbConfirming.value = false; },
     });
@@ -118,13 +167,14 @@ const closeBstbModal = () => {
     bstbFile.value        = null;
     bstbStep.value        = 'upload';
     selectedUpdates.value = [];
+    editablePreview.value = [];
 };
 
 const toggleAllBstb = () => {
-    if (selectedUpdates.value.length === bstbPreview.value.length) {
+    if (selectedUpdates.value.length === editablePreview.value.length) {
         selectedUpdates.value = [];
     } else {
-        selectedUpdates.value = bstbPreview.value.map((p: any) => p.id_sap);
+        selectedUpdates.value = editablePreview.value.map((p) => p.id_sap);
     }
 };
 
@@ -144,29 +194,37 @@ const statusList = [
 
 const statusCfg = (s: string) => statusList.find(x => x.v === s) ?? { l: s, badge: 'bg-gray-100 text-gray-600' };
 
-const pct = (d: Dies) => d.std_stroke > 0 ? Math.min(round(d.current_stroke / d.std_stroke * 100, 1), 100) : 0;
-const round = (n: number, dec: number) => Math.round(n * 10 ** dec) / 10 ** dec;
+const getDiesProcesses = (d: Dies): DiesProcess[] => d.processes ?? [];
 
-const pctBadge = (d: Dies) => {
-    const p = pct(d);
-    if (p >= 100) return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400';
-    if (p >= 85)  return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400';
+const procPct = (p: DiesProcess): number => {
+    if (!p.std_stroke) return 0;
+    return Math.min(Math.round(p.current_stroke / p.std_stroke * 1000) / 10, 100);
+};
+
+const pctBadge = (pct: number) => {
+    if (pct >= 100) return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400';
+    if (pct >= 85)  return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400';
     return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400';
 };
 
-const pctBar = (d: Dies) => {
-    const p = pct(d);
-    if (p >= 100) return 'bg-red-500';
-    if (p >= 85)  return 'bg-amber-400';
+const pctBar = (pct: number) => {
+    if (pct >= 100) return 'bg-red-500';
+    if (pct >= 85)  return 'bg-amber-400';
     return 'bg-emerald-400';
 };
 
-const pctTextColor = (d: Dies) => {
-    const p = pct(d);
-    if (p >= 100) return 'text-red-600';
-    if (p >= 85)  return 'text-amber-600';
-    return 'text-emerald-600';
+const pctTextColor = (pct: number) => {
+    if (pct >= 100) return 'text-red-600 dark:text-red-400';
+    if (pct >= 85)  return 'text-amber-600 dark:text-amber-400';
+    return 'text-emerald-600 dark:text-emerald-400';
 };
+
+const toggleRow = (idSap: string) => {
+    if (expandedRows.value.has(idSap)) expandedRows.value.delete(idSap);
+    else expandedRows.value.add(idSap);
+};
+
+const isExpanded = (idSap: string) => expandedRows.value.has(idSap);
 
 const activeFilterCount = computed(() => {
     let c = 0;
@@ -192,19 +250,15 @@ watch([filterStatus, filterLine], () => {
 const form = useForm({
     id_sap: '', no_part: '', nama_dies: '', line: '',
     kategori: '', status: 'active', is_common: false,
-    std_stroke: 20000, freq_maintenance: 'Fix Volume',
-    freq_maintenance_day: null as number | null,
-    cav: 1, forecast_per_day: 0,
-    current_stroke: 0, total_stroke: 0, last_mtc_date: '',
+    forecast_per_day: 0,
+    process_name: '', std_stroke: 20000, tonase: null as number | null,
+    last_mtc_date: '',
 });
 
 const editForm = useForm({
     no_part: '', nama_dies: '', line: '',
     kategori: '', status: 'active', is_common: false,
-    std_stroke: 20000, freq_maintenance: 'Fix Volume',
-    freq_maintenance_day: null as number | null,
-    cav: 1, forecast_per_day: 0,
-    current_stroke: 0, total_stroke: 0, last_mtc_date: '',
+    forecast_per_day: 0,
 });
 
 const openAdd  = () => { form.reset(); showAddModal.value = true; };
@@ -219,11 +273,7 @@ const openEdit = (d: Dies) => {
     editForm.kategori          = d.kategori ?? '';
     editForm.status            = d.status;
     editForm.is_common         = d.is_common;
-    editForm.std_stroke        = d.std_stroke;
-    editForm.current_stroke    = d.current_stroke;
-    editForm.total_stroke      = d.total_stroke ?? 0;
     editForm.forecast_per_day  = d.forecast_per_day;
-    editForm.last_mtc_date     = d.last_mtc_date ?? '';
     showEditModal.value = true;
 };
 
@@ -263,22 +313,39 @@ const fmtDate = (d: string | null) => {
 
 const exportExcel = () => {
     const rows = [
-        ['No Part', 'Nama Dies', 'ID SAP', 'Line', 'Kategori', 'Status', 'Common', 'STD Stroke', 'Current Stroke', 'Total Stroke', '%', 'Forecast/Day', 'Last MTC', 'Total PM', 'Total CM'],
-        ...props.dies.data.map(d => [
-            d.no_part, d.nama_dies, d.id_sap, d.line, d.kategori ?? '-',
-            statusCfg(d.status).l,
-            d.is_common ? 'Ya' : 'Tidak',
-            d.std_stroke, d.current_stroke, d.total_stroke ?? 0,
-            `${pct(d)}%`,
-            d.forecast_per_day,
-            d.last_mtc_date ?? '-',
-            d.preventives_count,
-            d.correctives_count,
-        ]),
+        ['No Part', 'Nama Dies', 'ID SAP', 'Line', 'Kategori', 'Status', 'Common', 'Forecast/Day', 'Total PM', 'Total CM', 'Proses', 'STD Stroke', 'Current Stroke', '%'],
+        ...props.dies.data.flatMap(d => {
+            const procs = getDiesProcesses(d);
+            if (!procs.length) return [[
+                d.no_part, d.nama_dies, d.id_sap, d.line, d.kategori ?? '-',
+                statusCfg(d.status).l, d.is_common ? 'Ya' : 'Tidak',
+                d.forecast_per_day, d.preventives_count, d.correctives_count,
+                '-', 0, 0, '0%',
+            ]];
+            return procs.map((p, i) => [
+                i === 0 ? d.no_part : '',
+                i === 0 ? d.nama_dies : '',
+                i === 0 ? d.id_sap : '',
+                i === 0 ? d.line : '',
+                i === 0 ? (d.kategori ?? '-') : '',
+                i === 0 ? statusCfg(d.status).l : '',
+                i === 0 ? (d.is_common ? 'Ya' : 'Tidak') : '',
+                i === 0 ? d.forecast_per_day : '',
+                i === 0 ? d.preventives_count : '',
+                i === 0 ? d.correctives_count : '',
+                p.process_name,
+                p.std_stroke,
+                p.current_stroke,
+                `${procPct(p)}%`,
+            ]);
+        }),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 16 }, { wch: 14 },
-        { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }];
+    ws['!cols'] = [
+        { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 16 },
+        { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+        { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 8 },
+    ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Master Dies');
     XLSX.writeFile(wb, 'Master_Dies.xlsx');
@@ -298,7 +365,11 @@ const exportExcel = () => {
                         </span>
                         Master Dies
                     </h1>
-                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">{{ totalDies }} dies terdaftar</p>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-0.5 ml-10 sm:ml-11">
+                        {{ totalDies }} part
+                        <span class="text-gray-300 mx-1">|</span>
+                        <span class="text-gray-400">{{ totalProcesses }} dies</span>
+                    </p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                     <button @click="exportExcel"
@@ -380,91 +451,136 @@ const exportExcel = () => {
                 </div>
             </div>
 
+            <!-- Desktop Table -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
                             <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-6"></th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">No Part / Dies</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Line</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
-                                <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wide">Stroke</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">%</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Proses & Stroke</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">PM / CM</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Last MTC</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">BSTB Update</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Aksi</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
+                        <tbody>
                             <tr v-if="dies.data.length === 0">
                                 <td colspan="8" class="py-16 text-center text-gray-400 text-sm">
                                     <Search class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                                     Tidak ada data dies
                                 </td>
                             </tr>
-                            <tr v-for="d in dies.data" :key="d.id_sap"
-                                class="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors">
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center gap-2">
-                                        <div>
-                                            <p class="text-xs font-bold text-gray-900 dark:text-white">{{ d.no_part }}</p>
-                                            <p class="text-xs text-gray-400 mt-0.5 line-clamp-1">{{ d.nama_dies }}</p>
-                                            <p class="text-xs text-gray-300 mt-0.5 font-mono">{{ d.id_sap }}</p>
+                            <template v-for="d in dies.data" :key="d.id_sap">
+                                <tr :class="['transition-colors border-b border-gray-50 dark:border-gray-700/50',
+                                    isExpanded(d.id_sap) ? 'bg-blue-50/40 dark:bg-blue-900/10' : 'hover:bg-gray-50/80 dark:hover:bg-gray-700/30']">
+                                    <td class="pl-3 pr-1 py-3">
+                                        <button v-if="getDiesProcesses(d).length > 0"
+                                            @click="toggleRow(d.id_sap)"
+                                            class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-400">
+                                            <ChevronDown v-if="!isExpanded(d.id_sap)" class="w-3.5 h-3.5" />
+                                            <ChevronUp v-else class="w-3.5 h-3.5 text-blue-500" />
+                                        </button>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <div>
+                                                <p class="text-xs font-bold text-gray-900 dark:text-white">{{ d.no_part }}</p>
+                                                <p class="text-xs text-gray-400 mt-0.5 line-clamp-1">{{ d.nama_dies }}</p>
+                                                <p class="text-xs text-gray-300 mt-0.5 font-mono">{{ d.id_sap }}</p>
+                                            </div>
+                                            <span v-if="d.is_common"
+                                                class="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400 rounded text-xs font-bold flex-shrink-0">
+                                                Common
+                                            </span>
                                         </div>
-                                        <span v-if="d.is_common"
-                                            class="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400 rounded text-xs font-bold">
-                                            Common
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">
+                                            {{ d.line }}
                                         </span>
-                                    </div>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">
-                                        {{ d.line }}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    <span :class="['inline-block px-2 py-0.5 rounded-full text-xs font-bold', statusCfg(d.status).badge]">
-                                        {{ statusCfg(d.status).l }}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3 text-right text-xs">
-                                    <p class="font-bold text-gray-800 dark:text-gray-200">{{ d.current_stroke.toLocaleString() }}</p>
-                                    <p class="text-gray-400">/ {{ d.std_stroke.toLocaleString() }}</p>
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    <span :class="['inline-block px-2 py-0.5 rounded-full text-xs font-bold', pctBadge(d)]">
-                                        {{ pct(d) }}%
-                                    </span>
-                                    <div class="w-16 mx-auto mt-1 h-1 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div :class="['h-full rounded-full', pctBar(d)]" :style="{ width: `${pct(d)}%` }"></div>
-                                    </div>
-                                </td>
-                                <td class="px-4 py-3 text-center text-xs">
-                                    <span class="text-blue-600 dark:text-blue-400 font-bold">{{ d.preventives_count }}</span>
-                                    <span class="text-gray-300 mx-1">/</span>
-                                    <span class="text-orange-600 dark:text-orange-400 font-bold">{{ d.correctives_count }}</span>
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    <p class="text-xs text-gray-500">{{ fmtDate(d.last_mtc_date) }}</p>
-                                    <p v-if="d.bstb_updated_at" class="text-xs text-indigo-400 mt-0.5">BSTB: {{ fmtDate(d.bstb_updated_at) }}</p>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button @click="router.visit(`/dies/${d.id_sap}`)"
-                                            class="p-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 transition-colors">
-                                            <Eye class="w-3.5 h-3.5" />
-                                        </button>
-                                        <button @click="openEdit(d)"
-                                            class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors">
-                                            <Pencil class="w-3.5 h-3.5" />
-                                        </button>
-                                        <button @click="openDelete(d)"
-                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors">
-                                            <Trash2 class="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span :class="['inline-block px-2 py-0.5 rounded-full text-xs font-bold', statusCfg(d.status).badge]">
+                                            {{ statusCfg(d.status).l }}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div v-if="getDiesProcesses(d).length === 0" class="text-center text-xs text-gray-300">—</div>
+                                        <div v-else class="space-y-1.5">
+                                            <div v-for="p in getDiesProcesses(d)" :key="p.id" class="flex items-center gap-2">
+                                                <span class="text-xs text-gray-500 w-24 truncate flex-shrink-0">{{ p.process_name }}</span>
+                                                <div class="flex-1 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden min-w-16">
+                                                    <div :class="['h-full rounded-full transition-all', pctBar(procPct(p))]"
+                                                        :style="{ width: `${procPct(p)}%` }"></div>
+                                                </div>
+                                                <span :class="['text-xs font-bold w-10 text-right flex-shrink-0', pctTextColor(procPct(p))]">
+                                                    {{ procPct(p) }}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-xs">
+                                        <span class="text-blue-600 dark:text-blue-400 font-bold">{{ d.preventives_count }}</span>
+                                        <span class="text-gray-300 mx-1">/</span>
+                                        <span class="text-orange-600 dark:text-orange-400 font-bold">{{ d.correctives_count }}</span>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <p v-if="d.bstb_updated_at" class="text-xs text-indigo-500 font-semibold">{{ fmtDate(d.bstb_updated_at) }}</p>
+                                        <p v-else class="text-xs text-gray-300">—</p>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center justify-center gap-1.5">
+                                            <button @click="router.visit(`/dies/${d.id_sap}`)"
+                                                class="p-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 transition-colors">
+                                                <Eye class="w-3.5 h-3.5" />
+                                            </button>
+                                            <button @click="openEdit(d)"
+                                                class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors">
+                                                <Pencil class="w-3.5 h-3.5" />
+                                            </button>
+                                            <button @click="openDelete(d)"
+                                                class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors">
+                                                <Trash2 class="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr v-if="isExpanded(d.id_sap)" class="bg-blue-50/60 dark:bg-blue-900/10 border-b border-blue-100 dark:border-blue-900/30">
+                                    <td colspan="8" class="px-8 py-3">
+                                        <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                                            <div v-for="p in getDiesProcesses(d)" :key="p.id"
+                                                class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3 flex flex-col gap-1.5">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="text-xs font-bold text-gray-700 dark:text-gray-300">{{ p.process_name }}</span>
+                                                    <span :class="['text-xs font-black px-2 py-0.5 rounded-full', pctBadge(procPct(p))]">
+                                                        {{ procPct(p) }}%
+                                                    </span>
+                                                </div>
+                                                <div class="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                                    <div :class="['h-full rounded-full', pctBar(procPct(p))]"
+                                                        :style="{ width: `${procPct(p)}%` }"></div>
+                                                </div>
+                                                <div class="flex items-center justify-between text-xs text-gray-500">
+                                                    <span>{{ (p.current_stroke ?? 0).toLocaleString() }} / {{ (p.std_stroke ?? 0).toLocaleString() }}</span>
+                                                    <span class="text-gray-400">sisa {{ (p.remaining ?? 0).toLocaleString() }}</span>
+                                                </div>
+                                                <div class="flex items-center justify-between text-xs">
+                                                    <span class="text-gray-400">Last MTC</span>
+                                                    <span class="text-gray-600 dark:text-gray-400">{{ fmtDate(p.last_mtc_date) }}</span>
+                                                </div>
+                                                <div v-if="p.tonase" class="flex items-center justify-between text-xs">
+                                                    <span class="text-gray-400">Tonase</span>
+                                                    <span class="text-gray-600 dark:text-gray-400">{{ p.tonase }} T</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
                         </tbody>
                     </table>
                 </div>
@@ -481,6 +597,7 @@ const exportExcel = () => {
                 </div>
             </div>
 
+            <!-- Mobile Cards -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="dies.data.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <p class="text-gray-400 text-sm">Tidak ada data dies</p>
@@ -502,25 +619,26 @@ const exportExcel = () => {
                                 <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">{{ d.line }}</span>
                             </div>
                         </div>
-                        <div class="space-y-1.5 mb-3">
-                            <div class="flex items-center justify-between text-xs">
-                                <span class="text-gray-400">Stroke</span>
-                                <span class="font-bold text-gray-700 dark:text-gray-300">{{ d.current_stroke.toLocaleString() }} / {{ d.std_stroke.toLocaleString() }}</span>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <div class="flex-1 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div :class="['h-full rounded-full transition-all', pctBar(d)]" :style="{ width: `${pct(d)}%` }"></div>
+
+                        <div v-if="getDiesProcesses(d).length > 0" class="space-y-2 mb-3">
+                            <p class="text-xs font-bold text-gray-500 uppercase">Proses</p>
+                            <div v-for="p in getDiesProcesses(d)" :key="p.id" class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-gray-700 dark:text-gray-300">{{ p.process_name }}</span>
+                                    <span :class="['text-xs font-black px-2 py-0.5 rounded-full', pctBadge(procPct(p))]">{{ procPct(p) }}%</span>
                                 </div>
-                                <span :class="['text-xs font-bold', pctTextColor(d)]">{{ pct(d) }}%</span>
+                                <div class="h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                                    <div :class="['h-full rounded-full', pctBar(procPct(p))]" :style="{ width: `${procPct(p)}%` }"></div>
+                                </div>
+                                <div class="flex items-center justify-between text-xs text-gray-400">
+                                    <span>{{ (p.current_stroke ?? 0).toLocaleString() }} / {{ (p.std_stroke ?? 0).toLocaleString() }}</span>
+                                    <span>Last MTC: {{ fmtDate(p.last_mtc_date) }}</span>
+                                </div>
                             </div>
-                            <div class="flex items-center justify-between text-xs">
-                                <span class="text-gray-400">Last MTC</span>
-                                <span class="text-gray-600 dark:text-gray-400">{{ fmtDate(d.last_mtc_date) }}</span>
-                            </div>
-                            <div v-if="d.bstb_updated_at" class="flex items-center justify-between text-xs">
-                                <span class="text-gray-400">BSTB Update</span>
-                                <span class="text-indigo-500 font-semibold">{{ fmtDate(d.bstb_updated_at) }}</span>
-                            </div>
+                        </div>
+                        <div v-else class="mb-3 text-xs text-gray-300 text-center py-2">Belum ada data proses</div>
+
+                        <div class="space-y-1 mb-3">
                             <div class="flex items-center justify-between text-xs">
                                 <span class="text-gray-400">PM / CM</span>
                                 <span>
@@ -529,7 +647,12 @@ const exportExcel = () => {
                                     <span class="text-orange-600 font-bold">{{ d.correctives_count }}</span>
                                 </span>
                             </div>
+                            <div v-if="d.bstb_updated_at" class="flex items-center justify-between text-xs">
+                                <span class="text-gray-400">BSTB Update</span>
+                                <span class="text-indigo-500 font-semibold">{{ fmtDate(d.bstb_updated_at) }}</span>
+                            </div>
                         </div>
+
                         <div class="flex items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700">
                             <button @click="router.visit(`/dies/${d.id_sap}`)"
                                 class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl text-xs font-bold hover:bg-gray-200 active:scale-95 transition-all">
@@ -557,6 +680,7 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- Add Modal -->
         <div v-if="showAddModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -617,33 +741,34 @@ const exportExcel = () => {
                             </label>
                         </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">STD Stroke <span class="text-red-500">*</span></label>
-                            <input v-model="form.std_stroke" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">CAV <span class="text-red-500">*</span></label>
-                            <input v-model="form.cav" type="number" min="1"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day <span class="text-red-500">*</span></label>
-                            <input v-model="form.forecast_per_day" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
-                        </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day <span class="text-red-500">*</span></label>
+                        <input v-model="form.forecast_per_day" type="number" min="0"
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
                     </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Frekuensi Maintenance</label>
-                            <input v-model="form.freq_maintenance" type="text" placeholder="Fix Volume / 30"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Last MTC Date</label>
-                            <input v-model="form.last_mtc_date" type="date"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                    <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
+                        <p class="text-xs font-bold text-gray-500 uppercase mb-3">Proses Pertama (opsional)</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Nama Proses</label>
+                                <input v-model="form.process_name" type="text" placeholder="DRAW / TRIM / PIERCE..."
+                                    class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">STD Stroke</label>
+                                <input v-model="form.std_stroke" type="number" min="0"
+                                    class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Tonase (T)</label>
+                                <input v-model="form.tonase" type="number" min="0" step="0.1"
+                                    class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Last MTC Date</label>
+                                <input v-model="form.last_mtc_date" type="date"
+                                    class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                            </div>
                         </div>
                     </div>
                     <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-safe border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
@@ -660,6 +785,7 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- Edit Modal -->
         <div v-if="showEditModal && selectedDies" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -705,46 +831,13 @@ const exportExcel = () => {
                             </label>
                         </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">STD Stroke <span class="text-red-500">*</span></label>
-                            <input v-model="editForm.std_stroke" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">CAV</label>
-                            <input v-model="editForm.cav" type="number" min="1"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day</label>
-                            <input v-model="editForm.forecast_per_day" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day</label>
+                        <input v-model="editForm.forecast_per_day" type="number" min="0"
+                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
                     </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Current Stroke</label>
-                            <input v-model="editForm.current_stroke" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Total Stroke</label>
-                            <input v-model="editForm.total_stroke" type="number" min="0"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Frekuensi Maintenance</label>
-                            <input v-model="editForm.freq_maintenance" type="text"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Last MTC Date</label>
-                            <input v-model="editForm.last_mtc_date" type="date"
-                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
-                        </div>
+                    <div class="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
+                        Data proses (stroke, STD stroke, last MTC) dikelola melalui halaman detail dies.
                     </div>
                     <div class="sticky bottom-0 bg-white dark:bg-gray-800 pt-3 pb-safe border-t border-gray-100 dark:border-gray-700 -mx-4 sm:-mx-6 px-4 sm:px-6">
                         <div class="flex gap-3">
@@ -760,6 +853,7 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- Import Excel Modal -->
         <div v-if="showImportModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -796,6 +890,7 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- BSTB Modal -->
         <div v-if="showBstbModal" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-3xl max-h-[92vh] flex flex-col shadow-2xl">
                 <div class="flex-shrink-0">
@@ -833,7 +928,7 @@ const exportExcel = () => {
                             <p>• File CSV dari sistem BSTB (Daily Production Report)</p>
                             <p>• Sistem membaca otomatis semua shift dalam satu file</p>
                             <p>• Key matching: <span class="font-bold">Material Number</span> → ID SAP di sistem</p>
-                            <p>• Field yang diupdate: <span class="font-bold">Current Stroke</span> = akumulasi total output semua shift</p>
+                            <p>• Qty BSTB akan ditambahkan ke <span class="font-bold">semua proses</span> dies — bisa diedit per proses sebelum konfirmasi</p>
                         </div>
                         <label class="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-indigo-200 dark:border-indigo-700 rounded-2xl cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 transition-colors">
                             <div class="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/40 rounded-2xl flex items-center justify-center">
@@ -863,7 +958,7 @@ const exportExcel = () => {
                                 <p class="text-xs text-blue-500 font-semibold">Total di CSV</p>
                             </div>
                             <div class="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 border border-emerald-100 dark:border-emerald-800 text-center">
-                                <p class="text-2xl font-black text-emerald-600">{{ bstbPreview.length }}</p>
+                                <p class="text-2xl font-black text-emerald-600">{{ editablePreview.length }}</p>
                                 <p class="text-xs text-emerald-500 font-semibold">Ada Perubahan</p>
                             </div>
                             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 border border-gray-100 dark:border-gray-700 text-center">
@@ -889,49 +984,70 @@ const exportExcel = () => {
                             </div>
                         </div>
 
-                        <div v-if="bstbPreview.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+                        <div v-if="editablePreview.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
                             <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
                                 <div class="flex items-center gap-2">
                                     <input type="checkbox"
-                                        :checked="selectedUpdates.length === bstbPreview.length"
+                                        :checked="selectedUpdates.length === editablePreview.length"
                                         @change="toggleAllBstb"
                                         class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                     <span class="text-xs font-bold text-gray-700 dark:text-gray-300">
-                                        {{ selectedUpdates.length }} / {{ bstbPreview.length }} dipilih
+                                        {{ selectedUpdates.length }} / {{ editablePreview.length }} dipilih
                                     </span>
                                 </div>
-                                <span class="text-xs text-gray-400">Preview akumulasi current stroke</span>
+                                <span class="text-xs text-gray-400">Qty per proses bisa diedit</span>
                             </div>
-                            <div class="overflow-x-auto max-h-72">
+                            <div class="overflow-x-auto max-h-96">
                                 <table class="w-full text-xs">
                                     <thead class="bg-gray-50 dark:bg-gray-700/50 sticky top-0">
                                         <tr>
                                             <th class="px-3 py-2 text-center w-10"></th>
                                             <th class="px-3 py-2 text-left font-bold text-gray-500 uppercase">No Part</th>
                                             <th class="px-3 py-2 text-center font-bold text-gray-500 uppercase">Qty BSTB</th>
+                                            <th class="px-3 py-2 text-left font-bold text-gray-500 uppercase">Proses</th>
                                             <th class="px-3 py-2 text-center font-bold text-gray-500 uppercase">Stroke Skrg</th>
-                                            <th class="px-3 py-2 text-center font-bold text-gray-500 uppercase">Total</th>
+                                            <th class="px-3 py-2 text-center font-bold text-gray-500 uppercase">+Qty</th>
+                                            <th class="px-3 py-2 text-center font-bold text-gray-500 uppercase">Setelah</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
-                                        <tr v-for="item in bstbPreview" :key="item.id_sap"
-                                            :class="['hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors',
-                                                selectedUpdates.includes(item.id_sap) ? '' : 'opacity-40']">
-                                            <td class="px-3 py-2 text-center">
-                                                <input type="checkbox"
-                                                    :checked="selectedUpdates.includes(item.id_sap)"
-                                                    @change="toggleBstbItem(item.id_sap)"
-                                                    class="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                                            </td>
-                                            <td class="px-3 py-2">
-                                                <p class="font-bold text-gray-900 dark:text-white">{{ item.no_part }}</p>
-                                                <p class="text-gray-400 truncate max-w-40">{{ item.nama_dies }}</p>
-                                                <p class="text-gray-300 font-mono">{{ item.id_sap }}</p>
-                                            </td>
-                                            <td class="px-3 py-2 text-center font-black text-emerald-600 dark:text-emerald-400">+{{ item.qty.toLocaleString() }}</td>
-                                            <td class="px-3 py-2 text-center text-gray-400 font-semibold">{{ item.old_total.toLocaleString() }}</td>
-                                            <td class="px-3 py-2 text-center font-black text-indigo-600 dark:text-indigo-400">{{ item.new_total.toLocaleString() }}</td>
-                                        </tr>
+                                        <template v-for="item in editablePreview" :key="item.id_sap">
+                                            <tr v-for="(proc, pi) in item.processes" :key="proc.id"
+                                                :class="['transition-colors',
+                                                    pi % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-700/20',
+                                                    selectedUpdates.includes(item.id_sap) ? '' : 'opacity-40']">
+                                                <td class="px-3 py-2 text-center">
+                                                    <input v-if="pi === 0" type="checkbox"
+                                                        :checked="selectedUpdates.includes(item.id_sap)"
+                                                        @change="toggleBstbItem(item.id_sap)"
+                                                        class="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                                </td>
+                                                <td class="px-3 py-2">
+                                                    <template v-if="pi === 0">
+                                                        <p class="font-bold text-gray-900 dark:text-white">{{ item.no_part }}</p>
+                                                        <p class="text-gray-400 truncate max-w-40">{{ item.nama_dies }}</p>
+                                                        <p class="text-gray-300 font-mono">{{ item.id_sap }}</p>
+                                                    </template>
+                                                </td>
+                                                <td class="px-3 py-2 text-center font-black text-emerald-600 dark:text-emerald-400">
+                                                    <template v-if="pi === 0">+{{ item.qty.toLocaleString() }}</template>
+                                                </td>
+                                                <td class="px-3 py-2 text-gray-600 dark:text-gray-400 font-semibold">{{ proc.process_name }}</td>
+                                                <td class="px-3 py-2 text-center text-gray-400 font-semibold">{{ (proc.old_stroke ?? 0).toLocaleString() }}</td>
+                                                <td class="px-3 py-2 text-center">
+                                                    <input
+                                                        v-model.number="proc.add_qty"
+                                                        @input="recalcNewStroke(item, proc)"
+                                                        type="number"
+                                                        min="0"
+                                                        :disabled="!selectedUpdates.includes(item.id_sap)"
+                                                        class="w-20 px-2 py-1 text-xs text-center border border-indigo-200 dark:border-indigo-700 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-bold focus:outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed" />
+                                                </td>
+                                                <td class="px-3 py-2 text-center font-black text-indigo-600 dark:text-indigo-400">
+                                                    {{ (proc.new_stroke ?? 0).toLocaleString() }}
+                                                </td>
+                                            </tr>
+                                        </template>
                                     </tbody>
                                 </table>
                             </div>
@@ -962,14 +1078,14 @@ const exportExcel = () => {
                         <Upload v-else class="w-4 h-4" />
                         {{ bstbUploading ? 'Memproses...' : 'Proses File BSTB' }}
                     </button>
-                    <button v-if="bstbStep === 'preview' && bstbPreview.length > 0"
+                    <button v-if="bstbStep === 'preview' && editablePreview.length > 0"
                         @click="confirmBstb" :disabled="selectedUpdates.length === 0 || bstbConfirming"
                         class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">
                         <Loader2 v-if="bstbConfirming" class="w-4 h-4 animate-spin" />
                         <CheckCircle2 v-else class="w-4 h-4" />
                         {{ bstbConfirming ? 'Mengupdate...' : `Akumulasi ${selectedUpdates.length} Dies` }}
                     </button>
-                    <button v-if="bstbStep === 'preview' && bstbPreview.length === 0"
+                    <button v-if="bstbStep === 'preview' && editablePreview.length === 0"
                         @click="closeBstbModal"
                         class="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-all">
                         Tutup
@@ -978,6 +1094,7 @@ const exportExcel = () => {
             </div>
         </div>
 
+        <!-- Delete Modal -->
         <div v-if="showDeleteModal && selectedDies" class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
                 <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
@@ -987,7 +1104,7 @@ const exportExcel = () => {
                     </div>
                     <h3 class="text-base font-bold text-gray-900 dark:text-white mb-1">Hapus Dies?</h3>
                     <p class="text-sm text-gray-500 mb-1">{{ selectedDies.no_part }}</p>
-                    <p class="text-xs text-gray-400 mb-5">Semua data PM, CM, dan history sparepart terkait akan ikut terhapus.</p>
+                    <p class="text-xs text-gray-400 mb-5">Semua data PM, CM, proses, dan history sparepart terkait akan ikut terhapus.</p>
                     <div class="flex gap-3">
                         <button @click="showDeleteModal = false"
                             class="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">Batal</button>
@@ -997,6 +1114,5 @@ const exportExcel = () => {
                 </div>
             </div>
         </div>
-
     </AppLayout>
 </template>

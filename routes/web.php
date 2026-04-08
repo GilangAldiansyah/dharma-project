@@ -1,40 +1,40 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Auth;
-use App\Http\Controllers\WelcomeController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\SupplierController;
-use App\Http\Controllers\NgReportController;
-use App\Http\Controllers\PartController;
-use App\Http\Controllers\StockController;
-use App\Http\Controllers\ESP32Controller;
-use App\Http\Controllers\MaterialController;
-use App\Http\Controllers\PartMaterialController;
-use App\Http\Controllers\TransaksiMaterialController;
-use App\Http\Controllers\PengembalianMaterialController;
-use App\Http\Controllers\DashboardTransaksiController;
-use App\Http\Controllers\MaintenanceController;
-use App\Http\Controllers\MachineController;
-use App\Http\Controllers\LineController;
-use App\Http\Controllers\LineOperationController;
-use App\Http\Controllers\OeeController;
-use App\Http\Controllers\ProductController;
-use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\AiChatController;
+use App\Http\Controllers\CmReportController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardTransaksiController;
+use App\Http\Controllers\DiesController;
+use App\Http\Controllers\DiesCorrectiveController;
+use App\Http\Controllers\DiesDashboardController;
+use App\Http\Controllers\DiesPreventiveController;
+use App\Http\Controllers\DiesProcessController;
+use App\Http\Controllers\DiesSparepartController;
+use App\Http\Controllers\ESP32Controller;
+use App\Http\Controllers\ImprovementReportController;
 use App\Http\Controllers\JigController;
 use App\Http\Controllers\JigDashboardController;
-use App\Http\Controllers\PmScheduleController;
+use App\Http\Controllers\KanbanController;
+use App\Http\Controllers\LineController;
+use App\Http\Controllers\LineOperationController;
+use App\Http\Controllers\MachineController;
+use App\Http\Controllers\MaintenanceController;
+use App\Http\Controllers\MaterialController;
+use App\Http\Controllers\NgReportController;
+use App\Http\Controllers\OeeController;
+use App\Http\Controllers\PartController;
+use App\Http\Controllers\PartMaterialController;
+use App\Http\Controllers\PengembalianMaterialController;
 use App\Http\Controllers\PmReportController;
-use App\Http\Controllers\CmReportController;
+use App\Http\Controllers\PmScheduleController;
+use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SparepartController;
-use App\Http\Controllers\ImprovementReportController;
-use App\Http\Controllers\DiesController;
-use App\Http\Controllers\DiesProcessController;
-use App\Http\Controllers\DiesPreventiveController;
-use App\Http\Controllers\DiesCorrectiveController;
-use App\Http\Controllers\DiesSparepartController;
-use App\Http\Controllers\DiesDashboardController;
+use App\Http\Controllers\StockController;
+use App\Http\Controllers\SupplierController;
+use App\Http\Controllers\TransaksiMaterialController;
+use App\Http\Controllers\WelcomeController;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 
 
 Route::get('/', function () {
@@ -380,6 +380,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::get('/sparepart', [DiesSparepartController::class, 'index'])->name('sparepart.index');
         Route::get('/sparepart/history', [DiesSparepartController::class, 'historyIndex'])->name('sparepart.history');
+        Route::get('/sparepart/all', [DiesSparepartController::class, 'allForBulk']);
         Route::get('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'show'])->name('sparepart.show');
 
         Route::get('/create', [DiesController::class, 'create'])->name('create');
@@ -393,6 +394,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/import', [DiesController::class, 'import'])->name('import');
         Route::post('/schedule-pm', [DiesDashboardController::class, 'schedulePm'])->name('schedule-pm');
         Route::post('/preventive', [DiesPreventiveController::class, 'store'])->name('preventive.store');
+        Route::post('/preventive/submit-from-dies', [DiesPreventiveController::class, 'submitFromDies'])->name('preventive.submit-from-dies');
         Route::post('/preventive/{diesPreventive}/complete', [DiesPreventiveController::class, 'complete'])->name('preventive.complete');
         Route::post('/corrective', [DiesCorrectiveController::class, 'store'])->name('corrective.store');
     });
@@ -417,6 +419,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::prefix('/{idSap}/processes')->name('processes.')->group(function () {
             Route::post('/', [DiesProcessController::class, 'store'])->name('store');
+            Route::put('/reorder', [DiesProcessController::class, 'reorder'])->name('reorder');
             Route::put('/{process}', [DiesProcessController::class, 'update'])->name('update');
             Route::delete('/{process}', [DiesProcessController::class, 'destroy'])->name('destroy');
         });

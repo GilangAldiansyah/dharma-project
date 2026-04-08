@@ -1,8 +1,8 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use App\Models\Dies;
+use App\Models\DiesProcess;
 use App\Models\DiesPreventive;
 use App\Models\DiesHistorySparepart;
 use App\Models\DiesSparepart;
@@ -17,49 +17,124 @@ class DiesPreventiveController extends Controller
 {
     public function index(Request $request)
     {
-        $query = DiesPreventive::with([
-            'dies', 'process', 'spareparts.sparepart', 'createdBy', 'nokClosedBy',
-        ])->whereNotIn('status', ['scheduled'])->latest('report_date');
+        $baseQuery = DiesPreventive::query();
 
         if ($request->filled('search')) {
-            $query->where(function ($q) use ($request) {
+            $baseQuery->where(function ($q) use ($request) {
                 $q->where('report_no',  'like', '%' . $request->search . '%')
                   ->orWhere('pic_name', 'like', '%' . $request->search . '%')
                   ->orWhereHas('dies', fn($d) => $d->where('no_part', 'like', '%' . $request->search . '%'));
             });
         }
-        if ($request->filled('status'))  $query->where('status',   $request->status);
-        if ($request->filled('dies_id')) $query->where('dies_id',  $request->dies_id);
+        if ($request->filled('status'))    $baseQuery->where('status', $request->status);
+        if ($request->filled('dies_id'))   $baseQuery->where('dies_id', $request->dies_id);
+        if ($request->filled('date_from')) $baseQuery->whereDate('report_date', '>=', $request->date_from);
+        if ($request->filled('date_to'))   $baseQuery->whereDate('report_date', '<=', $request->date_to);
 
-        $preventives = $query->paginate(20)->withQueryString();
+        $totalCount  = (clone $baseQuery)->count();
 
-        $scheduled = DiesPreventive::with(['dies.processes', 'process', 'spareparts.sparepart', 'createdBy'])
-            ->where('status', 'scheduled')
-            ->orderBy('scheduled_date')
-            ->get();
+        $preventives = (clone $baseQuery)
+            ->with(['dies', 'process', 'spareparts.sparepart', 'createdBy', 'nokClosedBy'])
+            ->latest('report_date')
+            ->paginate(20)
+            ->withQueryString();
 
-        $diesList   = Dies::with('processes')->orderBy('no_part')
-            ->get(['id_sap', 'no_part', 'nama_dies', 'line', 'current_stroke', 'std_stroke']);
+        $nearProcesses = DiesProcess::with('dies')
+            ->where('std_stroke', '>', 0)
+            ->whereRaw('(current_stroke / std_stroke * 100) >= 86')
+            ->orderByRaw('(current_stroke / std_stroke) DESC')
+            ->get()
+            ->map(function ($proc) {
+                $pct = round($proc->current_stroke / $proc->std_stroke * 100, 1);
+                return [
+                    'process_id'     => $proc->id,
+                    'process_name'   => $proc->process_name,
+                    'dies_id'        => $proc->dies_id,
+                    'dies'           => $proc->dies,
+                    'std_stroke'     => $proc->std_stroke,
+                    'current_stroke' => $proc->current_stroke,
+                    'remaining'      => max(0, $proc->std_stroke - $proc->current_stroke),
+                    'pct'            => $pct,
+                    'urgency'        => $pct >= 96 ? 'urgent' : 'scheduled',
+                    'last_mtc_date'  => $proc->last_mtc_date,
+                ];
+            });
 
-        $spareparts = DiesSparepart::orderBy('sparepart_name')
-            ->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok']);
+        $diesList   = Dies::with('processes')->orderBy('no_part')->get(['id_sap', 'no_part', 'nama_dies', 'line']);
+        $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok']);
 
         $user     = User::with('roles')->find(Auth::id());
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
 
         return Inertia::render('Dies/Preventive/Index', [
-            'preventives' => $preventives,
-            'scheduled'   => $scheduled,
-            'diesList'    => $diesList,
-            'spareparts'  => $spareparts,
-            'isLeader'    => $isLeader,
-            'filters'     => $request->only('search', 'status', 'dies_id'),
+            'preventives'   => $preventives,
+            'totalCount'    => $totalCount,
+            'nearProcesses' => $nearProcesses,
+            'diesList'      => $diesList,
+            'spareparts'    => $spareparts,
+            'isLeader'      => $isLeader,
+            'filters'       => $request->only('search', 'status', 'dies_id', 'date_from', 'date_to'),
         ]);
+    }
+
+    public function submitFromDies(Request $request)
+    {
+        $validated = $request->validate([
+            'process_id'                => 'required|exists:dies_processes,id',
+            'photo'                     => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'photo_sparepart'           => 'nullable|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'condition'                 => 'required|in:ok,nok',
+            'repair_action'             => 'nullable|string',
+            'spareparts'                => 'nullable|array',
+            'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.quantity'     => 'nullable|string',
+            'spareparts.*.notes'        => 'nullable|string',
+        ]);
+
+        DB::transaction(function () use ($request, $validated) {
+            $process = DiesProcess::with('dies')->findOrFail($validated['process_id']);
+            $dies    = $process->dies;
+
+            $yy  = now()->format('y');
+            $mm  = now()->format('m');
+            $dd  = now()->format('d');
+            $rnd = str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
+
+            $photo          = $request->file('photo')->store('dies/preventive', 'public');
+            $photoSparepart = $request->hasFile('photo_sparepart')
+                ? $request->file('photo_sparepart')->store('dies/preventive', 'public')
+                : null;
+
+            $preventive = DiesPreventive::create([
+                'report_no'             => "PM-DIES-{$yy}{$mm}{$dd}-{$rnd}",
+                'dies_id'               => $dies->id_sap,
+                'process_id'            => $process->id,
+                'pic_name'              => Auth::user()->name,
+                'report_date'           => now()->toDateString(),
+                'stroke_at_maintenance' => $process->current_stroke,
+                'repair_action'         => $validated['repair_action'] ?? null,
+                'photos'                => [$photo],
+                'pic_dies'              => $photoSparepart,
+                'condition'             => $validated['condition'],
+                'status'                => 'completed',
+                'completed_at'          => now(),
+                'created_by'            => Auth::id(),
+            ]);
+
+            $process->update([
+                'current_stroke' => 0,
+                'last_mtc_date'  => now()->toDateString(),
+            ]);
+
+            $this->syncSpareparts($preventive, $validated['spareparts'] ?? []);
+        });
+
+        return back()->with('success', 'PM berhasil disubmit. Stroke proses direset ke 0.');
     }
 
     public function store(Request $request)
     {
-        $request->validate([
+        $validated = $request->validate([
             'dies_id'                   => 'required|exists:dies,id_sap',
             'process_id'                => 'required|exists:dies_processes,id',
             'repair_action'             => 'nullable|string',
@@ -67,88 +142,59 @@ class DiesPreventiveController extends Controller
             'photos.*'                  => 'image|mimes:jpg,jpeg,png,webp|max:3072',
             'status'                    => 'required|in:pending,in_progress,completed',
             'spareparts'                => 'nullable|array',
-            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'     => 'nullable|integer|min:1',
+            'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.quantity'     => 'nullable|string',
             'spareparts.*.notes'        => 'nullable|string',
         ]);
 
-        DB::transaction(function () use ($request) {
-            $dies   = Dies::findOrFail($request->dies_id);
+        DB::transaction(function () use ($request, $validated) {
+            $process = DiesProcess::findOrFail($validated['process_id']);
+
             $photos = [];
             if ($request->hasFile('photos')) {
                 foreach ($request->file('photos') as $p) {
                     $photos[] = $p->store('dies/preventive', 'public');
                 }
             }
-            $yy  = now()->format('y'); $mm = now()->format('m'); $dd = now()->format('d');
+
+            $yy  = now()->format('y');
+            $mm  = now()->format('m');
+            $dd  = now()->format('d');
             $rnd = str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
 
             $preventive = DiesPreventive::create([
                 'report_no'             => "PM-DIES-{$yy}{$mm}{$dd}-{$rnd}",
-                'dies_id'               => $request->dies_id,
-                'process_id'            => $request->process_id,
+                'dies_id'               => $validated['dies_id'],
+                'process_id'            => $validated['process_id'],
                 'pic_name'              => Auth::user()->name,
                 'report_date'           => now()->toDateString(),
-                'stroke_at_maintenance' => $dies->current_stroke,
-                'repair_action'         => $request->repair_action,
+                'stroke_at_maintenance' => $process->current_stroke,
+                'repair_action'         => $validated['repair_action'] ?? null,
                 'photos'                => $photos ?: null,
-                'status'                => $request->status,
+                'status'                => $validated['status'],
                 'created_by'            => Auth::id(),
-                'completed_at'          => $request->status === 'completed' ? now() : null,
+                'completed_at'          => $validated['status'] === 'completed' ? now() : null,
             ]);
 
-            $this->syncSpareparts($preventive, $request->spareparts ?? []);
+            if ($validated['status'] === 'completed') {
+                $process->update([
+                    'current_stroke' => 0,
+                    'last_mtc_date'  => now()->toDateString(),
+                ]);
+            }
+
+            $this->syncSpareparts($preventive, $validated['spareparts'] ?? []);
         });
 
         return back()->with('success', 'Laporan preventive berhasil dibuat.');
     }
 
-    public function complete(Request $request, DiesPreventive $diesPreventive)
-    {
-        abort_if($diesPreventive->status !== 'scheduled', 403, 'Hanya laporan scheduled yang bisa di-complete.');
-
-        $request->validate([
-            'photo'                     => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
-            'photo_sparepart'           => 'nullable|image|mimes:jpg,jpeg,png,webp|max:5120',
-            'condition'                 => 'required|in:ok,nok',
-            'repair_action'             => 'nullable|string',
-            'spareparts'                => 'nullable|array',
-            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'     => 'nullable|integer|min:1',
-            'spareparts.*.notes'        => 'nullable|string',
-        ]);
-
-        DB::transaction(function () use ($request, $diesPreventive) {
-            $photos   = $diesPreventive->photos ?? [];
-            $photos[] = $request->file('photo')->store('dies/preventive', 'public');
-
-            $photoSparepart = null;
-            if ($request->hasFile('photo_sparepart')) {
-                $photoSparepart = $request->file('photo_sparepart')->store('dies/preventive', 'public');
-            }
-
-            $diesPreventive->update([
-                'repair_action' => $request->repair_action,
-                'photos'        => $photos,
-                'pic_dies'      => $photoSparepart,
-                'condition'     => $request->condition,
-                'status'        => 'completed',
-                'completed_at'  => now(),
-                'report_date'   => now()->toDateString(),
-            ]);
-
-            $this->syncSpareparts($diesPreventive, $request->spareparts ?? []);
-        });
-
-        return back()->with('success', 'Laporan PM berhasil diselesaikan.');
-    }
-
     public function closeNok(Request $request, DiesPreventive $diesPreventive)
     {
-        abort_if($diesPreventive->condition !== 'nok', 403, 'Hanya laporan NOK yang bisa di-close.');
+        abort_if($diesPreventive->condition !== 'nok', 403);
 
         $user = User::with('roles')->find(Auth::id());
-        abort_if(!($user->hasRole('leader') || $user->hasRole('admin')), 403, 'Hanya leader/admin yang bisa close NOK.');
+        abort_if(!($user->hasRole('leader') || $user->hasRole('admin')), 403);
 
         $request->validate(['nok_notes' => 'nullable|string']);
 
@@ -164,7 +210,7 @@ class DiesPreventiveController extends Controller
 
     public function update(Request $request, DiesPreventive $diesPreventive)
     {
-        $request->validate([
+        $validated = $request->validate([
             'dies_id'                   => 'required|exists:dies,id_sap',
             'process_id'                => 'required|exists:dies_processes,id',
             'repair_action'             => 'nullable|string',
@@ -172,29 +218,40 @@ class DiesPreventiveController extends Controller
             'photos.*'                  => 'image|mimes:jpg,jpeg,png,webp|max:3072',
             'status'                    => 'required|in:pending,in_progress,completed',
             'spareparts'                => 'nullable|array',
-            'spareparts.*.sparepart_id' => 'nullable|exists:dies_spareparts,id',
-            'spareparts.*.quantity'     => 'nullable|integer|min:1',
+            'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.quantity'     => 'nullable|string',
             'spareparts.*.notes'        => 'nullable|string',
         ]);
 
-        DB::transaction(function () use ($request, $diesPreventive) {
+        DB::transaction(function () use ($request, $validated, $diesPreventive) {
             $photos = $diesPreventive->photos ?? [];
             if ($request->hasFile('photos')) {
                 foreach ($request->file('photos') as $p) {
                     $photos[] = $p->store('dies/preventive', 'public');
                 }
             }
+
+            $wasCompleted = $diesPreventive->status === 'completed';
+            $nowCompleted = $validated['status'] === 'completed';
+
             $diesPreventive->update([
-                'dies_id'       => $request->dies_id,
-                'process_id'    => $request->process_id,
-                'repair_action' => $request->repair_action,
+                'dies_id'       => $validated['dies_id'],
+                'process_id'    => $validated['process_id'],
+                'repair_action' => $validated['repair_action'] ?? null,
                 'photos'        => $photos ?: null,
-                'status'        => $request->status,
-                'completed_at'  => $request->status === 'completed' && !$diesPreventive->completed_at
+                'status'        => $validated['status'],
+                'completed_at'  => $nowCompleted && !$diesPreventive->completed_at
                     ? now() : $diesPreventive->completed_at,
             ]);
 
-            $this->syncSpareparts($diesPreventive, $request->spareparts ?? []);
+            if (!$wasCompleted && $nowCompleted) {
+                DiesProcess::where('id', $validated['process_id'])->update([
+                    'current_stroke' => 0,
+                    'last_mtc_date'  => now()->toDateString(),
+                ]);
+            }
+
+            $this->syncSpareparts($diesPreventive, $validated['spareparts'] ?? []);
         });
 
         return back()->with('success', 'Laporan preventive berhasil diperbarui.');
@@ -232,20 +289,29 @@ class DiesPreventiveController extends Controller
     private function syncSpareparts(DiesPreventive $preventive, array $spareparts): void
     {
         foreach ($spareparts as $sp) {
-            if (empty($sp['sparepart_id'])) continue;
-            $sparepart = DiesSparepart::findOrFail($sp['sparepart_id']);
-            $qty       = (int) $sp['quantity'];
+            $sparepartId = isset($sp['sparepart_id']) ? (int) $sp['sparepart_id'] : 0;
+            if ($sparepartId <= 0) continue;
+
+            $qty = isset($sp['quantity']) ? (int) trim((string) $sp['quantity']) : 0;
+            if ($qty <= 0) continue;
+
+            $sparepart = DiesSparepart::findOrFail($sparepartId);
+
             if ($sparepart->stok < $qty) {
-                throw new \Exception("Stok {$sparepart->sparepart_name} tidak mencukupi.");
+                throw new \Exception(
+                    "Stok {$sparepart->sparepart_name} tidak mencukupi (tersedia: {$sparepart->stok}, diminta: {$qty})."
+                );
             }
+
             DiesHistorySparepart::create([
                 'tipe'           => 'preventive',
                 'maintenance_id' => $preventive->id,
-                'sparepart_id'   => $sp['sparepart_id'],
+                'sparepart_id'   => $sparepartId,
                 'quantity'       => $qty,
-                'notes'          => $sp['notes'] ?? null,
+                'notes'          => isset($sp['notes']) && trim($sp['notes']) !== '' ? trim($sp['notes']) : null,
                 'created_by'     => Auth::id(),
             ]);
+
             $sparepart->decrement('stok', $qty);
         }
     }

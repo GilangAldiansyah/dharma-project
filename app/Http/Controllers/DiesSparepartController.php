@@ -118,6 +118,14 @@ class DiesSparepartController extends Controller
         return back()->with('success', 'Stok berhasil disesuaikan.');
     }
 
+    public function allForBulk()
+    {
+        $spareparts = DiesSparepart::orderBy('sparepart_name')
+            ->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok', 'stok_minimum']);
+
+        return response()->json($spareparts);
+    }
+
     public function bulkUpdate(Request $request)
     {
         $request->validate([

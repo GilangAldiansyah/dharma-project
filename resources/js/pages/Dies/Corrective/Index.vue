@@ -7,12 +7,12 @@ import {
     AlertTriangle, CheckCircle2, X, Download, Camera,
     Upload, Package, AlertCircle, Clock, Loader2,
     Timer, ChevronUp, ChevronDown, Layers, FileText,
-    ArrowDownToLine, Play, Pause, History
+    ArrowDownToLine, Play, Pause, History, CalendarRange
 } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
-interface DiesProcess { id: number; process_name: string; tonase: number | null }
-interface DiesMini { id_sap: string; no_part: string; nama_dies: string; line: string; current_stroke: number; processes: DiesProcess[] }
+interface DiesProcess { id: number; process_name: string; tonase: number | null; current_stroke: number }
+interface DiesMini { id_sap: string; no_part: string; nama_dies: string; line: string; processes: DiesProcess[] }
 interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; unit: string; stok: number }
 interface HistorySp { id: number; quantity: number; notes: string | null; sparepart: Sparepart | null }
 interface Photo { path: string; type: 'before' | 'after' }
@@ -36,12 +36,27 @@ interface Corrective {
     created_by: { id: number; name: string } | null;
     closed_by: { id: number; name: string } | null;
 }
+
+interface PaginationLink { url: string | null; label: string; active: boolean }
+
 interface Props {
-    correctives: { data: Corrective[]; links: any[]; meta: any };
+    correctives: {
+        data: Corrective[];
+        links: PaginationLink[];
+        meta: {
+            current_page: number;
+            from: number;
+            last_page: number;
+            per_page: number;
+            to: number;
+            total: number;
+            links: PaginationLink[];
+        };
+    };
     diesList: DiesMini[];
     spareparts: Sparepart[];
     summary: { open: number; in_progress: number; on_repair: number; closed: number };
-    filters: { search?: string; status?: string; dies_id?: string; month?: string; year?: string };
+    filters: { search?: string; status?: string; dies_id?: string; month?: string; year?: string; date_from?: string; date_to?: string };
 }
 
 const props = defineProps<Props>();
@@ -55,6 +70,8 @@ const filterStatus = ref(props.filters.status   ?? '');
 const filterDies   = ref(props.filters.dies_id  ?? '');
 const filterMonth  = ref(props.filters.month    ?? '');
 const filterYear   = ref(props.filters.year ? Number(props.filters.year) : currentYear);
+const filterDateFrom = ref(props.filters.date_from ?? '');
+const filterDateTo   = ref(props.filters.date_to   ?? '');
 const showFilter   = ref(false);
 
 const months = [
@@ -67,6 +84,13 @@ const months = [
 
 const incrementYear = () => { if (filterYear.value < currentYear) filterYear.value++; };
 const decrementYear = () => { if (filterYear.value > currentYear - 4) filterYear.value--; };
+
+const isDateRangeActive = computed(() => !!(filterDateFrom.value || filterDateTo.value));
+
+const clearDateRange = () => {
+    filterDateFrom.value = '';
+    filterDateTo.value   = '';
+};
 
 const showDelModal        = ref(false);
 const showFormModal       = ref(false);
@@ -88,25 +112,20 @@ const statusCfg: Record<string, { label: string; badge: string; dot: string; car
 };
 
 const hasActiveSession = (c: Corrective) => c.repair_sessions?.some(s => !s.ended_at) ?? false;
-
 const canClose = (c: Corrective) => c.status === 'in_progress' || c.status === 'on_repair';
-
-const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterMonth.value].filter(Boolean).length);
+const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterMonth.value, filterDateFrom.value || filterDateTo.value ? '1' : ''].filter(Boolean).length);
 
 const totalMachineDurationMinutes = computed(() =>
     props.correctives.data.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0)
 );
-
 const totalRepairDurationMinutes = computed(() =>
     props.correctives.data.reduce((acc, c) => acc + (c.repair_duration_minutes ?? 0), 0)
 );
-
 const avgMachineDurationMinutes = computed(() => {
     const withMachine = props.correctives.data.filter(c => c.machine_duration_minutes);
     if (!withMachine.length) return 0;
     return Math.round(withMachine.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0) / withMachine.length);
 });
-
 const avgRepairDurationMinutes = computed(() => {
     const withRepair = props.correctives.data.filter(c => c.repair_duration_minutes);
     if (!withRepair.length) return 0;
@@ -122,17 +141,41 @@ const fmtMinutes = (minutes: number): string => {
     return `${m} menit`;
 };
 
-let debounce: ReturnType<typeof setTimeout>;
-watch(search, () => { clearTimeout(debounce); debounce = setTimeout(() => navigate(), 400); });
-watch([filterStatus, filterDies, filterMonth, filterYear], () => navigate());
-
-const navigate = () => router.get('/dies/corrective', {
-    search:   search.value,
-    status:   filterStatus.value,
-    dies_id:  filterDies.value,
-    month:    filterMonth.value,
-    year:     String(filterYear.value),
+const navigate = (resetPage = true) => router.get('/dies/corrective', {
+    search:     search.value,
+    status:     filterStatus.value,
+    dies_id:    filterDies.value,
+    month:      isDateRangeActive.value ? '' : filterMonth.value,
+    year:       isDateRangeActive.value ? '' : String(filterYear.value),
+    date_from:  filterDateFrom.value,
+    date_to:    filterDateTo.value,
+    ...(resetPage ? { page: 1 } : {}),
 }, { preserveState: true, preserveScroll: true, replace: true });
+
+const goToPage = (url: string | null) => {
+    if (!url) return;
+    router.visit(url, { preserveState: true, preserveScroll: true });
+};
+
+let searchDebounce: ReturnType<typeof setTimeout>;
+watch(search, () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => navigate(true), 400);
+});
+
+watch([filterStatus, filterDies, filterMonth, filterYear], () => navigate(true));
+
+let dateDebounce: ReturnType<typeof setTimeout>;
+watch([filterDateFrom, filterDateTo], () => {
+    clearTimeout(dateDebounce);
+    dateDebounce = setTimeout(() => navigate(true), 400);
+});
+
+watch(isDateRangeActive, (active) => {
+    if (active) {
+        filterMonth.value = '';
+    }
+});
 
 const fmtDate = (d: string | null) =>
     !d ? '-' : new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -243,9 +286,9 @@ const selectFormDies        = (d: DiesMini) => { form.dies_id = d.id_sap; form.p
 const clearFormDies         = () => { form.dies_id = ''; form.process_id = null; formDiesSearch.value = ''; formDiesOpen.value = true; };
 const closeFormDiesDropdown = () => { setTimeout(() => { formDiesOpen.value = false; }, 180); };
 
-const availableProcesses  = computed(() => selectedFormDiesObj.value?.processes ?? []);
-const processOpen         = ref(false);
-const selectedProcessObj  = computed(() => availableProcesses.value.find(p => p.id === form.process_id) ?? null);
+const availableProcesses   = computed(() => selectedFormDiesObj.value?.processes ?? []);
+const processOpen          = ref(false);
+const selectedProcessObj   = computed(() => availableProcesses.value.find(p => p.id === form.process_id) ?? null);
 const selectedProcessIndex = computed(() => availableProcesses.value.findIndex(p => p.id === form.process_id));
 
 watch(() => form.dies_id, () => { form.process_id = null; });
@@ -405,7 +448,7 @@ const openEdit = (c: Corrective) => {
     showFormModal.value   = true;
 };
 
-const openDetail = (c: Corrective) => { selectedCm.value = c; showDetailModal.value = true; };
+const openDetail   = (c: Corrective) => { selectedCm.value = c; showDetailModal.value = true; };
 const openSessions = (c: Corrective) => { selectedCm.value = c; showSessionsModal.value = true; };
 
 const closeFormModal = () => {
@@ -446,7 +489,7 @@ const submitForm = () => {
     }
 };
 
-const openOffMachine = (c: Corrective) => { selectedCm.value = c; showOffMachineModal.value = true; };
+const openOffMachine   = (c: Corrective) => { selectedCm.value = c; showOffMachineModal.value = true; };
 const submitOffMachine = () => {
     if (!selectedCm.value) return;
     router.post(`/dies/corrective/${selectedCm.value.id}/off-machine`, {}, {
@@ -463,8 +506,8 @@ const submitRepairPause = (c: Corrective) => {
     router.post(`/dies/corrective/${c.id}/repair-pause`, {}, { preserveScroll: true });
 };
 
-const closeForm = useForm({ action: '' });
-const openClose  = (c: Corrective) => { selectedCm.value = c; closeForm.reset(); showCloseModal.value = true; };
+const closeForm   = useForm({ action: '' });
+const openClose   = (c: Corrective) => { selectedCm.value = c; closeForm.reset(); showCloseModal.value = true; };
 const submitClose = () => {
     if (!selectedCm.value) return;
     closeForm.post(`/dies/corrective/${selectedCm.value.id}/close`, {
@@ -472,7 +515,7 @@ const submitClose = () => {
     });
 };
 
-const openDelete  = (c: Corrective) => { selectedCm.value = c; showDelModal.value = true; };
+const openDelete   = (c: Corrective) => { selectedCm.value = c; showDelModal.value = true; };
 const submitDelete = () => {
     if (!selectedCm.value) return;
     router.delete(`/dies/corrective/${selectedCm.value.id}`, {
@@ -512,6 +555,14 @@ const exportExcel = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Corrective');
     XLSX.writeFile(wb, `Dies_CM_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
+
+const paginationLinks = computed(() => props.correctives.meta?.links ?? []);
+const hasPagination   = computed(() => (props.correctives.meta?.last_page ?? 1) > 1);
+const paginationInfo  = computed(() => {
+    const meta = props.correctives.meta;
+    if (!meta) return '';
+    return `${meta.from ?? 0}–${meta.to ?? 0} dari ${meta.total ?? 0}`;
+});
 </script>
 
 <template>
@@ -604,13 +655,12 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- Month + Year Filter -->
             <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-2.5">
                 <div class="flex items-center gap-2">
                     <div class="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-                        <button v-for="m in months" :key="m.v" @click="filterMonth = m.v"
+                        <button v-for="m in months" :key="m.v" @click="filterMonth = m.v; clearDateRange()"
                             :class="['flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all',
-                                filterMonth === m.v ? 'bg-orange-500 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700']">
+                                !isDateRangeActive && filterMonth === m.v ? 'bg-orange-500 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700']">
                             {{ m.l }}
                         </button>
                     </div>
@@ -628,7 +678,6 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- Search + Filter -->
             <div class="flex items-center gap-2">
                 <div class="relative flex-1">
                     <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
@@ -649,7 +698,6 @@ const exportExcel = () => {
                 </button>
             </div>
 
-            <!-- Filter Panel -->
             <div v-if="showFilter" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3">
                 <div>
                     <label class="block text-xs font-semibold text-gray-400 uppercase mb-1.5">Status</label>
@@ -662,6 +710,37 @@ const exportExcel = () => {
                         </button>
                     </div>
                 </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase mb-1.5 flex items-center gap-1.5">
+                        <CalendarRange class="w-3.5 h-3.5" /> Rentang Tanggal
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1">
+                            <label class="block text-xs text-gray-400 mb-1">Dari</label>
+                            <input v-model="filterDateFrom" type="date"
+                                :max="filterDateTo || undefined"
+                                :class="['w-full px-3 py-2 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                    filterDateFrom ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-orange-400 text-gray-700 dark:text-gray-300']" />
+                        </div>
+                        <div class="flex-shrink-0 text-gray-300 mt-4">—</div>
+                        <div class="flex-1">
+                            <label class="block text-xs text-gray-400 mb-1">Sampai</label>
+                            <input v-model="filterDateTo" type="date"
+                                :min="filterDateFrom || undefined"
+                                :class="['w-full px-3 py-2 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                    filterDateTo ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-orange-400 text-gray-700 dark:text-gray-300']" />
+                        </div>
+                        <button v-if="isDateRangeActive" type="button" @click="clearDateRange"
+                            class="flex-shrink-0 mt-4 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                            <X class="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                    <p v-if="isDateRangeActive" class="mt-1.5 text-xs text-orange-500 flex items-center gap-1">
+                        <CalendarRange class="w-3 h-3" /> Filter bulan/tahun dinonaktifkan saat rentang tanggal aktif
+                    </p>
+                </div>
+
                 <div>
                     <label class="block text-xs font-semibold text-gray-400 uppercase mb-1.5">Dies</label>
                     <div class="relative">
@@ -691,12 +770,11 @@ const exportExcel = () => {
                     </div>
                 </div>
                 <div class="flex justify-end">
-                    <button @click="filterStatus = ''; clearDiesFilter()"
+                    <button @click="filterStatus = ''; clearDiesFilter(); clearDateRange()"
                         class="text-xs text-orange-500 font-semibold hover:underline">Reset filter</button>
                 </div>
             </div>
 
-            <!-- Desktop Table -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
@@ -807,11 +885,11 @@ const exportExcel = () => {
                         </tr>
                     </tbody>
                 </table>
-                <div v-if="correctives.meta?.last_page > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-                    <p class="text-xs text-gray-400">{{ correctives.meta.from }}–{{ correctives.meta.to }} dari {{ correctives.meta.total }}</p>
+                <div v-if="hasPagination" class="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+                    <p class="text-xs text-gray-400">{{ paginationInfo }}</p>
                     <div class="flex gap-1">
-                        <button v-for="link in correctives.links" :key="link.label"
-                            @click="link.url && router.visit(link.url)" :disabled="!link.url" v-html="link.label"
+                        <button v-for="link in paginationLinks" :key="link.label"
+                            @click="goToPage(link.url)" :disabled="!link.url" v-html="link.label"
                             :class="['px-3 py-1.5 text-xs rounded-lg font-semibold transition-colors',
                                 link.active ? 'bg-orange-500 text-white' : link.url ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200' : 'opacity-40 cursor-default bg-gray-100 dark:bg-gray-700 text-gray-400']">
                         </button>
@@ -819,7 +897,6 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- Mobile Cards -->
             <div class="lg:hidden space-y-2">
                 <div v-if="correctives.data.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
                     <Wrench class="w-8 h-8 mx-auto mb-2 text-gray-300" />
@@ -914,17 +991,20 @@ const exportExcel = () => {
                         </div>
                     </div>
                 </div>
-                <div v-if="correctives.meta?.last_page > 1" class="flex justify-center gap-1 pt-1">
-                    <button v-for="link in correctives.links" :key="link.label"
-                        @click="link.url && router.visit(link.url)" :disabled="!link.url" v-html="link.label"
-                        :class="['px-3 py-1.5 text-xs rounded-lg font-semibold',
-                            link.active ? 'bg-orange-500 text-white' : link.url ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600' : 'opacity-40 cursor-default']">
-                    </button>
+
+                <div v-if="hasPagination" class="flex items-center justify-between pt-1">
+                    <p class="text-xs text-gray-400">{{ paginationInfo }}</p>
+                    <div class="flex gap-1">
+                        <button v-for="link in paginationLinks" :key="link.label"
+                            @click="goToPage(link.url)" :disabled="!link.url" v-html="link.label"
+                            :class="['px-3 py-1.5 text-xs rounded-lg font-semibold',
+                                link.active ? 'bg-orange-500 text-white' : link.url ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600' : 'opacity-40 cursor-default']">
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- ====== MODAL FORM ====== -->
         <div v-if="showFormModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
@@ -977,7 +1057,7 @@ const exportExcel = () => {
                                 <p class="text-xs font-bold text-orange-700 dark:text-orange-300">{{ selectedFormDiesObj.nama_dies }}</p>
                                 <div class="flex items-center gap-3 mt-1 text-xs text-gray-500">
                                     <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 rounded font-semibold">{{ selectedFormDiesObj.line }}</span>
-                                    <span>Stroke: <span class="font-bold text-gray-700 dark:text-gray-300">{{ selectedFormDiesObj.current_stroke.toLocaleString() }}</span></span>
+                                    <span v-if="selectedProcessObj">Stroke: <span class="font-bold text-gray-700 dark:text-gray-300">{{ selectedProcessObj.current_stroke.toLocaleString() }}</span></span>
                                 </div>
                             </div>
                         </div>
@@ -1015,7 +1095,10 @@ const exportExcel = () => {
                                             <span class="text-xs font-bold text-purple-400 w-8 flex-shrink-0">({{ idx + 1 }}/{{ availableProcesses.length }})</span>
                                             <span class="text-xs font-semibold text-gray-800 dark:text-gray-200">{{ p.process_name }}</span>
                                         </span>
-                                        <span v-if="p.tonase" class="text-xs text-gray-400">{{ p.tonase }} ton</span>
+                                        <span class="flex items-center gap-2 text-xs text-gray-400">
+                                            <span v-if="p.current_stroke">{{ p.current_stroke.toLocaleString() }} stk</span>
+                                            <span v-if="p.tonase">{{ p.tonase }} ton</span>
+                                        </span>
                                     </button>
                                 </div>
                             </div>
@@ -1201,7 +1284,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- ====== MODAL DETAIL ====== -->
         <div v-if="showDetailModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -1231,6 +1313,10 @@ const exportExcel = () => {
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded font-semibold">
                                 <Layers class="w-3 h-3" /> {{ selectedCm.process.process_name }}
                             </span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-gray-400">Stroke saat CM</span>
+                            <span class="font-bold text-gray-900 dark:text-white">{{ selectedCm.stroke_at_maintenance.toLocaleString() }}</span>
                         </div>
                         <div class="flex justify-between gap-2">
                             <span class="text-gray-400">PIC</span>
@@ -1345,7 +1431,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- ====== MODAL REPAIR SESSIONS ====== -->
         <div v-if="showSessionsModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[85vh] flex flex-col">
@@ -1396,7 +1481,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- ====== MODAL TURUN MESIN ====== -->
         <div v-if="showOffMachineModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
@@ -1436,7 +1520,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- ====== MODAL CLOSE ====== -->
         <div v-if="showCloseModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -1488,7 +1571,6 @@ const exportExcel = () => {
             </div>
         </div>
 
-        <!-- ====== MODAL DELETE ====== -->
         <div v-if="showDelModal && selectedCm"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">

@@ -23,7 +23,6 @@ interface Props {
     filters: { search?: string; filter?: string };
 }
 
-
 const props = defineProps<Props>();
 const page  = usePage();
 const flash = computed(() => (page.props as any).flash);
@@ -54,13 +53,15 @@ interface BulkItem {
     new_stok_minimum: number | null;
 }
 
-const bulkItems  = ref<BulkItem[]>([]);
-const bulkNotes  = ref('');
-const bulkSearch = ref('');
+const bulkItems     = ref<BulkItem[]>([]);
+const bulkNotes     = ref('');
+const bulkSearch    = ref('');
+const allSpareparts = ref<Sparepart[]>([]);
+const isFetchingAll = ref(false);
 
 const filteredBulkCandidates = computed(() => {
     const q = bulkSearch.value.toLowerCase().trim();
-    return props.spareparts.data.filter(sp => {
+    return allSpareparts.value.filter(sp => {
         const notAdded = !bulkItems.value.find(b => b.id === sp.id);
         if (!notAdded) return false;
         if (!q) return true;
@@ -86,20 +87,28 @@ const removeFromBulk = (id: number) => {
     bulkItems.value = bulkItems.value.filter(b => b.id !== id);
 };
 
-const openBulk = () => {
-    bulkItems.value  = [];
-    bulkNotes.value  = '';
-    bulkSearch.value = '';
+const openBulk = async () => {
+    bulkItems.value     = [];
+    bulkNotes.value     = '';
+    bulkSearch.value    = '';
     showBulkModal.value = true;
+
+    isFetchingAll.value = true;
+    try {
+        const res = await fetch('/dies/sparepart/all');
+        allSpareparts.value = await res.json();
+    } finally {
+        isFetchingAll.value = false;
+    }
 };
 
 const submitBulk = () => {
     const items = bulkItems.value
         .filter(b => (b.stok_tambah !== null && b.stok_tambah > 0) || b.new_stok_minimum !== null)
         .map(b => ({
-            id: b.id,
-            stok_tambah:   b.stok_tambah   ?? 0,
-            stok_minimum:  b.new_stok_minimum ?? b.stok_minimum,
+            id:           b.id,
+            stok_tambah:  b.stok_tambah ?? 0,
+            stok_minimum: b.new_stok_minimum ?? b.stok_minimum,
         }));
 
     if (!items.length) return;
@@ -130,7 +139,7 @@ const navigate = () => router.get('/dies/sparepart',
 
 const clearFilters = () => {
     filterStok.value = '';
-    search.value = '';
+    search.value     = '';
     showFilter.value = false;
 };
 
@@ -144,17 +153,17 @@ const openEdit = (sp: Sparepart) => {
     form.value = {
         sparepart_code: sp.sparepart_code,
         sparepart_name: sp.sparepart_name,
-        unit: sp.unit,
-        stok: sp.stok,
-        stok_minimum: sp.stok_minimum,
+        unit:           sp.unit,
+        stok:           sp.stok,
+        stok_minimum:   sp.stok_minimum,
     };
     showEditModal.value = true;
 };
 
 const openAdj = (sp: Sparepart) => {
     selectedSp.value = sp;
-    adjQty.value   = 1;
-    adjNotes.value = '';
+    adjQty.value     = 1;
+    adjNotes.value   = '';
     showAdjModal.value = true;
 };
 
@@ -342,15 +351,15 @@ const submitDelete = () => {
                                 <td class="px-4 py-3">
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button @click="openAdj(sp)"
-                                            class="p-1.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-200 transition-colors" title="Tambah stok">
+                                            class="p-1.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-200 transition-colors">
                                             <ArrowUpCircle class="w-3.5 h-3.5" />
                                         </button>
                                         <button @click="openEdit(sp)"
-                                            class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors" title="Edit">
+                                            class="p-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 transition-colors">
                                             <Pencil class="w-3.5 h-3.5" />
                                         </button>
                                         <button @click="openDelete(sp)"
-                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors" title="Hapus">
+                                            class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors">
                                             <Trash2 class="w-3.5 h-3.5" />
                                         </button>
                                     </div>
@@ -565,8 +574,7 @@ const submitDelete = () => {
                                     class="w-10 h-10 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-xl font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200 active:scale-95 transition-all text-lg flex-shrink-0">
                                     −
                                 </button>
-                                <input v-model.number="adjQty" type="number" min="1"
-                                    @blur="clampQty"
+                                <input v-model.number="adjQty" type="number" min="1" @blur="clampQty"
                                     class="flex-1 text-center px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm font-bold focus:outline-none focus:border-orange-400" />
                                 <button @click="adjQty = (adjQty || 0) + 1"
                                     class="w-10 h-10 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-xl font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200 active:scale-95 transition-all text-lg flex-shrink-0">
@@ -639,10 +647,19 @@ const submitDelete = () => {
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Cari & Tambahkan Sparepart</label>
                         <div class="relative">
                             <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                            <input v-model="bulkSearch" type="text" placeholder="Cari kode atau nama sparepart..."
-                                class="w-full pl-9 pr-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400" />
+                            <input v-model="bulkSearch" type="text"
+                                :placeholder="isFetchingAll ? 'Memuat data...' : 'Cari kode atau nama sparepart...'"
+                                :disabled="isFetchingAll"
+                                class="w-full pl-9 pr-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:outline-none focus:border-orange-400 disabled:opacity-50" />
                         </div>
-                        <div v-if="bulkSearch && filteredBulkCandidates.length > 0"
+                        <div v-if="isFetchingAll" class="mt-2 flex items-center gap-2 text-xs text-gray-400 px-1">
+                            <svg class="w-3.5 h-3.5 animate-spin text-orange-400" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            Memuat semua sparepart...
+                        </div>
+                        <div v-if="!isFetchingAll && bulkSearch && filteredBulkCandidates.length > 0"
                             class="mt-1 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
                             <button v-for="sp in filteredBulkCandidates.slice(0, 8)" :key="sp.id"
                                 @click="addToBulk(sp)"
@@ -651,7 +668,10 @@ const submitDelete = () => {
                                 <span class="text-gray-400 whitespace-nowrap font-mono">{{ sp.sparepart_code }} · {{ sp.stok }} {{ sp.unit }}</span>
                             </button>
                         </div>
-                        <p v-if="bulkSearch && filteredBulkCandidates.length === 0" class="text-xs text-gray-400 mt-1.5 px-1">Tidak ada sparepart yang cocok atau sudah ditambahkan.</p>
+                        <p v-if="!isFetchingAll && bulkSearch && filteredBulkCandidates.length === 0"
+                            class="text-xs text-gray-400 mt-1.5 px-1">
+                            Tidak ada sparepart yang cocok atau sudah ditambahkan.
+                        </p>
                     </div>
 
                     <div v-if="bulkItems.length > 0">
@@ -663,8 +683,7 @@ const submitDelete = () => {
                             <p class="col-span-1"></p>
                         </div>
                         <div class="space-y-2">
-                            <div v-for="item in bulkItems" :key="item.id"
-                                class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
+                            <div v-for="item in bulkItems" :key="item.id" class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                                 <div class="flex items-start justify-between gap-2 mb-2 lg:hidden">
                                     <div>
                                         <p class="text-xs font-mono font-bold text-orange-600 dark:text-orange-400">{{ item.sparepart_code }}</p>
@@ -704,7 +723,7 @@ const submitDelete = () => {
                         </div>
                     </div>
 
-                    <div v-if="bulkItems.length === 0" class="py-8 text-center text-gray-400 text-sm">
+                    <div v-if="bulkItems.length === 0 && !isFetchingAll" class="py-8 text-center text-gray-400 text-sm">
                         <Layers class="w-8 h-8 mx-auto mb-2 text-gray-300" />
                         Cari dan tambahkan sparepart di atas untuk mulai bulk update.
                     </div>

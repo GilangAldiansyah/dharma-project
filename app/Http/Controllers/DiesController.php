@@ -1,8 +1,8 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use App\Models\Dies;
+use App\Models\DiesProcess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -11,13 +11,14 @@ class DiesController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Dies::withCount(['preventives', 'correctives']);
+        $query = Dies::withCount(['preventives', 'correctives'])
+            ->with('processes');
 
         if ($request->filled('search')) {
             $query->where(function ($q) use ($request) {
-                $q->where('no_part', 'like', '%' . $request->search . '%')
-                    ->orWhere('nama_dies', 'like', '%' . $request->search . '%')
-                    ->orWhere('id_sap', 'like', '%' . $request->search . '%');
+                $q->where('no_part',   'like', '%' . $request->search . '%')
+                  ->orWhere('nama_dies','like', '%' . $request->search . '%')
+                  ->orWhere('id_sap',  'like', '%' . $request->search . '%');
             });
         }
 
@@ -29,17 +30,19 @@ class DiesController extends Controller
             $query->where('line', $request->line);
         }
 
-        $dies  = $query->orderBy('no_part')->paginate(20)->withQueryString();
-        $lines = Dies::distinct()->orderBy('line')->pluck('line');
+        $dies          = $query->orderBy('no_part')->paginate(20)->withQueryString();
+        $lines         = Dies::distinct()->orderBy('line')->pluck('line');
+        $totalProcesses = DiesProcess::count();
 
         return Inertia::render('Dies/Index', [
-            'dies'           => $dies,
-            'lines'          => $lines,
-            'filters'        => $request->only('search', 'status', 'line'),
-            'bstb_preview'   => session('bstb_preview',   []),
-            'bstb_not_found' => session('bstb_not_found', []),
-            'bstb_no_change' => session('bstb_no_change', 0),
-            'bstb_total'     => session('bstb_total',     0),
+            'dies'            => $dies,
+            'lines'           => $lines,
+            'totalProcesses'  => $totalProcesses,
+            'filters'         => $request->only('search', 'status', 'line'),
+            'bstb_preview'    => session('bstb_preview',   []),
+            'bstb_not_found'  => session('bstb_not_found', []),
+            'bstb_no_change'  => session('bstb_no_change', 0),
+            'bstb_total'      => session('bstb_total',     0),
         ]);
     }
 
@@ -47,47 +50,54 @@ class DiesController extends Controller
     {
         $dies = Dies::with(['processes'])->findOrFail($idSap);
 
-        $preventives = $dies->preventives()->latest('report_date')->paginate(10, ['*'], 'pm_page');
-        $correctives = $dies->correctives()->latest('report_date')->paginate(10, ['*'], 'cm_page');
+        $preventives = $dies->preventives()
+            ->with('process')
+            ->latest('report_date')
+            ->paginate(10, ['*'], 'pm_page');
 
-        $pct       = $dies->std_stroke > 0 ? round(($dies->current_stroke / $dies->std_stroke) * 100, 1) : 0;
-        $remaining = max(0, $dies->std_stroke - $dies->current_stroke);
-        $daysLeft  = $dies->forecast_per_day > 0 ? ceil($remaining / $dies->forecast_per_day) : null;
+        $correctives = $dies->correctives()
+            ->latest('report_date')
+            ->paginate(10, ['*'], 'cm_page');
 
         return Inertia::render('Dies/Show', [
             'dies'        => $dies,
             'preventives' => $preventives,
             'correctives' => $correctives,
-            'stats'       => [
-                'percentage' => $pct,
-                'remaining'  => $remaining,
-                'days_left'  => $daysLeft,
-                'is_overdue' => $pct >= 100,
-            ],
         ]);
     }
 
     public function store(Request $request)
     {
         $request->validate([
-            'id_sap'               => 'required|string|unique:dies,id_sap',
-            'no_part'              => 'required|string',
-            'nama_dies'            => 'required|string',
-            'line'                 => 'required|string',
-            'kategori'             => 'nullable|string',
-            'status'               => 'required|in:active,slow_moving,discontinue,ohp,service_part',
-            'is_common'            => 'boolean',
-            'std_stroke'           => 'required|integer|min:0',
-            'freq_maintenance'     => 'nullable|string',
-            'freq_maintenance_day' => 'nullable|integer|min:1',
-            'cav'                  => 'required|integer|min:1',
-            'forecast_per_day'     => 'required|integer|min:0',
-            'current_stroke'       => 'required|integer|min:0',
-            'total_stroke'         => 'required|integer|min:0',
-            'last_mtc_date'        => 'nullable|date',
+            'id_sap'           => 'required|string|unique:dies,id_sap',
+            'no_part'          => 'required|string',
+            'nama_dies'        => 'required|string',
+            'line'             => 'required|string',
+            'kategori'         => 'nullable|string',
+            'status'           => 'required|in:active,slow_moving,discontinue,ohp,service_part',
+            'is_common'        => 'boolean',
+            'forecast_per_day' => 'required|integer|min:0',
+            'process_name'     => 'nullable|string',
+            'std_stroke'       => 'nullable|integer|min:0',
+            'tonase'           => 'nullable|numeric|min:0',
+            'last_mtc_date'    => 'nullable|date',
         ]);
 
-        Dies::create($request->all());
+        $dies = Dies::create($request->only([
+            'id_sap','no_part','nama_dies','line','kategori',
+            'status','is_common','forecast_per_day',
+        ]));
+
+        if ($request->filled('process_name')) {
+            $dies->processes()->create([
+                'process_name'   => $request->process_name,
+                'no_proses'      => 0,
+                'std_stroke'     => $request->std_stroke ?? 20000,
+                'current_stroke' => 0,
+                'tonase'         => $request->tonase ?: null,
+                'last_mtc_date'  => $request->last_mtc_date ?: null,
+            ]);
+        }
 
         return redirect()->route('dies.index')->with('success', 'Data dies berhasil ditambahkan.');
     }
@@ -97,31 +107,26 @@ class DiesController extends Controller
         $dies = Dies::findOrFail($idSap);
 
         $request->validate([
-            'no_part'              => 'required|string',
-            'nama_dies'            => 'required|string',
-            'line'                 => 'required|string',
-            'kategori'             => 'nullable|string',
-            'status'               => 'required|in:active,slow_moving,discontinue,ohp,service_part',
-            'is_common'            => 'boolean',
-            'std_stroke'           => 'required|integer|min:0',
-            'freq_maintenance'     => 'nullable|string',
-            'freq_maintenance_day' => 'nullable|integer|min:1',
-            'cav'                  => 'required|integer|min:1',
-            'forecast_per_day'     => 'required|integer|min:0',
-            'current_stroke'       => 'required|integer|min:0',
-            'total_stroke'         => 'required|integer|min:0',
-            'last_mtc_date'        => 'nullable|date',
+            'no_part'          => 'required|string',
+            'nama_dies'        => 'required|string',
+            'line'             => 'required|string',
+            'kategori'         => 'nullable|string',
+            'status'           => 'required|in:active,slow_moving,discontinue,ohp,service_part',
+            'is_common'        => 'boolean',
+            'forecast_per_day' => 'required|integer|min:0',
         ]);
 
-        $dies->update($request->all());
+        $dies->update($request->only([
+            'no_part','nama_dies','line','kategori',
+            'status','is_common','forecast_per_day',
+        ]));
 
-        return redirect()->route('dies.show', $idSap)->with('success', 'Data dies berhasil diperbarui.');
+        return redirect()->route('dies.index')->with('success', 'Data dies berhasil diperbarui.');
     }
 
     public function destroy(string $idSap)
     {
         Dies::findOrFail($idSap)->delete();
-
         return redirect()->route('dies.index')->with('success', 'Data dies berhasil dihapus.');
     }
 
@@ -138,24 +143,15 @@ class DiesController extends Controller
         $skipped = 0;
 
         foreach (array_slice($sheet, 2) as $row) {
-            $idSap         = trim((string)($row['L'] ?? ''));
-            $currentStroke = intval($row['AA'] ?? 0);
-            $totalStroke   = intval($row['AC'] ?? 0);
-            $lastMtcRaw    = $row['S'] ?? null;
+            $idSap       = trim((string)($row['L'] ?? ''));
+            $totalStroke = intval($row['AC'] ?? 0);
 
             if (empty($idSap)) { $skipped++; continue; }
 
             $dies = Dies::where('id_sap', $idSap)->first();
             if (!$dies) { $skipped++; continue; }
 
-            $dies->update([
-                'current_stroke' => $currentStroke,
-                'total_stroke'   => $totalStroke,
-                'last_mtc_date'  => $lastMtcRaw
-                    ? \Carbon\Carbon::parse($lastMtcRaw)->toDateString()
-                    : $dies->last_mtc_date,
-            ]);
-
+            $dies->update(['total_stroke' => $totalStroke]);
             $updated++;
         }
 
@@ -181,7 +177,8 @@ class DiesController extends Controller
 
         $idSaps       = collect($parsed)->pluck('id_sap')->unique()->filter()->values();
         $existingDies = Dies::whereIn('id_sap', $idSaps)
-            ->get(['id_sap', 'no_part', 'nama_dies', 'line', 'current_stroke', 'std_stroke'])
+            ->with('processes')
+            ->get()
             ->keyBy('id_sap');
 
         $preview  = [];
@@ -197,14 +194,10 @@ class DiesController extends Controller
                 continue;
             }
 
-            $dies      = $existingDies[$idSap];
-            $addQty    = $row['qty'];
-            $projected = (int) $dies->current_stroke + $addQty;
+            $dies   = $existingDies[$idSap];
+            $addQty = $row['qty'];
 
-            if ($addQty <= 0) {
-                $noChange++;
-                continue;
-            }
+            if ($addQty <= 0) { $noChange++; continue; }
 
             $preview[] = [
                 'id_sap'    => $idSap,
@@ -213,8 +206,14 @@ class DiesController extends Controller
                 'line'      => $dies->line,
                 'desc'      => $row['desc'],
                 'qty'       => $addQty,
-                'old_total' => (int) $dies->current_stroke,
-                'new_total' => $projected,
+                'processes' => $dies->processes->map(fn($pr) => [
+                    'id'           => $pr->id,
+                    'process_name' => $pr->process_name,
+                    'old_stroke'   => $pr->current_stroke,
+                    'add_qty'      => $addQty,
+                    'new_stroke'   => $pr->current_stroke + $addQty,
+                    'std_stroke'   => $pr->std_stroke,
+                ])->values()->toArray(),
             ];
         }
 
@@ -225,12 +224,14 @@ class DiesController extends Controller
             'bstb_total'     => count($parsed),
         ]);
 
-        $dies  = Dies::withCount(['preventives', 'correctives'])->orderBy('no_part')->paginate(20)->withQueryString();
-        $lines = Dies::distinct()->orderBy('line')->pluck('line');
+        $dies           = Dies::withCount(['preventives','correctives'])->with('processes')->orderBy('no_part')->paginate(20)->withQueryString();
+        $lines          = Dies::distinct()->orderBy('line')->pluck('line');
+        $totalProcesses = DiesProcess::count();
 
         return Inertia::render('Dies/Index', [
             'dies'           => $dies,
             'lines'          => $lines,
+            'totalProcesses' => $totalProcesses,
             'filters'        => request()->only('search', 'status', 'line'),
             'bstb_preview'   => $preview,
             'bstb_not_found' => array_slice(array_unique($notFound, SORT_REGULAR), 0, 20),
@@ -242,37 +243,36 @@ class DiesController extends Controller
     public function importBstbConfirm(Request $request)
     {
         $request->validate([
-            'updates'   => 'required|array',
-            'updates.*' => 'string',
+            'updates'          => 'required|array',
+            'updates.*.id_sap' => 'required|string',
+            'updates.*.processes' => 'required|array',
+            'updates.*.processes.*.id'      => 'required|integer',
+            'updates.*.processes.*.add_qty' => 'required|integer|min:0',
         ]);
 
-        $preview = session('bstb_preview', []);
-
-        if (empty($preview)) {
-            return back()->withErrors(['error' => 'Session expired. Upload ulang file BSTB.']);
-        }
-
-        $toUpdate = collect($preview)->whereIn('id_sap', $request->updates);
-        $updated  = 0;
-
-        DB::transaction(function () use ($toUpdate, &$updated) {
-            foreach ($toUpdate as $item) {
+        DB::transaction(function () use ($request) {
+            foreach ($request->updates as $item) {
+                foreach ($item['processes'] as $proc) {
+                    if ($proc['add_qty'] <= 0) continue;
+                    DiesProcess::where('id', $proc['id'])->increment('current_stroke', $proc['add_qty']);
+                }
                 Dies::where('id_sap', $item['id_sap'])->update([
-                    'current_stroke'  => DB::raw("current_stroke + {$item['qty']}"),
                     'bstb_updated_at' => now(),
                 ]);
-                $updated++;
             }
         });
 
         session()->forget(['bstb_preview', 'bstb_not_found', 'bstb_no_change', 'bstb_total']);
 
-        $dies  = Dies::withCount(['preventives', 'correctives'])->orderBy('no_part')->paginate(20)->withQueryString();
-        $lines = Dies::distinct()->orderBy('line')->pluck('line');
+        $updated        = count($request->updates);
+        $dies           = Dies::withCount(['preventives','correctives'])->with('processes')->orderBy('no_part')->paginate(20)->withQueryString();
+        $lines          = Dies::distinct()->orderBy('line')->pluck('line');
+        $totalProcesses = DiesProcess::count();
 
         return Inertia::render('Dies/Index', [
             'dies'           => $dies,
             'lines'          => $lines,
+            'totalProcesses' => $totalProcesses,
             'filters'        => request()->only('search', 'status', 'line'),
             'bstb_preview'   => [],
             'bstb_not_found' => [],
@@ -313,10 +313,7 @@ class DiesController extends Controller
 
             if (!$currentShift) continue;
 
-            if ($headerPassed < 2) {
-                $headerPassed++;
-                continue;
-            }
+            if ($headerPassed < 2) { $headerPassed++; continue; }
 
             $dataLines[] = $line;
         }

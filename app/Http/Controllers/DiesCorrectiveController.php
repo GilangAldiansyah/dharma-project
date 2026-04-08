@@ -18,7 +18,10 @@ class DiesCorrectiveController extends Controller
 {
     public function index(Request $request)
     {
-        $year = $request->year ?? now()->year;
+        $year      = $request->year ?? now()->year;
+        $dateFrom  = $request->date_from;
+        $dateTo    = $request->date_to;
+        $useDateRange = $dateFrom || $dateTo;
 
         $query = DiesCorrective::with([
             'dies',
@@ -30,8 +33,16 @@ class DiesCorrectiveController extends Controller
         ])
         ->when($request->status, fn($q) => $q->where('status', $request->status))
         ->when($request->dies_id, fn($q) => $q->where('dies_id', $request->dies_id))
-        ->when($request->month, fn($q) => $q->whereRaw("DATE_FORMAT(report_date, '%Y-%m') = ?", [$year . '-' . $request->month]))
-        ->when(!$request->month, fn($q) => $q->whereYear('report_date', $year))
+        ->when($useDateRange, function ($q) use ($dateFrom, $dateTo) {
+            if ($dateFrom) {
+                $q->whereDate('report_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $q->whereDate('report_date', '<=', $dateTo);
+            }
+        })
+        ->when(!$useDateRange && $request->month, fn($q) => $q->whereRaw("DATE_FORMAT(report_date, '%Y-%m') = ?", [$year . '-' . $request->month]))
+        ->when(!$useDateRange && !$request->month, fn($q) => $q->whereYear('report_date', $year))
         ->when($request->search, fn($q) => $q->where(function ($sq) use ($request) {
             $sq->where('report_no', 'like', '%' . $request->search . '%')
                ->orWhere('pic_name', 'like', '%' . $request->search . '%')
@@ -39,28 +50,40 @@ class DiesCorrectiveController extends Controller
         }))
         ->latest('report_date');
 
-        $correctives = $query->paginate(20)->withQueryString();
+        $paginated = $query->paginate(20)->withQueryString();
 
         $summary = [
-            'open'        => DiesCorrective::where('status', 'open')->count(),
-            'in_progress' => DiesCorrective::where('status', 'in_progress')->count(),
-            'on_repair'   => DiesCorrective::where('status', 'on_repair')->count(),
-            'closed'      => DiesCorrective::where('status', 'closed')->count(),
+            'open'        => DiesCorrective::where('status', 'open')->whereYear('report_date', $year)->count(),
+            'in_progress' => DiesCorrective::where('status', 'in_progress')->whereYear('report_date', $year)->count(),
+            'on_repair'   => DiesCorrective::where('status', 'on_repair')->whereYear('report_date', $year)->count(),
+            'closed'      => DiesCorrective::where('status', 'closed')->whereYear('report_date', $year)->count(),
         ];
 
         $diesList = Dies::with('processes')
             ->orderBy('no_part')
-            ->get(['id_sap', 'no_part', 'nama_dies', 'line', 'current_stroke']);
+            ->get(['id_sap', 'no_part', 'nama_dies', 'line']);
 
         $spareparts = DiesSparepart::orderBy('sparepart_name')
             ->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok']);
 
         return Inertia::render('Dies/Corrective/Index', [
-            'correctives' => $correctives,
+            'correctives' => [
+                'data'  => $paginated->items(),
+                'links' => $paginated->linkCollection()->toArray(),
+                'meta'  => [
+                    'current_page' => $paginated->currentPage(),
+                    'from'         => $paginated->firstItem(),
+                    'last_page'    => $paginated->lastPage(),
+                    'per_page'     => $paginated->perPage(),
+                    'to'           => $paginated->lastItem(),
+                    'total'        => $paginated->total(),
+                    'links'        => $paginated->linkCollection()->toArray(),
+                ],
+            ],
             'diesList'    => $diesList,
             'spareparts'  => $spareparts,
             'summary'     => $summary,
-            'filters'     => $request->only('search', 'status', 'dies_id', 'month', 'year') + ['year' => (string) $year],
+            'filters'     => $request->only('search', 'status', 'dies_id', 'month', 'year', 'date_from', 'date_to') + ['year' => (string) $year],
         ]);
     }
 
@@ -101,7 +124,7 @@ class DiesCorrectiveController extends Controller
             $mm  = now()->format('m');
             $dd  = now()->format('d');
             $rnd = str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
-            $dies = Dies::find($request->dies_id);
+            $process = DiesProcess::find($request->process_id);
 
             $corrective = DiesCorrective::create([
                 'report_no'               => "CM-DIES-{$yy}{$mm}{$dd}-{$rnd}",
@@ -109,7 +132,7 @@ class DiesCorrectiveController extends Controller
                 'process_id'              => $request->process_id,
                 'pic_name'                => Auth::user()->name,
                 'report_date'             => now(),
-                'stroke_at_maintenance'   => $request->stroke_at_maintenance ?? $dies?->current_stroke ?? 0,
+                'stroke_at_maintenance'   => $request->stroke_at_maintenance ?? $process?->current_stroke ?? 0,
                 'repair_duration_minutes' => null,
                 'machine_duration_minutes'=> null,
                 'problem_description'     => $request->problem_description,
@@ -284,6 +307,11 @@ class DiesCorrectiveController extends Controller
         $repairMinutes = $diesCorrective->repairSessions()
             ->whereNotNull('ended_at')
             ->sum('duration_minutes');
+
+        if ($repairMinutes === 0 && $diesCorrective->off_machine_at) {
+            $repairMinutes = (int) \Carbon\Carbon::parse($diesCorrective->off_machine_at)
+                ->diffInMinutes(now());
+        }
 
         $machineMinutes = $diesCorrective->machine_duration_minutes ?? 0;
 

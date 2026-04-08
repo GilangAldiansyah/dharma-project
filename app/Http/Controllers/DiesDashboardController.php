@@ -18,95 +18,109 @@ class DiesDashboardController extends Controller
         $totalDies   = Dies::count();
         $totalActive = Dies::where('status', 'active')->count();
 
-        $overdue = Dies::where('status', 'active')
+        $overdue = DiesProcess::whereHas('dies', fn($q) => $q->where('status', 'active'))
             ->whereRaw('std_stroke > 0')
             ->whereRaw('current_stroke >= std_stroke')
-            ->count();
+            ->distinct('dies_id')
+            ->count('dies_id');
 
-        $dueSoon = Dies::where('status', 'active')
+        $dueSoon = DiesProcess::whereHas('dies', fn($q) => $q->where('status', 'active'))
             ->whereRaw('std_stroke > 0')
             ->whereRaw('current_stroke < std_stroke')
             ->whereRaw('(current_stroke / std_stroke) >= 0.85')
-            ->count();
+            ->distinct('dies_id')
+            ->count('dies_id');
 
         $correctiveOpen = DiesCorrective::whereIn('status', ['open', 'in_progress'])->count();
 
-        $dueList = Dies::where('status', 'active')
+        $dueProcesses = DiesProcess::with('dies')
+            ->whereHas('dies', fn($q) => $q->where('status', 'active'))
             ->whereRaw('std_stroke > 0')
             ->whereRaw('(current_stroke / std_stroke) >= 0.75')
             ->orderByRaw('(current_stroke / std_stroke) DESC')
-            ->with('processes')
             ->limit(50)
-            ->get([
-                'id_sap', 'no_part', 'nama_dies', 'line',
-                'std_stroke', 'current_stroke', 'forecast_per_day',
-                'last_mtc_date', 'freq_maintenance', 'freq_maintenance_day',
-            ])
-            ->map(function ($d) {
-                $pct       = $d->std_stroke > 0 ? round(($d->current_stroke / $d->std_stroke) * 100, 2) : 0;
-                $remaining = max(0, $d->std_stroke - $d->current_stroke);
-                $fpd       = $d->forecast_per_day ?? 0;
-                $daysLeft  = $fpd > 0 ? ceil($remaining / $fpd) : null;
-                $estMtcDate = $daysLeft !== null ? now()->addDays($daysLeft)->toDateString() : null;
-                $statusMtc  = $this->getStatusMtc($pct, $d->last_mtc_date, $d->freq_maintenance_day);
+            ->get();
 
-                $forecasts = [];
-                for ($h = 1; $h <= 5; $h++) {
-                    $fStroke = $d->current_stroke + ($fpd * $h);
-                    $fPct    = $d->std_stroke > 0 ? round($fStroke / $d->std_stroke * 100, 2) : 0;
-                    $forecasts[] = [
-                        'day'        => $h,
-                        'stroke'     => $fStroke,
-                        'percentage' => $fPct,
-                        'status'     => $this->getDiesStatus($fPct),
-                    ];
-                }
+        $dueList = $dueProcesses->map(function ($proc) {
+            $d   = $proc->dies;
+            $pct = $proc->std_stroke > 0
+                ? round(($proc->current_stroke / $proc->std_stroke) * 100, 2)
+                : 0;
 
-                $scheduled = DiesPreventive::where('dies_id', $d->id_sap)
-                    ->where('status', 'scheduled')
-                    ->first(['id', 'scheduled_date', 'process_id', 'pic_name']);
+            $remaining  = max(0, $proc->std_stroke - $proc->current_stroke);
+            $fpd        = $d->forecast_per_day ?? 0;
+            $daysLeft   = $fpd > 0 ? ceil($remaining / $fpd) : null;
+            $estMtcDate = $daysLeft !== null ? now()->addDays($daysLeft)->toDateString() : null;
+            $statusMtc  = $this->getStatusMtc($pct, $proc->last_mtc_date, null);
 
-                return [
-                    'id_sap'               => $d->id_sap,
-                    'no_part'              => $d->no_part,
-                    'nama_dies'            => $d->nama_dies,
-                    'line'                 => $d->line,
-                    'std_stroke'           => $d->std_stroke,
-                    'current_stroke'       => $d->current_stroke,
-                    'forecast_per_day'     => $fpd,
-                    'percentage'           => $pct,
-                    'days_left'            => $daysLeft,
-                    'est_mtc_date'         => $estMtcDate,
-                    'last_mtc_date'        => $d->last_mtc_date,
-                    'freq_maintenance'     => $d->freq_maintenance,
-                    'status_mtc'           => $statusMtc,
-                    'dies_status'          => $this->getDiesStatus($pct),
-                    'is_overdue'           => $pct >= 100,
-                    'forecasts'            => $forecasts,
-                    'has_scheduled'        => $scheduled !== null,
-                    'scheduled_id'         => $scheduled?->id,
-                    'scheduled_date'       => $scheduled?->scheduled_date,
-                    'scheduled_process_id' => $scheduled?->process_id,
-                    'scheduled_pic_name'   => $scheduled?->pic_name,
-                    'processes'            => $d->processes->map(fn($p) => [
-                        'id'           => $p->id,
-                        'process_name' => $p->process_name,
-                        'tonase'       => $p->tonase,
-                    ]),
+            $forecasts = [];
+            for ($h = 1; $h <= 5; $h++) {
+                $fStroke     = $proc->current_stroke + ($fpd * $h);
+                $fPct        = $proc->std_stroke > 0 ? round($fStroke / $proc->std_stroke * 100, 2) : 0;
+                $forecasts[] = [
+                    'day'        => $h,
+                    'stroke'     => $fStroke,
+                    'percentage' => $fPct,
+                    'status'     => $this->getDiesStatus($fPct),
                 ];
-            });
+            }
 
-        $byLine = Dies::where('status', 'active')
-            ->whereRaw('std_stroke > 0')
+            $allProcesses = DiesProcess::where('dies_id', $d->id_sap)
+                ->get(['id', 'process_name', 'tonase', 'std_stroke', 'current_stroke']);
+
+            $scheduled = DiesPreventive::where('dies_id', $d->id_sap)
+                ->where('process_id', $proc->id)
+                ->where('status', 'scheduled')
+                ->first(['id', 'scheduled_date', 'process_id', 'pic_name']);
+
+            return [
+                'id_sap'               => $d->id_sap,
+                'no_part'              => $d->no_part,
+                'nama_dies'            => $d->nama_dies,
+                'line'                 => $d->line,
+                'process_id'           => $proc->id,
+                'process_name'         => $proc->process_name,
+                'tonase'               => $proc->tonase,
+                'std_stroke'           => $proc->std_stroke,
+                'current_stroke'       => $proc->current_stroke,
+                'forecast_per_day'     => $fpd,
+                'percentage'           => $pct,
+                'days_left'            => $daysLeft,
+                'est_mtc_date'         => $estMtcDate,
+                'last_mtc_date'        => $proc->last_mtc_date?->toDateString(),
+                'freq_maintenance'     => null,
+                'status_mtc'           => $statusMtc,
+                'dies_status'          => $this->getDiesStatus($pct),
+                'is_overdue'           => $pct >= 100,
+                'forecasts'            => $forecasts,
+                'has_scheduled'        => $scheduled !== null,
+                'scheduled_id'         => $scheduled?->id,
+                'scheduled_date'       => $scheduled?->scheduled_date,
+                'scheduled_process_id' => $scheduled?->process_id,
+                'scheduled_pic_name'   => $scheduled?->pic_name,
+                'processes'            => $allProcesses->map(fn($p) => [
+                    'id'             => $p->id,
+                    'process_name'   => $p->process_name,
+                    'tonase'         => $p->tonase,
+                    'std_stroke'     => $p->std_stroke,
+                    'current_stroke' => $p->current_stroke,
+                ]),
+            ];
+        });
+
+        $byLine = DiesProcess::withoutGlobalScopes()
+            ->join('dies', 'dies_processes.dies_id', '=', 'dies.id_sap')
+            ->where('dies.status', 'active')
+            ->whereRaw('dies_processes.std_stroke > 0')
             ->select(
-                'line',
+                'dies.line',
                 DB::raw('COUNT(*) as total'),
-                DB::raw('SUM(CASE WHEN current_stroke >= std_stroke THEN 1 ELSE 0 END) as overdue'),
-                DB::raw('SUM(CASE WHEN (current_stroke/std_stroke) >= 0.85 AND current_stroke < std_stroke THEN 1 ELSE 0 END) as due_soon'),
-                DB::raw('SUM(CASE WHEN (current_stroke/std_stroke) >= 0.75 AND (current_stroke/std_stroke) < 0.85 THEN 1 ELSE 0 END) as due_warn')
+                DB::raw('SUM(CASE WHEN dies_processes.current_stroke >= dies_processes.std_stroke THEN 1 ELSE 0 END) as overdue'),
+                DB::raw('SUM(CASE WHEN (dies_processes.current_stroke/dies_processes.std_stroke) >= 0.85 AND dies_processes.current_stroke < dies_processes.std_stroke THEN 1 ELSE 0 END) as due_soon'),
+                DB::raw('SUM(CASE WHEN (dies_processes.current_stroke/dies_processes.std_stroke) >= 0.75 AND (dies_processes.current_stroke/dies_processes.std_stroke) < 0.85 THEN 1 ELSE 0 END) as due_warn')
             )
-            ->groupBy('line')
-            ->orderBy('line')
+            ->groupBy('dies.line')
+            ->orderBy('dies.line')
             ->get();
 
         $recentPm = DiesPreventive::with('dies:id_sap,no_part,nama_dies,line')
@@ -196,9 +210,11 @@ class DiesDashboardController extends Controller
         ]);
 
         $dies    = Dies::findOrFail($request->dies_id);
+        $proc    = DiesProcess::findOrFail($request->process_id);
         $picUser = User::findOrFail($request->pic_id);
 
         $existing = DiesPreventive::where('dies_id', $request->dies_id)
+            ->where('process_id', $request->process_id)
             ->where('status', 'scheduled')
             ->first();
 
@@ -222,7 +238,7 @@ class DiesDashboardController extends Controller
             'process_id'            => $request->process_id,
             'pic_name'              => $picUser->name,
             'report_date'           => $request->scheduled_date,
-            'stroke_at_maintenance' => $dies->current_stroke,
+            'stroke_at_maintenance' => $proc->current_stroke,
             'status'                => 'scheduled',
             'scheduled_date'        => $request->scheduled_date,
             'created_by'            => Auth::id(),
