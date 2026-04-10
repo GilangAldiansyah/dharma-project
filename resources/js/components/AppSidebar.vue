@@ -70,7 +70,7 @@ const allNavGroups: NavGroup[] = [
     {
         title: 'Dies', icon: Wrench, permission: 'dies.view',
         gradient: 'from-orange-500 to-amber-500', accent: '#f97316', accentRgb: '249,115,22',
-        routes: ['/dies', '/dies/preventive', '/dies/corrective', '/dies/sparepart', '/dies/dashboard'],
+        routes: ['/dies', '/dies/preventive', '/dies/corrective', '/dies/sparepart', '/dies/dashboard', '/dies/io'],
         dashboardRoute: '/dies/dashboard',
         items: [
             { title: 'Dashboard Dies',         href: '/dies/dashboard',         icon: BarChart3, permission: 'dies.view' },
@@ -79,6 +79,7 @@ const allNavGroups: NavGroup[] = [
             { title: 'Corrective Maintenance', href: '/dies/corrective',        icon: FileText,  permission: 'dies.view' },
             { title: 'Sparepart',              href: '/dies/sparepart',         icon: Package,   permission: 'dies.view' },
             { title: 'History Sparepart',      href: '/dies/sparepart/history', icon: History,   permission: 'dies.view' },
+            { title: 'IO',                      href: '/dies/io', icon: Warehouse,   permission: 'dies.view' },
         ],
     },
     {

@@ -7,13 +7,15 @@ import {
     AlertTriangle, CheckCircle2, X, Download, Camera,
     Upload, Package, AlertCircle, Clock, Loader2,
     Timer, ChevronUp, ChevronDown, Layers, FileText,
-    ArrowDownToLine, Play, Pause, History, CalendarRange
+    ArrowDownToLine, Play, Pause, History, CalendarRange,
+    Factory, Hammer
 } from 'lucide-vue-next';
 import * as XLSX from 'xlsx';
 
 interface DiesProcess { id: number; process_name: string; tonase: number | null; current_stroke: number }
 interface DiesMini { id_sap: string; no_part: string; nama_dies: string; line: string; processes: DiesProcess[] }
 interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; unit: string; stok: number }
+interface Io { id: number; nama: string; cc: string | null; io_number: string | null }
 interface HistorySp { id: number; quantity: number; notes: string | null; sparepart: Sparepart | null }
 interface Photo { path: string; type: 'before' | 'after' }
 interface RepairSession { id: number; started_at: string; ended_at: string | null; duration_minutes: number | null }
@@ -55,7 +57,19 @@ interface Props {
     };
     diesList: DiesMini[];
     spareparts: Sparepart[];
-    summary: { open: number; in_progress: number; on_repair: number; closed: number };
+    ios: Io[];
+    summary: {
+        open: number;
+        in_progress: number;
+        on_repair: number;
+        closed: number;
+        total_machine_minutes: number;
+        total_repair_minutes: number;
+        avg_machine_minutes: number;
+        avg_repair_minutes: number;
+        count_off_machine: number;
+        count_in_machine: number;
+    };
     filters: { search?: string; status?: string; dies_id?: string; month?: string; year?: string; date_from?: string; date_to?: string };
 }
 
@@ -114,23 +128,6 @@ const statusCfg: Record<string, { label: string; badge: string; dot: string; car
 const hasActiveSession = (c: Corrective) => c.repair_sessions?.some(s => !s.ended_at) ?? false;
 const canClose = (c: Corrective) => c.status === 'in_progress' || c.status === 'on_repair';
 const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterMonth.value, filterDateFrom.value || filterDateTo.value ? '1' : ''].filter(Boolean).length);
-
-const totalMachineDurationMinutes = computed(() =>
-    props.correctives.data.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0)
-);
-const totalRepairDurationMinutes = computed(() =>
-    props.correctives.data.reduce((acc, c) => acc + (c.repair_duration_minutes ?? 0), 0)
-);
-const avgMachineDurationMinutes = computed(() => {
-    const withMachine = props.correctives.data.filter(c => c.machine_duration_minutes);
-    if (!withMachine.length) return 0;
-    return Math.round(withMachine.reduce((acc, c) => acc + (c.machine_duration_minutes ?? 0), 0) / withMachine.length);
-});
-const avgRepairDurationMinutes = computed(() => {
-    const withRepair = props.correctives.data.filter(c => c.repair_duration_minutes);
-    if (!withRepair.length) return 0;
-    return Math.round(withRepair.reduce((acc, c) => acc + (c.repair_duration_minutes ?? 0), 0) / withRepair.length);
-});
 
 const fmtMinutes = (minutes: number): string => {
     if (!minutes) return '0m';
@@ -267,7 +264,7 @@ const form = useForm({
     repair_action:       '',
     photos_before:       [] as File[],
     photos_after:        [] as File[],
-    spareparts:          [] as { sparepart_id: number | null; quantity: string; notes: string }[],
+    spareparts:          [] as { sparepart_id: number | null; io_id: number | null; quantity: string; notes: string }[],
 });
 
 const formDiesSearch      = ref('');
@@ -295,6 +292,8 @@ watch(() => form.dies_id, () => { form.process_id = null; });
 
 const spSearch = ref<string[]>([]);
 const spOpen   = ref<boolean[]>([]);
+const ioSearch = ref<string[]>([]);
+const ioOpen   = ref<boolean[]>([]);
 
 const filteredSp = (i: number) => {
     const q = (spSearch.value[i] ?? '').toLowerCase().trim();
@@ -304,6 +303,17 @@ const filteredSp = (i: number) => {
         s.sparepart_code.toLowerCase().includes(q)
     );
 };
+
+const filteredIo = (i: number) => {
+    const q = (ioSearch.value[i] ?? '').toLowerCase().trim();
+    if (!q) return props.ios;
+    return props.ios.filter(io =>
+        io.nama.toLowerCase().includes(q) ||
+        (io.io_number ?? '').toLowerCase().includes(q) ||
+        (io.cc ?? '').toLowerCase().includes(q)
+    );
+};
+
 const selectSp        = (i: number, s: Sparepart) => { form.spareparts[i].sparepart_id = s.id; spSearch.value[i] = s.sparepart_name; spOpen.value[i] = false; };
 const openSpDropdown  = (i: number) => {
     const existing = form.spareparts[i]?.sparepart_id;
@@ -312,9 +322,19 @@ const openSpDropdown  = (i: number) => {
 };
 const closeSpDropdown  = (i: number) => { setTimeout(() => { spOpen.value[i] = false; }, 180); };
 const clearSpSelection = (i: number) => { form.spareparts[i].sparepart_id = null; spSearch.value[i] = ''; spOpen.value[i] = true; };
+
+const selectIo        = (i: number, io: Io) => { form.spareparts[i].io_id = io.id; ioSearch.value[i] = io.nama; ioOpen.value[i] = false; };
+const openIoDropdown  = (i: number) => {
+    const existing = form.spareparts[i]?.io_id;
+    if (existing) { const io = props.ios.find(o => o.id === existing); if (io && !ioSearch.value[i]) ioSearch.value[i] = io.nama; }
+    ioOpen.value[i] = true;
+};
+const closeIoDropdown  = (i: number) => { setTimeout(() => { ioOpen.value[i] = false; }, 180); };
+const clearIoSelection = (i: number) => { form.spareparts[i].io_id = null; ioSearch.value[i] = ''; ioOpen.value[i] = true; };
+
 const selectedSpItem   = (id: number | null) => props.spareparts.find(s => s.id === id);
-const addSp    = () => { form.spareparts.push({ sparepart_id: null, quantity: '', notes: '' }); spSearch.value.push(''); spOpen.value.push(false); };
-const removeSp = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); };
+const addSp    = () => { form.spareparts.push({ sparepart_id: null, io_id: null, quantity: '', notes: '' }); spSearch.value.push(''); spOpen.value.push(false); ioSearch.value.push(''); ioOpen.value.push(false); };
+const removeSp = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); ioSearch.value.splice(i, 1); ioOpen.value.splice(i, 1); };
 
 const newBeforePreview = ref<{ file: File; url: string }[]>([]);
 const newAfterPreview  = ref<{ file: File; url: string }[]>([]);
@@ -408,6 +428,8 @@ const resetFormState = () => {
     processOpen.value    = false;
     spSearch.value       = [];
     spOpen.value         = [];
+    ioSearch.value       = [];
+    ioOpen.value         = [];
     newBeforePreview.value.forEach(p => URL.revokeObjectURL(p.url));
     newAfterPreview.value.forEach(p => URL.revokeObjectURL(p.url));
     newBeforePreview.value = [];
@@ -632,15 +654,40 @@ const paginationInfo  = computed(() => {
                         <p class="text-xl font-black text-green-700 dark:text-green-300 leading-none">{{ summary.closed }}</p>
                     </div>
                 </div>
+
                 <div class="w-px bg-gray-200 dark:bg-gray-700 self-stretch flex-shrink-0 mx-0.5"></div>
+
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/40 flex items-center justify-center flex-shrink-0">
+                        <Factory class="w-4 h-4 text-sky-700 dark:text-sky-400" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Di Mesin</p>
+                        <p class="text-xl font-black text-sky-600 dark:text-sky-400 leading-none">{{ summary.count_in_machine }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">dies</p>
+                    </div>
+                </div>
+                <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-900/40 flex items-center justify-center flex-shrink-0">
+                        <Hammer class="w-4 h-4 text-rose-700 dark:text-rose-400" />
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Di Bengkel</p>
+                        <p class="text-xl font-black text-rose-600 dark:text-rose-400 leading-none">{{ summary.count_off_machine }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">dies</p>
+                    </div>
+                </div>
+
+                <div class="w-px bg-gray-200 dark:bg-gray-700 self-stretch flex-shrink-0 mx-0.5"></div>
+
                 <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
                     <div class="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center flex-shrink-0">
                         <ArrowDownToLine class="w-4 h-4 text-orange-700 dark:text-orange-400" />
                     </div>
                     <div>
                         <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Di Mesin</p>
-                        <p class="text-sm font-black text-orange-600 dark:text-orange-400 leading-none">{{ totalMachineDurationMinutes ? fmtMinutes(totalMachineDurationMinutes) : '—' }}</p>
-                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ avgMachineDurationMinutes ? fmtMinutes(avgMachineDurationMinutes) : '—' }}</p>
+                        <p class="text-sm font-black text-orange-600 dark:text-orange-400 leading-none">{{ summary.total_machine_minutes ? fmtMinutes(summary.total_machine_minutes) : '—' }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ summary.avg_machine_minutes ? fmtMinutes(summary.avg_machine_minutes) : '—' }}</p>
                     </div>
                 </div>
                 <div class="flex-shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
@@ -649,8 +696,8 @@ const paginationInfo  = computed(() => {
                     </div>
                     <div>
                         <p class="text-xs font-semibold text-gray-400 leading-none mb-1">Repair</p>
-                        <p class="text-sm font-black text-violet-600 dark:text-violet-400 leading-none">{{ totalRepairDurationMinutes ? fmtMinutes(totalRepairDurationMinutes) : '—' }}</p>
-                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ avgRepairDurationMinutes ? fmtMinutes(avgRepairDurationMinutes) : '—' }}</p>
+                        <p class="text-sm font-black text-violet-600 dark:text-violet-400 leading-none">{{ summary.total_repair_minutes ? fmtMinutes(summary.total_repair_minutes) : '—' }}</p>
+                        <p class="text-xs text-gray-400 leading-none mt-0.5">avg {{ summary.avg_repair_minutes ? fmtMinutes(summary.avg_repair_minutes) : '—' }}</p>
                     </div>
                 </div>
             </div>
@@ -815,7 +862,7 @@ const paginationInfo  = computed(() => {
                             </td>
                             <td class="px-4 py-3 text-center">
                                 <div class="flex flex-col items-center gap-1">
-                                    <span v-if="c.machine_duration"
+                                    <span v-if="c.off_machine_at && c.machine_duration"
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full text-xs font-bold">
                                         <ArrowDownToLine class="w-2.5 h-2.5" /> {{ c.machine_duration }}
                                     </span>
@@ -835,7 +882,7 @@ const paginationInfo  = computed(() => {
                                         class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 rounded-full text-xs font-bold">
                                         <Package class="w-2.5 h-2.5" /> {{ c.spareparts.length }} SP
                                     </span>
-                                    <span v-if="!c.machine_duration && c.status !== 'on_repair' && !c.repair_duration && !c.spareparts?.length" class="text-xs text-gray-300">—</span>
+                                    <span v-if="!c.off_machine_at && c.status !== 'on_repair' && !c.spareparts?.length" class="text-xs text-gray-300">—</span>
                                 </div>
                             </td>
                             <td class="px-4 py-3 text-center">
@@ -922,7 +969,7 @@ const paginationInfo  = computed(() => {
                                     {{ statusCfg[c.status]?.label ?? c.status }}
                                 </span>
                                 <div class="flex items-center gap-1 flex-wrap justify-end">
-                                    <span v-if="c.machine_duration"
+                                    <span v-if="c.off_machine_at && c.machine_duration"
                                         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full text-xs font-bold">
                                         <ArrowDownToLine class="w-2.5 h-2.5" /> {{ c.machine_duration }}
                                     </span>
@@ -934,7 +981,7 @@ const paginationInfo  = computed(() => {
                                         <Timer class="w-2.5 h-2.5" />
                                         {{ hasActiveSession(c) ? (liveTimers[c.id] ?? '...') : (c.repair_duration ?? '-') }}
                                     </span>
-                                    <span v-else-if="c.repair_duration"
+                                    <span v-else-if="c.repair_duration "
                                         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 rounded-full text-xs font-bold">
                                         <Timer class="w-2.5 h-2.5" /> {{ c.repair_duration }}
                                     </span>
@@ -1258,11 +1305,35 @@ const paginationInfo  = computed(() => {
                                     <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
+                            <div class="relative">
+                                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                <input v-model="ioSearch[i]" type="text" placeholder="IO (wajib)..." autocomplete="off"
+                                    @focus="openIoDropdown(i)" @blur="closeIoDropdown(i)"
+                                    :class="['w-full pl-7 pr-7 py-2 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                        sp.io_id ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-semibold' : 'border-orange-300 dark:border-orange-700 focus:border-teal-400 bg-orange-50/50 dark:bg-orange-900/10']" />
+                                <button v-if="sp.io_id" type="button" @click="clearIoSelection(i)"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500">
+                                    <X class="w-3 h-3" />
+                                </button>
+                                <div v-if="ioOpen[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                    <div v-if="filteredIo(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil</div>
+                                    <button v-for="io in filteredIo(i)" :key="io.id" type="button"
+                                        @mousedown.prevent="selectIo(i, io)"
+                                        :class="['w-full text-left px-3 py-2 text-xs hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors flex items-center justify-between gap-2',
+                                            sp.io_id === io.id ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 font-semibold' : 'text-gray-700 dark:text-gray-300']">
+                                        <span>{{ io.nama }}</span>
+                                        <span class="text-gray-400 shrink-0 text-xs">{{ io.io_number }}</span>
+                                    </button>
+                                </div>
+                            </div>
                             <input v-model="sp.notes" type="text" placeholder="Keterangan (opsional)"
                                 class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none" />
                             <p v-if="sp.sparepart_id && selectedSpItem(sp.sparepart_id) && parseInt(sp.quantity) > selectedSpItem(sp.sparepart_id)!.stok"
                                 class="text-xs text-red-500 flex items-center gap-1">
                                 <AlertCircle class="w-3 h-3" /> Stok tidak cukup ({{ selectedSpItem(sp.sparepart_id)!.stok }} tersedia)
+                            </p>
+                            <p v-if="sp.sparepart_id && !sp.io_id" class="text-xs text-orange-500 flex items-center gap-1">
+                                <AlertCircle class="w-3 h-3" /> IO wajib dipilih
                             </p>
                         </div>
                     </div>
@@ -1273,7 +1344,8 @@ const paginationInfo  = computed(() => {
                                 class="px-5 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">
                                 Batal
                             </button>
-                            <button type="submit" :disabled="!isEdit && (!form.dies_id || !form.process_id)"
+                            <button type="submit"
+                                :disabled="!isEdit && (!form.dies_id || !form.process_id) || form.spareparts.some(sp => sp.sparepart_id && !sp.io_id)"
                                 :class="['flex-1 py-3 rounded-xl font-bold text-sm text-white active:scale-95 transition-all disabled:opacity-50',
                                     isEdit ? 'bg-amber-500 hover:bg-amber-600' : 'bg-orange-500 hover:bg-orange-600']">
                                 {{ isEdit ? 'Simpan Perubahan' : 'Buat Laporan CM' }}
@@ -1335,10 +1407,13 @@ const paginationInfo  = computed(() => {
                         </div>
                         <template v-if="selectedCm.off_machine_at">
                             <div class="flex justify-between gap-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                <span class="text-gray-400 flex items-center gap-1"><ArrowDownToLine class="w-3 h-3" /> Turun dari Mesin</span>
+                                <span class="text-gray-400 flex items-center gap-1">
+                                    <ArrowDownToLine class="w-3 h-3" />
+                                    {{ (selectedCm.machine_duration_minutes ?? 0) > 0 ? 'Turun dari Mesin' : 'Di Dies Shop' }}
+                                </span>
                                 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ fmtDatetime(selectedCm.off_machine_at) }}</span>
                             </div>
-                            <div v-if="selectedCm.machine_duration" class="flex justify-between gap-2">
+                            <div v-if="(selectedCm.machine_duration_minutes ?? 0) > 0 && selectedCm.machine_duration" class="flex justify-between gap-2">
                                 <span class="text-gray-400 flex items-center gap-1"><Timer class="w-3 h-3" /> Durasi di Mesin</span>
                                 <span class="font-black text-orange-600 dark:text-orange-400">{{ selectedCm.machine_duration }}</span>
                             </div>
@@ -1540,7 +1615,7 @@ const paginationInfo  = computed(() => {
                             <span v-if="selectedCm.process" class="text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
                                 <Layers class="w-3 h-3" /> {{ selectedCm.process.process_name }}
                             </span>
-                            <span v-if="selectedCm.machine_duration" class="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1 font-semibold">
+                            <span v-if="selectedCm.off_machine_at && selectedCm.machine_duration" class="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1 font-semibold">
                                 <ArrowDownToLine class="w-3 h-3" /> {{ selectedCm.machine_duration }}
                             </span>
                         </div>

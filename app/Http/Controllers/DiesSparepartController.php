@@ -1,8 +1,8 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use App\Models\Dies;
+use App\Models\DiesIo;
 use App\Models\DiesSparepart;
 use App\Models\DiesHistorySparepart;
 use Illuminate\Http\Request;
@@ -20,7 +20,7 @@ class DiesSparepartController extends Controller
         if ($request->filled('search')) {
             $query->where(function ($q) use ($request) {
                 $q->where('sparepart_name', 'like', '%' . $request->search . '%')
-                    ->orWhere('sparepart_code', 'like', '%' . $request->search . '%');
+                  ->orWhere('sparepart_code', 'like', '%' . $request->search . '%');
             });
         }
 
@@ -106,6 +106,7 @@ class DiesSparepartController extends Controller
                     'maintenance_id' => null,
                     'sparepart_id'   => $diesSparepart->id,
                     'dies_id'        => null,
+                    'io_id'          => null,
                     'quantity'       => $request->qty,
                     'notes'          => $request->notes,
                     'created_by'     => Auth::id(),
@@ -120,28 +121,27 @@ class DiesSparepartController extends Controller
 
     public function allForBulk()
     {
-        $spareparts = DiesSparepart::orderBy('sparepart_name')
-            ->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok', 'stok_minimum']);
-
-        return response()->json($spareparts);
+        return response()->json(
+            DiesSparepart::orderBy('sparepart_name')
+                ->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok', 'stok_minimum'])
+        );
     }
 
     public function bulkUpdate(Request $request)
     {
         $request->validate([
-            'items'              => 'required|array|min:1',
-            'items.*.id'         => 'required|exists:dies_spareparts,id',
-            'items.*.stok_tambah'=> 'nullable|integer|min:0',
-            'items.*.stok_minimum'=> 'nullable|integer|min:0',
-            'notes'              => 'nullable|string',
+            'items'                => 'required|array|min:1',
+            'items.*.id'           => 'required|exists:dies_spareparts,id',
+            'items.*.stok_tambah'  => 'nullable|integer|min:0',
+            'items.*.stok_minimum' => 'nullable|integer|min:0',
+            'notes'                => 'nullable|string',
         ]);
 
         DB::transaction(function () use ($request) {
             foreach ($request->items as $item) {
-                $sp = DiesSparepart::find($item['id']);
-
-                $stokTambah   = isset($item['stok_tambah'])   ? (int) $item['stok_tambah']   : 0;
-                $stokMinimum  = isset($item['stok_minimum'])  ? (int) $item['stok_minimum']  : null;
+                $sp          = DiesSparepart::find($item['id']);
+                $stokTambah  = isset($item['stok_tambah'])  ? (int) $item['stok_tambah']  : 0;
+                $stokMinimum = isset($item['stok_minimum']) ? (int) $item['stok_minimum'] : null;
 
                 if ($stokTambah > 0) {
                     $sp->increment('stok', $stokTambah);
@@ -151,6 +151,7 @@ class DiesSparepartController extends Controller
                         'maintenance_id' => null,
                         'sparepart_id'   => $sp->id,
                         'dies_id'        => null,
+                        'io_id'          => null,
                         'quantity'       => $stokTambah,
                         'notes'          => $request->notes ?? null,
                         'created_by'     => Auth::id(),
@@ -168,7 +169,7 @@ class DiesSparepartController extends Controller
 
     public function historyIndex(Request $request)
     {
-        $query = DiesHistorySparepart::with(['sparepart', 'dies', 'createdBy'])->latest();
+        $query = DiesHistorySparepart::with(['sparepart', 'dies', 'io', 'createdBy'])->latest();
 
         if ($request->filled('tipe')) {
             $query->where('tipe', $request->tipe);
@@ -190,27 +191,40 @@ class DiesSparepartController extends Controller
             $query->where('dies_id', $request->dies_id);
         }
 
+        if ($request->filled('io_id')) {
+            $query->where('io_id', $request->io_id);
+        }
+
+        if ($request->filled('search')) {
+            $query->whereHas('sparepart', function ($q) use ($request) {
+                $q->where('sparepart_name', 'like', '%' . $request->search . '%')
+                  ->orWhere('sparepart_code', 'like', '%' . $request->search . '%');
+            });
+        }
+
         $histories  = $query->paginate(20)->withQueryString();
         $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_name', 'sparepart_code', 'stok', 'unit']);
         $dies       = Dies::orderBy('no_part')->get(['id_sap', 'no_part', 'nama_dies', 'line']);
+        $ios        = DiesIo::orderBy('nama')->get(['id', 'nama', 'cc', 'io_number']);
 
         return Inertia::render('Dies/Sparepart/History', [
             'histories'  => $histories,
             'spareparts' => $spareparts,
             'dies'       => $dies,
-            'filters'    => $request->only('tipe', 'sparepart_id', 'dies_id', 'flow'),
+            'ios'        => $ios,
+            'filters'    => $request->only('tipe', 'sparepart_id', 'dies_id', 'io_id', 'flow', 'search'),
         ]);
     }
 
     public function historyStore(Request $request)
     {
         $request->validate([
-            'tipe'           => 'required|in:preventive,corrective,reguler',
-            'maintenance_id' => 'nullable|required_unless:tipe,reguler|integer',
-            'sparepart_id'   => 'required|exists:dies_spareparts,id',
-            'dies_id'        => 'nullable|exists:dies,id_sap',
-            'quantity'       => 'required|integer|min:1',
-            'notes'          => 'nullable|string',
+            'tipe'         => 'required|in:preventive,corrective,reguler',
+            'sparepart_id' => 'required|exists:dies_spareparts,id',
+            'dies_id'      => 'nullable|exists:dies,id_sap',
+            'io_id'        => 'nullable|exists:dies_io,id',
+            'quantity'     => 'required|integer|min:1',
+            'notes'        => 'nullable|string|max:500',
         ]);
 
         $sparepart = DiesSparepart::findOrFail($request->sparepart_id);
@@ -222,9 +236,10 @@ class DiesSparepartController extends Controller
         DB::transaction(function () use ($request, $sparepart) {
             DiesHistorySparepart::create([
                 'tipe'           => $request->tipe,
-                'maintenance_id' => $request->tipe !== 'reguler' ? $request->maintenance_id : null,
+                'maintenance_id' => null,
                 'sparepart_id'   => $request->sparepart_id,
-                'dies_id'        => $request->dies_id ?? null,
+                'dies_id'        => $request->dies_id,
+                'io_id'          => $request->io_id,
                 'quantity'       => $request->quantity,
                 'notes'          => $request->notes,
                 'created_by'     => Auth::id(),

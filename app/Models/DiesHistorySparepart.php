@@ -2,25 +2,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use App\Models\User;
 
 class DiesHistorySparepart extends Model
 {
+    protected $table = 'dies_history_sparepart';
+
     protected $fillable = [
         'tipe',
         'maintenance_id',
         'sparepart_id',
         'dies_id',
+        'io_id',
         'quantity',
         'notes',
         'created_by',
-    ];
-
-    protected $table = 'dies_history_sparepart';
-
-    protected $casts = [
-        'quantity'       => 'integer',
-        'maintenance_id' => 'integer',
     ];
 
     public function sparepart()
@@ -33,17 +28,13 @@ class DiesHistorySparepart extends Model
         return $this->belongsTo(Dies::class, 'dies_id', 'id_sap');
     }
 
-    public function createdBy()
+    public function io()
     {
-        return $this->belongsTo(User::class, 'created_by');
+        return $this->belongsTo(DiesIo::class, 'io_id');
     }
 
-    public function maintenance()
+    public function createdBy()
     {
-        return match($this->tipe) {
-            'preventive' => $this->belongsTo(DiesPreventive::class, 'maintenance_id'),
-            'corrective' => $this->belongsTo(DiesCorrective::class, 'maintenance_id'),
-            default      => null,
-        };
+        return $this->belongsTo(\App\Models\User::class, 'created_by');
     }
 }

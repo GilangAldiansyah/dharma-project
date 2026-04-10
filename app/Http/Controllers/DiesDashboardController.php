@@ -5,6 +5,7 @@ use App\Models\Dies;
 use App\Models\DiesPreventive;
 use App\Models\DiesCorrective;
 use App\Models\DiesProcess;
+use App\Models\DiesHistorySparepart;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -149,7 +150,13 @@ class DiesDashboardController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $cmPeriod = request('cm_period', '6');
+        $dateFrom = request('date_from')
+            ? \Carbon\Carbon::parse(request('date_from'))->startOfDay()
+            : now()->subDays(29)->startOfDay();
+
+        $dateTo = request('date_to')
+            ? \Carbon\Carbon::parse(request('date_to'))->endOfDay()
+            : now()->endOfDay();
 
         $cmRankingQuery = DiesCorrective::select(
                 'dies_id',
@@ -157,13 +164,10 @@ class DiesDashboardController extends Controller
                 DB::raw('COUNT(*) as cm_count'),
                 DB::raw('MAX(report_date) as last_cm_date')
             )
+            ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->groupBy('dies_id', 'process_id')
             ->orderByDesc('cm_count')
             ->limit(10);
-
-        if ($cmPeriod !== 'all') {
-            $cmRankingQuery->where('report_date', '>=', now()->subMonths((int)$cmPeriod)->startOfMonth());
-        }
 
         $cmRanking = $cmRankingQuery->get()->map(function ($row) {
             $dies    = Dies::find($row->dies_id, ['id_sap', 'no_part', 'nama_dies', 'line']);
@@ -181,6 +185,36 @@ class DiesDashboardController extends Controller
             ];
         });
 
+        $cmTrend = DiesCorrective::select(
+                DB::raw("DATE(report_date) as day"),
+                DB::raw('COUNT(*) as cm_count')
+            )
+            ->whereBetween('report_date', [$dateFrom, $dateTo])
+            ->groupBy('day')
+            ->orderBy('day')
+            ->get();
+
+        $sparepartRanking = DiesHistorySparepart::select(
+                'sparepart_id',
+                DB::raw('SUM(quantity) as total_used')
+            )
+            ->whereIn('tipe', ['preventive', 'corrective', 'reguler'])
+            ->whereBetween('created_at', [$dateFrom, $dateTo])
+            ->groupBy('sparepart_id')
+            ->orderByDesc('total_used')
+            ->limit(10)
+            ->get()
+            ->map(function ($row) {
+                $sp = \App\Models\DiesSparepart::find($row->sparepart_id, ['id', 'sparepart_code', 'sparepart_name', 'unit']);
+                return [
+                    'sparepart_id'   => $row->sparepart_id,
+                    'sparepart_code' => $sp?->sparepart_code ?? '-',
+                    'sparepart_name' => $sp?->sparepart_name ?? '-',
+                    'unit'           => $sp?->unit ?? '-',
+                    'total_used'     => (int)$row->total_used,
+                ];
+            });
+
         return Inertia::render('Dies/Dashboard', [
             'summary' => [
                 'total_dies'      => $totalDies,
@@ -189,14 +223,17 @@ class DiesDashboardController extends Controller
                 'due_soon'        => $dueSoon,
                 'corrective_open' => $correctiveOpen,
             ],
-            'dueList'     => $dueList,
-            'byLine'      => $byLine,
-            'recentPm'    => $recentPm,
-            'recentCm'    => $recentCm,
-            'strokeTrend' => $strokeTrend,
-            'picList'     => $picList,
-            'cmRanking'   => $cmRanking,
-            'cmPeriod'    => $cmPeriod,
+            'dueList'          => $dueList,
+            'byLine'           => $byLine,
+            'recentPm'         => $recentPm,
+            'recentCm'         => $recentCm,
+            'strokeTrend'      => $strokeTrend,
+            'picList'          => $picList,
+            'cmRanking'        => $cmRanking,
+            'cmTrend'          => $cmTrend,
+            'sparepartRanking' => $sparepartRanking,
+            'dateFrom'         => $dateFrom->toDateString(),
+            'dateTo'           => $dateTo->toDateString(),
         ]);
     }
 

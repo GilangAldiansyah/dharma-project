@@ -2,6 +2,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Dies;
+use App\Models\DiesIo;
 use App\Models\DiesProcess;
 use App\Models\DiesPreventive;
 use App\Models\DiesHistorySparepart;
@@ -62,6 +63,7 @@ class DiesPreventiveController extends Controller
 
         $diesList   = Dies::with('processes')->orderBy('no_part')->get(['id_sap', 'no_part', 'nama_dies', 'line']);
         $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_code', 'sparepart_name', 'unit', 'stok']);
+        $ios        = DiesIo::orderBy('nama')->get(['id', 'nama', 'cc', 'io_number']);
 
         $user     = User::with('roles')->find(Auth::id());
         $isLeader = $user->hasRole('leader') || $user->hasRole('admin');
@@ -72,6 +74,7 @@ class DiesPreventiveController extends Controller
             'nearProcesses' => $nearProcesses,
             'diesList'      => $diesList,
             'spareparts'    => $spareparts,
+            'ios'           => $ios,
             'isLeader'      => $isLeader,
             'filters'       => $request->only('search', 'status', 'dies_id', 'date_from', 'date_to'),
         ]);
@@ -87,6 +90,7 @@ class DiesPreventiveController extends Controller
             'repair_action'             => 'nullable|string',
             'spareparts'                => 'nullable|array',
             'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.io_id'        => 'required_with:spareparts.*.sparepart_id|exists:dies_io,id',
             'spareparts.*.quantity'     => 'nullable|string',
             'spareparts.*.notes'        => 'nullable|string',
         ]);
@@ -143,6 +147,7 @@ class DiesPreventiveController extends Controller
             'status'                    => 'required|in:pending,in_progress,completed',
             'spareparts'                => 'nullable|array',
             'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.io_id'        => 'required_with:spareparts.*.sparepart_id|exists:dies_io,id',
             'spareparts.*.quantity'     => 'nullable|string',
             'spareparts.*.notes'        => 'nullable|string',
         ]);
@@ -219,6 +224,7 @@ class DiesPreventiveController extends Controller
             'status'                    => 'required|in:pending,in_progress,completed',
             'spareparts'                => 'nullable|array',
             'spareparts.*.sparepart_id' => 'nullable|integer|exists:dies_spareparts,id',
+            'spareparts.*.io_id'        => 'required_with:spareparts.*.sparepart_id|exists:dies_io,id',
             'spareparts.*.quantity'     => 'nullable|string',
             'spareparts.*.notes'        => 'nullable|string',
         ]);
@@ -307,6 +313,7 @@ class DiesPreventiveController extends Controller
                 'tipe'           => 'preventive',
                 'maintenance_id' => $preventive->id,
                 'sparepart_id'   => $sparepartId,
+                'io_id'          => $sp['io_id'] ?? null,
                 'quantity'       => $qty,
                 'notes'          => isset($sp['notes']) && trim($sp['notes']) !== '' ? trim($sp['notes']) : null,
                 'created_by'     => Auth::id(),

@@ -26,6 +26,7 @@ interface Dies {
     no_part: string;
     nama_dies: string;
     line: string;
+    customer: string | null;
     kategori: string | null;
     status: string;
     is_common: boolean;
@@ -249,6 +250,7 @@ watch([filterStatus, filterLine], () => {
 
 const form = useForm({
     id_sap: '', no_part: '', nama_dies: '', line: '',
+    customer: '',
     kategori: '', status: 'active', is_common: false,
     forecast_per_day: 0,
     process_name: '', std_stroke: 20000, tonase: null as number | null,
@@ -257,6 +259,7 @@ const form = useForm({
 
 const editForm = useForm({
     no_part: '', nama_dies: '', line: '',
+    customer: '',
     kategori: '', status: 'active', is_common: false,
     forecast_per_day: 0,
 });
@@ -270,6 +273,7 @@ const openEdit = (d: Dies) => {
     editForm.no_part           = d.no_part;
     editForm.nama_dies         = d.nama_dies;
     editForm.line              = d.line;
+    editForm.customer          = d.customer ?? '';
     editForm.kategori          = d.kategori ?? '';
     editForm.status            = d.status;
     editForm.is_common         = d.is_common;
@@ -313,11 +317,11 @@ const fmtDate = (d: string | null) => {
 
 const exportExcel = () => {
     const rows = [
-        ['No Part', 'Nama Dies', 'ID SAP', 'Line', 'Kategori', 'Status', 'Common', 'Forecast/Day', 'Total PM', 'Total CM', 'Proses', 'STD Stroke', 'Current Stroke', '%'],
+        ['No Part', 'Nama Dies', 'ID SAP', 'Line', 'Customer', 'Kategori', 'Status', 'Common', 'Forecast/Day', 'Total PM', 'Total CM', 'Proses', 'STD Stroke', 'Current Stroke', '%'],
         ...props.dies.data.flatMap(d => {
             const procs = getDiesProcesses(d);
             if (!procs.length) return [[
-                d.no_part, d.nama_dies, d.id_sap, d.line, d.kategori ?? '-',
+                d.no_part, d.nama_dies, d.id_sap, d.line, d.customer ?? '-', d.kategori ?? '-',
                 statusCfg(d.status).l, d.is_common ? 'Ya' : 'Tidak',
                 d.forecast_per_day, d.preventives_count, d.correctives_count,
                 '-', 0, 0, '0%',
@@ -327,6 +331,7 @@ const exportExcel = () => {
                 i === 0 ? d.nama_dies : '',
                 i === 0 ? d.id_sap : '',
                 i === 0 ? d.line : '',
+                i === 0 ? (d.customer ?? '-') : '',
                 i === 0 ? (d.kategori ?? '-') : '',
                 i === 0 ? statusCfg(d.status).l : '',
                 i === 0 ? (d.is_common ? 'Ya' : 'Tidak') : '',
@@ -342,7 +347,7 @@ const exportExcel = () => {
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [
-        { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 16 },
+        { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 16 }, { wch: 16 },
         { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
         { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 8 },
     ];
@@ -460,6 +465,7 @@ const exportExcel = () => {
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-6"></th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">No Part / Dies</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Line</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Customer</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Proses & Stroke</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">PM / CM</th>
@@ -469,7 +475,7 @@ const exportExcel = () => {
                         </thead>
                         <tbody>
                             <tr v-if="dies.data.length === 0">
-                                <td colspan="8" class="py-16 text-center text-gray-400 text-sm">
+                                <td colspan="9" class="py-16 text-center text-gray-400 text-sm">
                                     <Search class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                                     Tidak ada data dies
                                 </td>
@@ -502,6 +508,12 @@ const exportExcel = () => {
                                         <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">
                                             {{ d.line }}
                                         </span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span v-if="d.customer" class="px-2 py-0.5 bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 rounded-full text-xs font-semibold">
+                                            {{ d.customer }}
+                                        </span>
+                                        <span v-else class="text-xs text-gray-300">—</span>
                                     </td>
                                     <td class="px-4 py-3 text-center">
                                         <span :class="['inline-block px-2 py-0.5 rounded-full text-xs font-bold', statusCfg(d.status).badge]">
@@ -550,7 +562,7 @@ const exportExcel = () => {
                                     </td>
                                 </tr>
                                 <tr v-if="isExpanded(d.id_sap)" class="bg-blue-50/60 dark:bg-blue-900/10 border-b border-blue-100 dark:border-blue-900/30">
-                                    <td colspan="8" class="px-8 py-3">
+                                    <td colspan="9" class="px-8 py-3">
                                         <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
                                             <div v-for="p in getDiesProcesses(d)" :key="p.id"
                                                 class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3 flex flex-col gap-1.5">
@@ -617,6 +629,7 @@ const exportExcel = () => {
                             <div class="flex flex-col items-end gap-1 flex-shrink-0">
                                 <span :class="['inline-block px-2 py-0.5 rounded-full text-xs font-bold', statusCfg(d.status).badge]">{{ statusCfg(d.status).l }}</span>
                                 <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">{{ d.line }}</span>
+                                <span v-if="d.customer" class="px-2 py-0.5 bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 rounded-full text-xs font-semibold">{{ d.customer }}</span>
                             </div>
                         </div>
 
@@ -721,12 +734,18 @@ const exportExcel = () => {
                             <p v-if="form.errors.line" class="mt-1 text-xs text-red-500">{{ form.errors.line }}</p>
                         </div>
                         <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Customer</label>
+                            <input v-model="form.customer" type="text" placeholder="TMMIN / HONDA / DAIHATSU..."
+                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                            <p v-if="form.errors.customer" class="mt-1 text-xs text-red-500">{{ form.errors.customer }}</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
                             <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Kategori</label>
                             <input v-model="form.kategori" type="text" placeholder="INSULATOR, FRAME BODY..."
                                 class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
                         </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Status <span class="text-red-500">*</span></label>
                             <select v-model="form.status"
@@ -734,17 +753,19 @@ const exportExcel = () => {
                                 <option v-for="s in statusList" :key="s.v" :value="s.v">{{ s.l }}</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day <span class="text-red-500">*</span></label>
+                            <input v-model="form.forecast_per_day" type="number" min="0"
+                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
+                        </div>
                         <div class="flex items-end pb-1">
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input v-model="form.is_common" type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                                 <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">Common Dies (R/L)</span>
                             </label>
                         </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day <span class="text-red-500">*</span></label>
-                        <input v-model="form.forecast_per_day" type="number" min="0"
-                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-blue-500 focus:outline-none" />
                     </div>
                     <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
                         <p class="text-xs font-bold text-gray-500 uppercase mb-3">Proses Pertama (opsional)</p>
@@ -811,12 +832,18 @@ const exportExcel = () => {
                                 class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
                         </div>
                         <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Customer</label>
+                            <input v-model="editForm.customer" type="text" placeholder="TMMIN / HONDA / DAIHATSU..."
+                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
+                            <p v-if="editForm.errors.customer" class="mt-1 text-xs text-red-500">{{ editForm.errors.customer }}</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
                             <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Kategori</label>
                             <input v-model="editForm.kategori" type="text"
                                 class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
                         </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Status <span class="text-red-500">*</span></label>
                             <select v-model="editForm.status"
@@ -824,17 +851,19 @@ const exportExcel = () => {
                                 <option v-for="s in statusList" :key="s.v" :value="s.v">{{ s.l }}</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day</label>
+                            <input v-model="editForm.forecast_per_day" type="number" min="0"
+                                class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
+                        </div>
                         <div class="flex items-end pb-1">
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input v-model="editForm.is_common" type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                                 <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">Common Dies (R/L)</span>
                             </label>
                         </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold mb-1.5 text-gray-700 dark:text-gray-300">Forecast/Day</label>
-                        <input v-model="editForm.forecast_per_day" type="number" min="0"
-                            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-sm focus:border-amber-500 focus:outline-none" />
                     </div>
                     <div class="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
                         Data proses (stroke, STD stroke, last MTC) dikelola melalui halaman detail dies.

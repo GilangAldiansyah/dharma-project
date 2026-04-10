@@ -13,6 +13,7 @@ class Dies extends Model
         'no_part',
         'nama_dies',
         'line',
+        'customer',
         'kategori',
         'status',
         'is_common',

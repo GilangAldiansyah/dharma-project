@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 interface DiesProcess { id: number; process_name: string; tonase: number | null; std_stroke: number; current_stroke: number; last_mtc_date: string | null }
 interface DiesMini { id_sap: string; no_part: string; nama_dies: string; line: string; processes: DiesProcess[] }
 interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; unit: string; stok: number }
+interface Io { id: number; nama: string; cc: string; io_number: string }
 interface HistorySp { id: number; quantity: number; notes: string | null; sparepart: Sparepart | null }
 interface Preventive {
     id: number; report_no: string; dies_id: string; process_id: number | null; pic_name: string;
@@ -42,6 +43,7 @@ interface Props {
     nearProcesses: NearProcess[];
     diesList:      DiesMini[];
     spareparts:    Sparepart[];
+    ios:           Io[];
     isLeader:      boolean;
     filters:       { search?: string; status?: string; dies_id?: string; date_from?: string; date_to?: string };
 }
@@ -117,7 +119,7 @@ const form = useForm({
     dies_id: '', process_id: null as number | null,
     repair_action: '', status: 'completed' as string,
     photos: [] as File[],
-    spareparts: [] as { sparepart_id: number | null; quantity: string; notes: string }[],
+    spareparts: [] as { sparepart_id: number | null; io_id: number | null; quantity: string; notes: string }[],
 });
 const formDiesSearch      = ref('');
 const formDiesOpen        = ref(false);
@@ -145,7 +147,7 @@ const submitForm = useForm({
     process_id: null as number | null,
     photo: null as File | null, photo_sparepart: null as File | null,
     condition: 'ok' as 'ok' | 'nok', repair_action: '',
-    spareparts: [] as { sparepart_id: number | null; quantity: string; notes: string }[],
+    spareparts: [] as { sparepart_id: number | null; io_id: number | null; quantity: string; notes: string }[],
 });
 const previewPhoto    = ref<string | null>(null);
 const previewSpPhoto  = ref<string | null>(null);
@@ -158,23 +160,37 @@ const nokForm = useForm({ nok_notes: '' });
 
 const spSearch        = ref<string[]>([]);
 const spOpen          = ref<boolean[]>([]);
+const spIoSearch      = ref<string[]>([]);
+const spIoOpen        = ref<boolean[]>([]);
 const filteredSp      = (i: number) => { const q = (spSearch.value[i] ?? '').toLowerCase().trim(); return !q ? props.spareparts : props.spareparts.filter(s => s.sparepart_name.toLowerCase().includes(q) || s.sparepart_code.toLowerCase().includes(q)); };
+const filteredSpIo    = (i: number) => { const q = (spIoSearch.value[i] ?? '').toLowerCase().trim(); return !q ? props.ios : props.ios.filter(io => io.nama.toLowerCase().includes(q) || io.io_number.toLowerCase().includes(q) || io.cc.toLowerCase().includes(q)); };
 const selectSp        = (i: number, s: Sparepart) => { form.spareparts[i].sparepart_id = s.id; spSearch.value[i] = s.sparepart_name; spOpen.value[i] = false; };
+const selectSpIo      = (i: number, io: Io) => { form.spareparts[i].io_id = io.id; spIoSearch.value[i] = io.io_number + ' - ' + io.nama; spIoOpen.value[i] = false; };
 const openSpDropdown  = (i: number) => { spOpen.value[i] = true; };
+const openSpIoDropdown = (i: number) => { spIoOpen.value[i] = true; };
 const closeSpDropdown = (i: number) => { setTimeout(() => { spOpen.value[i] = false; }, 180); };
+const closeSpIoDropdown = (i: number) => { setTimeout(() => { spIoOpen.value[i] = false; }, 180); };
 const clearSp         = (i: number) => { form.spareparts[i].sparepart_id = null; spSearch.value[i] = ''; spOpen.value[i] = true; };
-const addSp           = () => { form.spareparts.push({ sparepart_id: null, quantity: '', notes: '' }); spSearch.value.push(''); spOpen.value.push(false); };
-const removeSp        = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); };
+const clearSpIo       = (i: number) => { form.spareparts[i].io_id = null; spIoSearch.value[i] = ''; spIoOpen.value[i] = true; };
+const addSp           = () => { form.spareparts.push({ sparepart_id: null, io_id: null, quantity: '', notes: '' }); spSearch.value.push(''); spOpen.value.push(false); spIoSearch.value.push(''); spIoOpen.value.push(false); };
+const removeSp        = (i: number) => { form.spareparts.splice(i, 1); spSearch.value.splice(i, 1); spOpen.value.splice(i, 1); spIoSearch.value.splice(i, 1); spIoOpen.value.splice(i, 1); };
 
 const cspSearch        = ref<string[]>([]);
 const cspOpen          = ref<boolean[]>([]);
+const cspIoSearch      = ref<string[]>([]);
+const cspIoOpen        = ref<boolean[]>([]);
 const filteredCsp      = (i: number) => { const q = (cspSearch.value[i] ?? '').toLowerCase().trim(); return !q ? props.spareparts : props.spareparts.filter(s => s.sparepart_name.toLowerCase().includes(q) || s.sparepart_code.toLowerCase().includes(q)); };
+const filteredCspIo    = (i: number) => { const q = (cspIoSearch.value[i] ?? '').toLowerCase().trim(); return !q ? props.ios : props.ios.filter(io => io.nama.toLowerCase().includes(q) || io.io_number.toLowerCase().includes(q) || io.cc.toLowerCase().includes(q)); };
 const selectCsp        = (i: number, s: Sparepart) => { submitForm.spareparts[i].sparepart_id = s.id; cspSearch.value[i] = s.sparepart_name; cspOpen.value[i] = false; };
+const selectCspIo      = (i: number, io: Io) => { submitForm.spareparts[i].io_id = io.id; cspIoSearch.value[i] = io.io_number + ' - ' + io.nama; cspIoOpen.value[i] = false; };
 const openCspDropdown  = (i: number) => { cspOpen.value[i] = true; };
+const openCspIoDropdown = (i: number) => { cspIoOpen.value[i] = true; };
 const closeCspDropdown = (i: number) => { setTimeout(() => { cspOpen.value[i] = false; }, 180); };
+const closeCspIoDropdown = (i: number) => { setTimeout(() => { cspIoOpen.value[i] = false; }, 180); };
 const clearCsp         = (i: number) => { submitForm.spareparts[i].sparepart_id = null; cspSearch.value[i] = ''; cspOpen.value[i] = true; };
-const addCsp           = () => { submitForm.spareparts.push({ sparepart_id: null, quantity: '', notes: '' }); cspSearch.value.push(''); cspOpen.value.push(false); };
-const removeCsp        = (i: number) => { submitForm.spareparts.splice(i, 1); cspSearch.value.splice(i, 1); cspOpen.value.splice(i, 1); };
+const clearCspIo       = (i: number) => { submitForm.spareparts[i].io_id = null; cspIoSearch.value[i] = ''; cspIoOpen.value[i] = true; };
+const addCsp           = () => { submitForm.spareparts.push({ sparepart_id: null, io_id: null, quantity: '', notes: '' }); cspSearch.value.push(''); cspOpen.value.push(false); cspIoSearch.value.push(''); cspIoOpen.value.push(false); };
+const removeCsp        = (i: number) => { submitForm.spareparts.splice(i, 1); cspSearch.value.splice(i, 1); cspOpen.value.splice(i, 1); cspIoSearch.value.splice(i, 1); cspIoOpen.value.splice(i, 1); };
 const selectedSpItem   = (id: number | null) => props.spareparts.find(s => s.id === id);
 
 const compressImage = (file: File): Promise<File> =>
@@ -231,7 +247,8 @@ const removeNewPhoto = (idx: number) => { URL.revokeObjectURL(newPhotoPreview.va
 
 const openAdd = () => {
     form.dies_id = ''; form.process_id = null; form.repair_action = ''; form.status = 'completed'; form.photos = []; form.spareparts = [];
-    form.clearErrors(); formDiesSearch.value = ''; formDiesOpen.value = false; formProcessOpen.value = false; spSearch.value = []; spOpen.value = [];
+    form.clearErrors(); formDiesSearch.value = ''; formDiesOpen.value = false; formProcessOpen.value = false;
+    spSearch.value = []; spOpen.value = []; spIoSearch.value = []; spIoOpen.value = [];
     newPhotoPreview.value.forEach(p => URL.revokeObjectURL(p.url)); newPhotoPreview.value = [];
     showFormModal.value = true;
 };
@@ -241,7 +258,7 @@ const openSubmit = (near: NearProcess) => {
     submitForm.photo = null; submitForm.photo_sparepart = null;
     submitForm.condition = 'ok'; submitForm.repair_action = ''; submitForm.spareparts = [];
     submitForm.clearErrors(); previewPhoto.value = null; previewSpPhoto.value = null;
-    cspSearch.value = []; cspOpen.value = [];
+    cspSearch.value = []; cspOpen.value = []; cspIoSearch.value = []; cspIoOpen.value = [];
     showSubmitModal.value = true;
 };
 const closeSubmitModal = () => { showSubmitModal.value = false; selectedNear.value = null; previewPhoto.value = null; previewSpPhoto.value = null; };
@@ -400,7 +417,6 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- TAB: Perlu PM -->
             <div v-show="activeTab === 'schedule'">
                 <div v-if="nearProcesses.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <CheckCircle2 class="w-12 h-12 mx-auto mb-3 text-emerald-300" />
@@ -465,7 +481,6 @@ const exportExcel = () => {
                 </div>
             </div>
 
-            <!-- TAB: History -->
             <div v-show="activeTab === 'history'" class="space-y-3">
                 <div class="flex gap-2 overflow-x-auto scrollbar-none pb-0.5">
                     <button v-for="[v, c] in Object.entries(statusCfg)" :key="v"
@@ -732,6 +747,22 @@ const exportExcel = () => {
                                 <input v-model="sp.quantity" type="number" inputmode="numeric" min="1" placeholder="Qty" class="w-16 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none text-center" />
                                 <button type="button" @click="removeCsp(i)" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg active:scale-95"><Trash2 class="w-4 h-4" /></button>
                             </div>
+                            <div class="relative">
+                                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                <input v-model="cspIoSearch[i]" type="text" placeholder="Cari IO number / nama IO..." autocomplete="off"
+                                    @focus="openCspIoDropdown(i)" @blur="closeCspIoDropdown(i)"
+                                    :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none transition-colors dark:bg-gray-700',
+                                        sp.io_id ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-teal-400']" />
+                                <button v-if="sp.io_id" type="button" @click="clearCspIo(i)" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5"><X class="w-3 h-3" /></button>
+                                <div v-if="cspIoOpen[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                    <div v-if="filteredCspIo(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil</div>
+                                    <button v-for="io in filteredCspIo(i)" :key="io.id" type="button" @mousedown.prevent="selectCspIo(i, io)"
+                                        :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors', sp.io_id === io.id ? 'bg-teal-50 dark:bg-teal-900/30 font-semibold' : 'text-gray-700 dark:text-gray-300']">
+                                        <span class="block font-semibold text-gray-800 dark:text-gray-200">{{ io.io_number }} — {{ io.nama }}</span>
+                                        <span class="text-gray-400">CC: {{ io.cc }}</span>
+                                    </button>
+                                </div>
+                            </div>
                             <input v-model="sp.notes" type="text" placeholder="Keterangan (opsional)" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:border-indigo-500 focus:outline-none" />
                             <p v-if="sp.sparepart_id && selectedSpItem(sp.sparepart_id) && parseInt(sp.quantity) > selectedSpItem(sp.sparepart_id)!.stok" class="text-xs text-red-500 flex items-center gap-1"><AlertCircle class="w-3 h-3" /> Stok tidak cukup (tersedia: {{ selectedSpItem(sp.sparepart_id)!.stok }})</p>
                         </div>
@@ -895,6 +926,22 @@ const exportExcel = () => {
                                 </div>
                                 <input v-model="sp.quantity" type="number" min="1" placeholder="Qty" class="w-16 px-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl dark:bg-gray-700 text-xs text-center focus:outline-none" />
                                 <button type="button" @click="removeSp(i)" class="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 class="w-4 h-4" /></button>
+                            </div>
+                            <div class="relative">
+                                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                <input v-model="spIoSearch[i]" type="text" placeholder="Cari IO number / nama IO..." autocomplete="off"
+                                    @focus="openSpIoDropdown(i)" @blur="closeSpIoDropdown(i)"
+                                    :class="['w-full pl-7 pr-7 py-2.5 border rounded-xl text-xs focus:outline-none dark:bg-gray-700',
+                                        sp.io_id ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-semibold' : 'border-gray-200 dark:border-gray-600 focus:border-teal-400']" />
+                                <button v-if="sp.io_id" type="button" @click="clearSpIo(i)" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5"><X class="w-3 h-3" /></button>
+                                <div v-if="spIoOpen[i]" class="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                                    <div v-if="filteredSpIo(i).length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">Tidak ada hasil</div>
+                                    <button v-for="io in filteredSpIo(i)" :key="io.id" type="button" @mousedown.prevent="selectSpIo(i, io)"
+                                        :class="['w-full text-left px-3 py-2.5 text-xs hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors', sp.io_id === io.id ? 'bg-teal-50 dark:bg-teal-900/30 font-semibold' : 'text-gray-700 dark:text-gray-300']">
+                                        <span class="block font-semibold text-gray-800 dark:text-gray-200">{{ io.io_number }} — {{ io.nama }}</span>
+                                        <span class="text-gray-400">CC: {{ io.cc }}</span>
+                                    </button>
+                                </div>
                             </div>
                             <input v-model="sp.notes" type="text" placeholder="Keterangan (opsional)" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-700 text-xs focus:outline-none" />
                         </div>

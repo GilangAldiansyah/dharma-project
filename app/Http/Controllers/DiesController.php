@@ -73,6 +73,7 @@ class DiesController extends Controller
             'no_part'          => 'required|string',
             'nama_dies'        => 'required|string',
             'line'             => 'required|string',
+            'customer'         => 'nullable|string|max:100',
             'kategori'         => 'nullable|string',
             'status'           => 'required|in:active,slow_moving,discontinue,ohp,service_part',
             'is_common'        => 'boolean',
@@ -84,7 +85,7 @@ class DiesController extends Controller
         ]);
 
         $dies = Dies::create($request->only([
-            'id_sap','no_part','nama_dies','line','kategori',
+            'id_sap','no_part','nama_dies','line','customer','kategori',
             'status','is_common','forecast_per_day',
         ]));
 
@@ -110,6 +111,7 @@ class DiesController extends Controller
             'no_part'          => 'required|string',
             'nama_dies'        => 'required|string',
             'line'             => 'required|string',
+            'customer'         => 'nullable|string|max:100',
             'kategori'         => 'nullable|string',
             'status'           => 'required|in:active,slow_moving,discontinue,ohp,service_part',
             'is_common'        => 'boolean',
@@ -117,7 +119,7 @@ class DiesController extends Controller
         ]);
 
         $dies->update($request->only([
-            'no_part','nama_dies','line','kategori',
+            'no_part','nama_dies','line','customer','kategori',
             'status','is_common','forecast_per_day',
         ]));
 

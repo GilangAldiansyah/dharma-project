@@ -5,8 +5,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import {
     Wrench, AlertTriangle, Clock, CheckCircle2, Activity,
     ChevronRight, BarChart2, RefreshCw, Download,
-    CalendarCheck, Shield, AlertCircle,
-    ChevronDown, ChevronUp, Eye, Layers
+    CalendarCheck, Shield, ChevronDown, ChevronUp, Eye, Layers, TrendingUp, Package, Calendar
 } from 'lucide-vue-next';
 import Chart from 'chart.js/auto';
 import * as XLSX from 'xlsx';
@@ -32,10 +31,15 @@ interface RecentRecord {
     dies: { id_sap: string; no_part: string; nama_dies: string; line: string } | null;
 }
 interface StrokeTrend { month: string; pm_count: number; avg_stroke: number }
+interface CmTrend { day: string; cm_count: number }
 interface CmRankItem {
     dies_id: string; no_part: string; nama_dies: string; line: string;
     process_id: number | null; process_name: string; tonase: number | null;
     cm_count: number; last_cm_date: string | null;
+}
+interface SparepartRankItem {
+    sparepart_id: number; sparepart_code: string; sparepart_name: string;
+    unit: string; total_used: number;
 }
 interface Props {
     summary: { total_dies: number; total_active: number; overdue: number; due_soon: number; corrective_open: number };
@@ -46,7 +50,10 @@ interface Props {
     strokeTrend: StrokeTrend[];
     picList: any[];
     cmRanking: CmRankItem[];
-    cmPeriod: string;
+    cmTrend: CmTrend[];
+    sparepartRanking: SparepartRankItem[];
+    dateFrom: string;
+    dateTo: string;
 }
 
 const props = defineProps<Props>();
@@ -54,17 +61,60 @@ const props = defineProps<Props>();
 const activeTab   = ref<'overview' | 'schedule' | 'activity'>('overview');
 const expandedKey = ref<string | null>(null);
 const activityTab = ref<'pm' | 'cm'>('pm');
+const activePreset = ref<string>('30h');
 
-const cmPeriodFilter  = ref(props.cmPeriod ?? '6');
-const cmPeriodOptions = [
-    { value: '3',   label: '3 Bln' },
-    { value: '6',   label: '6 Bln' },
-    { value: '12',  label: '1 Thn' },
-    { value: 'all', label: 'Semua' },
-];
-const applyCmFilter = () => {
-    router.get('/dies/dashboard', { cm_period: cmPeriodFilter.value }, { preserveState: true, preserveScroll: true });
+const filterFrom = ref(props.dateFrom);
+const filterTo   = ref(props.dateTo);
+
+const applyDateFilter = () => {
+    router.get('/dies/dashboard', { date_from: filterFrom.value, date_to: filterTo.value }, { preserveState: true, preserveScroll: true });
 };
+
+const setPreset = (preset: string) => {
+    activePreset.value = preset;
+    const to   = new Date();
+    const from = new Date();
+
+    if (preset === 'today') {
+        filterFrom.value = to.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === 'week') {
+        const day = from.getDay();
+        const diff = from.getDate() - day + (day === 0 ? -6 : 1);
+        from.setDate(diff);
+        filterFrom.value = from.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === 'month') {
+        from.setDate(1);
+        filterFrom.value = from.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === '3m') {
+        from.setMonth(from.getMonth() - 3);
+        from.setDate(1);
+        filterFrom.value = from.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === '6m') {
+        from.setMonth(from.getMonth() - 6);
+        from.setDate(1);
+        filterFrom.value = from.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === '1y') {
+        from.setFullYear(from.getFullYear() - 1);
+        from.setDate(1);
+        filterFrom.value = from.toISOString().slice(0, 10);
+        filterTo.value   = to.toISOString().slice(0, 10);
+    } else if (preset === 'all') {
+        filterFrom.value = '2000-01-01';
+        filterTo.value   = to.toISOString().slice(0, 10);
+    }
+    applyDateFilter();
+};
+
+const periodLabel = computed(() => {
+    const from = new Date(filterFrom.value);
+    const to   = new Date(filterTo.value);
+    return `${from.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} – ${to.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+});
 
 const itemKey    = (d: DueItem) => `${d.id_sap}-${d.process_id}`;
 const toggleExpand = (d: DueItem) => {
@@ -76,14 +126,19 @@ const isDark    = () => document.documentElement.classList.contains('dark');
 const gridColor = () => isDark() ? '#1f2937' : '#f1f5f9';
 const textColor = () => isDark() ? '#6b7280' : '#9ca3af';
 
-const trendCanvas = ref<HTMLCanvasElement | null>(null);
-let trendChart: Chart | null = null;
+const fmtDay = (d: string) => {
+    const date = new Date(d);
+    return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+};
 
 const fmtMonth = (m: string) => {
     const [y, mo] = m.split('-');
     const months  = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
     return `${months[parseInt(mo) - 1]} '${y.slice(2)}`;
 };
+
+const trendCanvas = ref<HTMLCanvasElement | null>(null);
+let trendChart: Chart | null = null;
 
 const createTrendChart = () => {
     if (!trendCanvas.value || props.strokeTrend.length === 0) return;
@@ -198,15 +253,158 @@ const createCmBarChart = () => {
         },
     });
 };
-
 const rebuildCmChart = () => { cmBarChart?.destroy(); cmBarChart = null; nextTick(createCmBarChart); };
 
-watch(() => props.cmRanking, () => rebuildCmChart());
+const cmLineCanvas = ref<HTMLCanvasElement | null>(null);
+let cmLineChart: Chart | null = null;
+
+const createCmLineChart = () => {
+    if (!cmLineCanvas.value || props.cmTrend.length === 0) return;
+    cmLineChart = new Chart(cmLineCanvas.value, {
+        type: 'line',
+        data: {
+            labels: props.cmTrend.map(t => fmtDay(t.day)),
+            datasets: [{
+                label: 'Jumlah CM',
+                data: props.cmTrend.map(t => t.cm_count),
+                borderColor: 'rgba(249,115,22,0.9)',
+                backgroundColor: (ctx) => {
+                    const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, 160);
+                    gradient.addColorStop(0, 'rgba(249,115,22,0.25)');
+                    gradient.addColorStop(1, 'rgba(249,115,22,0.02)');
+                    return gradient;
+                },
+                borderWidth: 2.5,
+                pointBackgroundColor: 'rgba(249,115,22,1)',
+                pointBorderColor: isDark() ? '#1f2937' : '#ffffff',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 7,
+                fill: true,
+                tension: 0.4,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 500 },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: isDark() ? '#111827' : '#1f2937',
+                    padding: 10,
+                    cornerRadius: 8,
+                    callbacks: {
+                        title: (items) => {
+                            const t = props.cmTrend[items[0].dataIndex];
+                            return t ? new Date(t.day).toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) : '';
+                        },
+                        label: (ctx) => `  CM: ${ctx.parsed.y}x`,
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color: textColor(),
+                        font: { size: 9 },
+                        maxTicksLimit: 15,
+                        maxRotation: 45,
+                    },
+                    grid: { display: false },
+                    border: { display: false },
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: textColor(), font: { size: 10 }, stepSize: 1 },
+                    grid: { color: gridColor() },
+                    border: { display: false },
+                },
+            },
+        },
+    });
+};
+const rebuildCmLineChart = () => { cmLineChart?.destroy(); cmLineChart = null; nextTick(createCmLineChart); };
+
+const sparepartCanvas = ref<HTMLCanvasElement | null>(null);
+let sparepartChart: Chart | null = null;
+
+const createSparepartChart = () => {
+    if (!sparepartCanvas.value || props.sparepartRanking.length === 0) return;
+    const labels = props.sparepartRanking.map(r => r.sparepart_name.length > 22 ? r.sparepart_name.slice(0, 20) + '…' : r.sparepart_name);
+    const data   = props.sparepartRanking.map(r => r.total_used);
+    const maxVal = Math.max(...data, 1);
+
+    sparepartChart = new Chart(sparepartCanvas.value, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Total Pemakaian',
+                data,
+                backgroundColor: data.map((v) => {
+                    const ratio = v / maxVal;
+                    if (ratio >= 0.8) return 'rgba(139,92,246,0.85)';
+                    if (ratio >= 0.5) return 'rgba(99,102,241,0.75)';
+                    return 'rgba(99,102,241,0.45)';
+                }),
+                borderRadius: 5,
+                borderSkipped: false,
+            }],
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: isDark() ? '#111827' : '#1f2937',
+                    padding: 10,
+                    cornerRadius: 8,
+                    callbacks: {
+                        title: (items) => {
+                            const r = props.sparepartRanking[items[0].dataIndex];
+                            return r ? `${r.sparepart_code} — ${r.sparepart_name}` : '';
+                        },
+                        label: (ctx) => {
+                            const r = props.sparepartRanking[ctx.dataIndex];
+                            return [`  Total: ${ctx.parsed.x} ${r?.unit ?? ''}`];
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: { color: textColor(), font: { size: 10 }, stepSize: 1 },
+                    grid: { color: gridColor() },
+                    border: { display: false },
+                },
+                y: {
+                    ticks: { color: textColor(), font: { size: 10 } },
+                    grid: { display: false },
+                    border: { display: false },
+                },
+            },
+        },
+    });
+};
+const rebuildSparepartChart = () => { sparepartChart?.destroy(); sparepartChart = null; nextTick(createSparepartChart); };
+
+watch(() => [props.cmRanking, props.cmTrend, props.sparepartRanking], () => {
+    rebuildCmChart();
+    rebuildCmLineChart();
+    rebuildSparepartChart();
+}, { deep: true });
 
 onMounted(async () => {
     await nextTick();
     createTrendChart();
     createCmBarChart();
+    createCmLineChart();
+    createSparepartChart();
     let lastDark = isDark();
     const obs = new MutationObserver(() => {
         const nowDark = isDark();
@@ -214,13 +412,15 @@ onMounted(async () => {
             lastDark = nowDark;
             rebuildTrendChart();
             rebuildCmChart();
+            rebuildCmLineChart();
+            rebuildSparepartChart();
         }
     });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     onUnmounted(() => obs.disconnect());
 });
 
-onUnmounted(() => { trendChart?.destroy(); cmBarChart?.destroy(); });
+onUnmounted(() => { trendChart?.destroy(); cmBarChart?.destroy(); cmLineChart?.destroy(); sparepartChart?.destroy(); });
 
 const diesStatusCfg: Record<string, { badge: string; bar: string; text: string; bg: string; border: string }> = {
     'Siap Pakai':  { badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', bar: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/10',  border: 'border-emerald-200 dark:border-emerald-800/50' },
@@ -253,8 +453,19 @@ const dueByStatus = computed(() => {
     props.dueList.forEach(d => { if (groups[d.dies_status]) groups[d.dies_status].push(d); });
     return groups;
 });
-const normalCount   = computed(() => Math.max(0, props.summary.total_active - props.summary.overdue - props.summary.due_soon));
-const cmChartHeight = computed(() => Math.max(props.cmRanking.length * 36 + 16, 140));
+const normalCount          = computed(() => Math.max(0, props.summary.total_active - props.summary.overdue - props.summary.due_soon));
+const cmChartHeight        = computed(() => Math.max(props.cmRanking.length * 36 + 16, 140));
+const sparepartChartHeight = computed(() => Math.max(props.sparepartRanking.length * 36 + 16, 140));
+
+const presets = [
+    { key: 'today', label: 'Hari Ini' },
+    { key: 'week',  label: 'Minggu Ini' },
+    { key: 'month', label: 'Bulan Ini' },
+    { key: '3m',    label: '3 Bln' },
+    { key: '6m',    label: '6 Bln' },
+    { key: '1y',    label: '1 Thn' },
+    { key: 'all',   label: 'Semua' },
+];
 
 const exportExcel = () => {
     const wb   = XLSX.utils.book_new();
@@ -274,6 +485,11 @@ const exportExcel = () => {
         ['Rank', 'No Part', 'Nama Dies', 'Line', 'Proses', 'Tonase', 'Jumlah CM', 'Last CM'],
         ...props.cmRanking.map((r, i) => [
             i + 1, r.no_part, r.nama_dies, r.line, r.process_name, r.tonase ?? '-', r.cm_count, r.last_cm_date ?? '-',
+        ]),
+        [], ['SPAREPART PALING SERING DIPAKAI'],
+        ['Rank', 'Kode', 'Nama Sparepart', 'Unit', 'Total Pemakaian'],
+        ...props.sparepartRanking.map((r, i) => [
+            i + 1, r.sparepart_code, r.sparepart_name, r.unit, r.total_used,
         ]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -311,7 +527,7 @@ const exportExcel = () => {
                     </div>
                 </div>
 
-                <div class="px-4 pb-4">
+                <div class="px-4 pb-3">
                     <div class="grid grid-cols-5 gap-2">
                         <div class="bg-white/10 backdrop-blur-sm rounded-xl p-3 border border-white/10">
                             <p class="text-white/60 text-xs flex items-center gap-1"><Activity class="w-3 h-3" /> Total</p>
@@ -337,6 +553,46 @@ const exportExcel = () => {
                             <p class="text-emerald-200 text-xs flex items-center gap-1"><CheckCircle2 class="w-3 h-3" /> Normal</p>
                             <p class="text-2xl font-black text-white mt-1 tabular-nums">{{ normalCount }}</p>
                             <p class="text-emerald-200/70 text-xs mt-0.5">Siap pakai</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="px-4 pb-4">
+                    <div class="bg-white/10 backdrop-blur-sm rounded-xl border border-white/15 p-3 space-y-2.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-1.5">
+                                <Calendar class="w-3.5 h-3.5 text-white/70" />
+                                <span class="text-white/80 text-xs font-semibold">Filter Periode Analisis</span>
+                            </div>
+                            <span class="text-white/50 text-xs hidden sm:block">{{ periodLabel }}</span>
+                        </div>
+
+                        <div class="flex flex-wrap gap-1">
+                            <button v-for="p in presets" :key="p.key" @click="setPreset(p.key)"
+                                :class="['px-2.5 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95',
+                                    activePreset === p.key
+                                        ? 'bg-white text-blue-700 shadow-sm'
+                                        : 'bg-white/15 text-white/80 hover:bg-white/25 border border-white/20']">
+                                {{ p.label }}
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1.5 border border-white/20">
+                                <Calendar class="w-3 h-3 text-white/50 flex-shrink-0" />
+                                <input type="date" v-model="filterFrom"
+                                    class="flex-1 bg-transparent text-xs text-white outline-none min-w-0 placeholder-white/40" />
+                            </div>
+                            <span class="text-white/40 text-xs flex-shrink-0">—</span>
+                            <div class="flex-1 flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1.5 border border-white/20">
+                                <Calendar class="w-3 h-3 text-white/50 flex-shrink-0" />
+                                <input type="date" v-model="filterTo"
+                                    class="flex-1 bg-transparent text-xs text-white outline-none min-w-0" />
+                            </div>
+                            <button @click="() => { activePreset = 'custom'; applyDateFilter(); }"
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-blue-700 hover:bg-blue-50 transition-all active:scale-95 flex-shrink-0 shadow-sm">
+                                <RefreshCw class="w-3 h-3" /> Terapkan
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -377,19 +633,27 @@ const exportExcel = () => {
                 <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
                     <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
                         <h2 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                            <TrendingUp class="w-4 h-4 text-orange-400" /> Grafik Corrective Harian
+                        </h2>
+                        <span class="text-xs text-gray-400">{{ periodLabel }}</span>
+                    </div>
+                    <div class="p-4">
+                        <div v-if="cmTrend.length === 0" class="py-10 text-center">
+                            <Shield class="w-8 h-8 mx-auto mb-2 text-gray-200 dark:text-gray-600" />
+                            <p class="text-xs text-gray-400">Tidak ada data CM pada periode ini</p>
+                        </div>
+                        <div v-else style="height: 180px; position: relative;">
+                            <canvas ref="cmLineCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+                        <h2 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                             <Wrench class="w-4 h-4 text-orange-400" /> Dies Paling Sering CM
                         </h2>
-                        <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
-                            <button
-                                v-for="opt in cmPeriodOptions" :key="opt.value"
-                                @click="cmPeriodFilter = opt.value; applyCmFilter()"
-                                :class="['px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                                    cmPeriodFilter === opt.value
-                                        ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300']">
-                                {{ opt.label }}
-                            </button>
-                        </div>
+                        <span class="text-xs text-gray-400">{{ periodLabel }}</span>
                     </div>
                     <div class="p-4">
                         <div v-if="cmRanking.length === 0" class="py-10 text-center">
@@ -403,45 +667,23 @@ const exportExcel = () => {
                 </div>
 
                 <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                    <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
                         <h2 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-                            <AlertCircle class="w-4 h-4 text-red-400" /> Dies Kritis
+                            <Package class="w-4 h-4 text-violet-400" /> Sparepart Paling Sering Dipakai
                         </h2>
-                        <button @click="activeTab = 'schedule'" class="text-xs text-blue-500 font-medium flex items-center gap-0.5 hover:underline">
-                            Semua <ChevronRight class="w-3 h-3" />
-                        </button>
+                        <span class="text-xs text-gray-400">{{ periodLabel }}</span>
                     </div>
-                    <div class="divide-y divide-gray-50 dark:divide-gray-700/40">
-                        <div v-if="dueList.filter(d => d.dies_status === 'Diharuskan' || d.dies_status === 'Disegerakan').length === 0"
-                            class="py-10 text-center">
+                    <div class="p-4">
+                        <div v-if="sparepartRanking.length === 0" class="py-10 text-center">
                             <Shield class="w-8 h-8 mx-auto mb-2 text-gray-200 dark:text-gray-600" />
-                            <p class="text-xs text-gray-400">Semua dies kondisi baik</p>
+                            <p class="text-xs text-gray-400">Tidak ada data pemakaian sparepart pada periode ini</p>
                         </div>
-                        <div v-for="d in dueList.filter(d => d.dies_status === 'Diharuskan' || d.dies_status === 'Disegerakan').slice(0, 5)"
-                            :key="itemKey(d)"
-                            class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/20 transition-colors">
-                            <div :class="['w-1 h-10 rounded-full flex-shrink-0', diesStatusCfg[d.dies_status]?.bar]"></div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-1.5">
-                                    <p class="text-xs font-bold text-gray-900 dark:text-white truncate">{{ d.no_part }}</p>
-                                    <span class="text-xs text-gray-400">{{ d.line }}</span>
-                                    <span class="text-xs text-purple-500 dark:text-purple-400 truncate">· {{ d.process_name }}</span>
-                                </div>
-                                <div class="flex items-center gap-2 mt-1.5">
-                                    <div class="flex-1 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div :class="['h-full rounded-full', diesStatusCfg[d.dies_status]?.bar]"
-                                            :style="{ width: `${Math.min(d.percentage, 100)}%` }"></div>
-                                    </div>
-                                    <span :class="['text-xs font-bold tabular-nums', diesStatusCfg[d.dies_status]?.text]">{{ d.percentage }}%</span>
-                                </div>
-                            </div>
-                            <button @click="router.visit(`/dies/preventive`)"
-                                class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-all active:scale-95 flex-shrink-0">
-                                <CalendarCheck class="w-3 h-3" /> PM
-                            </button>
+                        <div v-else :style="{ height: sparepartChartHeight + 'px', position: 'relative' }">
+                            <canvas ref="sparepartCanvas"></canvas>
                         </div>
                     </div>
                 </div>
+
             </div>
 
             <div v-show="activeTab === 'schedule'" class="space-y-3">

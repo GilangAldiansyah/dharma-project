@@ -32,6 +32,7 @@ use App\Http\Controllers\SparepartController;
 use App\Http\Controllers\StockController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\TransaksiMaterialController;
+use App\Http\Controllers\DiesIoController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -365,7 +366,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('jig.improvement.close');
 
     // ── Dies ──────────────────────────────────────────────────────────────────
-    Route::prefix('dies')->name('dies.')->group(function () {
+Route::prefix('dies')->name('dies.')->group(function () {
 
     Route::middleware('permission:dies.view')->group(function () {
         Route::get('/', [DiesController::class, 'index'])->name('index');
@@ -382,6 +383,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/sparepart/history', [DiesSparepartController::class, 'historyIndex'])->name('sparepart.history');
         Route::get('/sparepart/all', [DiesSparepartController::class, 'allForBulk']);
         Route::get('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'show'])->name('sparepart.show');
+
+        Route::get('/io', [DiesIoController::class, 'index'])->name('io.index');
+        Route::get('/io/all', [DiesIoController::class, 'all'])->name('io.all');
 
         Route::get('/create', [DiesController::class, 'create'])->name('create');
         Route::get('/import-bstb-preview', fn() => redirect()->route('dies.index'));
@@ -429,6 +433,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/sparepart/bulk-update', [DiesSparepartController::class, 'bulkUpdate'])->name('sparepart.bulk-update');
         Route::post('/sparepart/{diesSparepart}/adjust-stok', [DiesSparepartController::class, 'adjustStok'])->name('sparepart.adjust-stok');
         Route::delete('/sparepart/{diesSparepart}', [DiesSparepartController::class, 'destroy'])->name('sparepart.destroy');
+
+        Route::post('/io', [DiesIoController::class, 'store'])->name('io.store');
+        Route::put('/io/{diesIo}', [DiesIoController::class, 'update'])->name('io.update');
+        Route::delete('/io/{diesIo}', [DiesIoController::class, 'destroy'])->name('io.destroy');
     });
 
     Route::middleware('permission:dies.delete')->group(function () {
@@ -441,7 +449,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/sparepart/history', [DiesSparepartController::class, 'historyStore'])->name('sparepart.history.store');
         Route::delete('/sparepart/history/{history}', [DiesSparepartController::class, 'historyDestroy'])->name('sparepart.history.destroy');
     });
-    });
+});
     Route::post('/ai/chat', [AiChatController::class, 'chat']);
     Route::get('/ai/alerts', [AiChatController::class, 'alerts']);
     Route::get('/ai/export-data', [AiChatController::class, 'exportData']);
