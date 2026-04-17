@@ -16,7 +16,14 @@ class DiesHistorySparepart extends Model
         'quantity',
         'notes',
         'created_by',
+        'sap_confirmed_at',
+        'sap_confirmed_by',
     ];
+
+    protected $casts = [
+        'sap_confirmed_at' => 'datetime',
+    ];
+
 
     public function sparepart()
     {
@@ -36,5 +43,9 @@ class DiesHistorySparepart extends Model
     public function createdBy()
     {
         return $this->belongsTo(\App\Models\User::class, 'created_by');
+    }
+    public function sapConfirmedBy()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'sap_confirmed_by');
     }
 }

@@ -448,6 +448,8 @@ Route::prefix('dies')->name('dies.')->group(function () {
     Route::middleware('permission:dies.pic')->group(function () {
         Route::post('/sparepart/history', [DiesSparepartController::class, 'historyStore'])->name('sparepart.history.store');
         Route::delete('/sparepart/history/{history}', [DiesSparepartController::class, 'historyDestroy'])->name('sparepart.history.destroy');
+        Route::post('/sparepart/history/{history}/confirm-sap', [DiesSparepartController::class, 'confirmSap'])->name('sparepart.history.confirm-sap');
+        Route::post('/sparepart/history/bulk-confirm-sap', [DiesSparepartController::class, 'bulkConfirmSap'])->name('sparepart.history.bulk-confirm-sap');
     });
 });
     Route::post('/ai/chat', [AiChatController::class, 'chat']);

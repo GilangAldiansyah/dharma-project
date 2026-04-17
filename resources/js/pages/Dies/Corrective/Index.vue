@@ -58,6 +58,7 @@ interface Props {
     diesList: DiesMini[];
     spareparts: Sparepart[];
     ios: Io[];
+    lines: string[];
     summary: {
         open: number;
         in_progress: number;
@@ -70,7 +71,7 @@ interface Props {
         count_off_machine: number;
         count_in_machine: number;
     };
-    filters: { search?: string; status?: string; dies_id?: string; month?: string; year?: string; date_from?: string; date_to?: string };
+    filters: { search?: string; status?: string; dies_id?: string; line?: string; month?: string; year?: string; date_from?: string; date_to?: string };
 }
 
 const props = defineProps<Props>();
@@ -79,14 +80,15 @@ const flash = computed(() => (page.props as any).flash);
 
 const currentYear = new Date().getFullYear();
 
-const search       = ref(props.filters.search   ?? '');
-const filterStatus = ref(props.filters.status   ?? '');
-const filterDies   = ref(props.filters.dies_id  ?? '');
-const filterMonth  = ref(props.filters.month    ?? '');
-const filterYear   = ref(props.filters.year ? Number(props.filters.year) : currentYear);
+const search         = ref(props.filters.search   ?? '');
+const filterStatus   = ref(props.filters.status   ?? '');
+const filterDies     = ref(props.filters.dies_id  ?? '');
+const filterLine     = ref(props.filters.line     ?? '');
+const filterMonth    = ref(props.filters.month    ?? '');
+const filterYear     = ref(props.filters.year ? Number(props.filters.year) : currentYear);
 const filterDateFrom = ref(props.filters.date_from ?? '');
 const filterDateTo   = ref(props.filters.date_to   ?? '');
-const showFilter   = ref(false);
+const showFilter     = ref(false);
 
 const months = [
     { v: '',   l: 'Semua' },
@@ -127,7 +129,7 @@ const statusCfg: Record<string, { label: string; badge: string; dot: string; car
 
 const hasActiveSession = (c: Corrective) => c.repair_sessions?.some(s => !s.ended_at) ?? false;
 const canClose = (c: Corrective) => c.status === 'in_progress' || c.status === 'on_repair';
-const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterMonth.value, filterDateFrom.value || filterDateTo.value ? '1' : ''].filter(Boolean).length);
+const activeFilterCount = computed(() => [filterStatus.value, filterDies.value, filterLine.value, filterMonth.value, filterDateFrom.value || filterDateTo.value ? '1' : ''].filter(Boolean).length);
 
 const fmtMinutes = (minutes: number): string => {
     if (!minutes) return '0m';
@@ -142,6 +144,7 @@ const navigate = (resetPage = true) => router.get('/dies/corrective', {
     search:     search.value,
     status:     filterStatus.value,
     dies_id:    filterDies.value,
+    line:       filterLine.value,
     month:      isDateRangeActive.value ? '' : filterMonth.value,
     year:       isDateRangeActive.value ? '' : String(filterYear.value),
     date_from:  filterDateFrom.value,
@@ -160,7 +163,7 @@ watch(search, () => {
     searchDebounce = setTimeout(() => navigate(true), 400);
 });
 
-watch([filterStatus, filterDies, filterMonth, filterYear], () => navigate(true));
+watch([filterStatus, filterDies, filterLine, filterMonth, filterYear], () => navigate(true));
 
 let dateDebounce: ReturnType<typeof setTimeout>;
 watch([filterDateFrom, filterDateTo], () => {
@@ -759,6 +762,19 @@ const paginationInfo  = computed(() => {
                 </div>
 
                 <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase mb-1.5">Line</label>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button
+                            v-for="l in ['', ...lines]" :key="l"
+                            @click="filterLine = l"
+                            :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors',
+                                filterLine === l ? 'bg-orange-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200']">
+                            {{ l === '' ? 'Semua' : l }}
+                        </button>
+                    </div>
+                </div>
+
+                <div>
                     <label class="block text-xs font-semibold text-gray-400 uppercase mb-1.5 flex items-center gap-1.5">
                         <CalendarRange class="w-3.5 h-3.5" /> Rentang Tanggal
                     </label>
@@ -816,8 +832,9 @@ const paginationInfo  = computed(() => {
                         </div>
                     </div>
                 </div>
+
                 <div class="flex justify-end">
-                    <button @click="filterStatus = ''; clearDiesFilter(); clearDateRange()"
+                    <button @click="filterStatus = ''; filterLine = ''; clearDiesFilter(); clearDateRange()"
                         class="text-xs text-orange-500 font-semibold hover:underline">Reset filter</button>
                 </div>
             </div>

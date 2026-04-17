@@ -7,7 +7,8 @@ import {
     History, Search, Trash2, AlertTriangle, CheckCircle2,
     Package, Calendar, User, X, TrendingDown,
     ArrowDownCircle, ArrowUpCircle, Cpu, FileSpreadsheet,
-    CheckSquare, Square, Download
+    CheckSquare, Square, Download, ShieldCheck, ShieldOff,
+    BadgeCheck, Clock
 } from 'lucide-vue-next';
 
 interface Sparepart { id: number; sparepart_code: string; sparepart_name: string; stok: number; unit: string; }
@@ -23,10 +24,13 @@ interface HistoryItem {
     quantity: number;
     notes: string | null;
     created_at: string;
+    sap_confirmed_at: string | null;
+    sap_confirmed_by: number | null;
     sparepart: Sparepart | null;
     dies: Dies | null;
     io: Io | null;
     created_by: { id: number; name: string } | null;
+    sap_confirmed_by_user: { id: number; name: string } | null;
 }
 
 interface Props {
@@ -34,7 +38,8 @@ interface Props {
     spareparts: Sparepart[];
     dies:       Dies[];
     ios:        Io[];
-    filters:    { tipe?: string; sparepart_id?: string; dies_id?: string; io_id?: string; flow?: string; search?: string; };
+    filters:    { tipe?: string; sparepart_id?: string; dies_id?: string; io_id?: string; flow?: string; search?: string; sap_status?: string; };
+    canConfirm: boolean;
 }
 
 const props = defineProps<Props>();
@@ -47,13 +52,19 @@ const filterDies      = ref(props.filters.dies_id      ?? '');
 const filterIo        = ref(props.filters.io_id        ?? '');
 const filterFlow      = ref(props.filters.flow         ?? '');
 const filterSearch    = ref(props.filters.search       ?? '');
+const filterSapStatus = ref(props.filters.sap_status   ?? '');
 
 const showDelModal     = ref(false);
 const showRegulerModal = ref(false);
 const selectedH        = ref<HistoryItem | null>(null);
 
-const selectedIds      = ref<Set<number>>(new Set());
-const showExportModal  = ref(false);
+// ── Selection ────────────────────────────────────────────────────────────────
+const selectedIds     = ref<Set<number>>(new Set());
+const showExportModal = ref(false);
+
+// ── SAP Confirm ──────────────────────────────────────────────────────────────
+const showBulkConfirmModal = ref(false);
+const confirmingId         = ref<number | null>(null);  // loading state per-row
 
 const tipeCfg: Record<string, { label: string; badge: string; dot: string }> = {
     masuk:      { label: 'Masuk',      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400', dot: 'bg-emerald-500' },
@@ -63,29 +74,34 @@ const tipeCfg: Record<string, { label: string; badge: string; dot: string }> = {
 };
 
 const isMasuk        = (h: HistoryItem) => h.tipe === 'masuk';
+const isSapConfirmed = (h: HistoryItem) => !!h.sap_confirmed_at;
+
 const totalHistories = computed(() => props.histories.meta?.total ?? 0);
 const fromHistories  = computed(() => props.histories.meta?.from  ?? 0);
 const toHistories    = computed(() => props.histories.meta?.to    ?? 0);
 const lastPage       = computed(() => props.histories.meta?.last_page ?? 1);
 
+// Hanya item yang BELUM confirmed yang bisa dipilih untuk export
+const selectableIds  = computed(() => props.histories.data.filter(h => !isSapConfirmed(h)).map(h => h.id));
 const allPageIds     = computed(() => props.histories.data.map(h => h.id));
-const allChecked     = computed(() => allPageIds.value.length > 0 && allPageIds.value.every(id => selectedIds.value.has(id)));
-const someChecked    = computed(() => allPageIds.value.some(id => selectedIds.value.has(id)) && !allChecked.value);
+const allChecked     = computed(() => selectableIds.value.length > 0 && selectableIds.value.every(id => selectedIds.value.has(id)));
+const someChecked    = computed(() => selectableIds.value.some(id => selectedIds.value.has(id)) && !allChecked.value);
 const selectedCount  = computed(() => selectedIds.value.size);
 
 const toggleAll = () => {
     if (allChecked.value) {
-        allPageIds.value.forEach(id => selectedIds.value.delete(id));
+        selectableIds.value.forEach(id => selectedIds.value.delete(id));
         selectedIds.value = new Set(selectedIds.value);
     } else {
-        allPageIds.value.forEach(id => selectedIds.value.add(id));
+        selectableIds.value.forEach(id => selectedIds.value.add(id));
         selectedIds.value = new Set(selectedIds.value);
     }
 };
 
-const toggleOne = (id: number) => {
+const toggleOne = (h: HistoryItem) => {
+    if (isSapConfirmed(h)) return; // tidak bisa dipilih kalau sudah confirmed
     const s = new Set(selectedIds.value);
-    if (s.has(id)) s.delete(id); else s.add(id);
+    if (s.has(h.id)) s.delete(h.id); else s.add(h.id);
     selectedIds.value = s;
 };
 
@@ -95,45 +111,73 @@ const selectedItems = computed(() =>
     props.histories.data.filter(h => selectedIds.value.has(h.id))
 );
 
+// ── Export Excel ─────────────────────────────────────────────────────────────
 const exportToExcel = () => {
     const items = selectedItems.value;
     if (items.length === 0) return;
 
     const rows = items.map(h => ({
-        'Tanggal':       fmtDateExcel(h.created_at),
-        'Kode Barang':   h.sparepart?.sparepart_code ?? '',
-        'Nama Barang':   h.sparepart?.sparepart_name ?? '',
-        'JML':           h.quantity,
-        'SLOC':          6212,
-        'CC':            h.io?.cc ?? '',
-        'IO':            h.io?.io_number ?? '',
+        'Tanggal':     fmtDateExcel(h.created_at),
+        'Kode Barang': h.sparepart?.sparepart_code ?? '',
+        'Nama Barang': h.sparepart?.sparepart_name ?? '',
+        'JML':         h.quantity,
+        'SLOC':        6212,
+        'CC':          h.io?.cc ?? '',
+        'IO':          h.io?.io_number ?? '',
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
-
-    const colWidths = [
-        { wch: 14 },
-        { wch: 22 },
-        { wch: 45 },
-        { wch: 6  },
-        { wch: 8  },
-        { wch: 14 },
-        { wch: 14 },
+    ws['!cols'] = [
+        { wch: 14 }, { wch: 22 }, { wch: 45 },
+        { wch: 6  }, { wch: 8  }, { wch: 14 }, { wch: 14 },
     ];
-    ws['!cols'] = colWidths;
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'History Sparepart');
 
-    const now = new Date();
+    const now     = new Date();
     const dateStr = now.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '');
     XLSX.writeFile(wb, `history_sparepart_${dateStr}.xlsx`);
 
-    showExportModal.value = false;
-    clearSelection();
+    // Setelah export, langsung bulk-confirm semua yang baru diexport
+    const exportedIds = items.map(h => h.id);
+    router.post('/dies/sparepart/history/bulk-confirm-sap', { ids: exportedIds }, {
+        preserveScroll: true,
+        onSuccess: () => {
+            showExportModal.value = false;
+            clearSelection();
+        },
+        onError: () => {
+            // Export tetap berhasil meski confirm gagal
+            showExportModal.value = false;
+            clearSelection();
+        },
+    });
 };
 
-watch([filterTipe, filterSparepart, filterDies, filterIo, filterFlow], () => navigate());
+// ── SAP Confirm Toggle (single) ───────────────────────────────────────────────
+const toggleConfirmSap = (h: HistoryItem) => {
+    if (!props.canConfirm) return;
+    confirmingId.value = h.id;
+    router.post(`/dies/sparepart/history/${h.id}/confirm-sap`, {}, {
+        preserveScroll: true,
+        onFinish: () => { confirmingId.value = null; },
+    });
+};
+
+// ── Bulk Confirm SAP (dari selection) ────────────────────────────────────────
+const submitBulkConfirm = () => {
+    const ids = Array.from(selectedIds.value);
+    router.post('/dies/sparepart/history/bulk-confirm-sap', { ids }, {
+        preserveScroll: true,
+        onSuccess: () => {
+            showBulkConfirmModal.value = false;
+            clearSelection();
+        },
+    });
+};
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+watch([filterTipe, filterSparepart, filterDies, filterIo, filterFlow, filterSapStatus], () => navigate());
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(filterSearch, () => {
@@ -148,12 +192,15 @@ const navigate = () => router.get('/dies/sparepart/history', {
     io_id:        filterIo.value,
     flow:         filterFlow.value,
     search:       filterSearch.value,
+    sap_status:   filterSapStatus.value,
 }, { preserveState: true, preserveScroll: true, replace: true });
 
-const fmtDate     = (d: string | null) => !d ? '-' : new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-const fmtDatetime = (d: string) => new Date(d).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const fmtDateExcel = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fmtDate      = (d: string | null) => !d ? '-' : new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+const fmtDatetime  = (d: string)        => new Date(d).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDateExcel = (d: string)        => new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
+// ── Delete ────────────────────────────────────────────────────────────────────
 const openDelete   = (h: HistoryItem) => { selectedH.value = h; showDelModal.value = true; };
 const submitDelete = () => {
     if (!selectedH.value) return;
@@ -162,6 +209,7 @@ const submitDelete = () => {
     });
 };
 
+// ── Highlight ─────────────────────────────────────────────────────────────────
 const highlightMatch = (text: string, query: string) => {
     if (!query.trim()) return [{ text, match: false }];
     const idx = text.toLowerCase().indexOf(query.toLowerCase().trim());
@@ -173,6 +221,7 @@ const highlightMatch = (text: string, query: string) => {
     ].filter(p => p.text !== '');
 };
 
+// ── Form Reguler ──────────────────────────────────────────────────────────────
 const form = useForm({ sparepart_id: '', io_id: '', quantity: 1, notes: '' });
 
 const selectedSp = ref<Sparepart | null>(null);
@@ -213,70 +262,30 @@ const filteredSparepartsForFilter = computed(() => {
     );
 });
 
-const selectSp = (s: Sparepart) => {
-    selectedSp.value  = s;
-    form.sparepart_id = String(s.id);
-    spSearch.value    = s.sparepart_name;
-    spOpen.value      = false;
-};
-const clearSp = () => {
-    selectedSp.value  = null;
-    form.sparepart_id = '';
-    spSearch.value    = '';
-    spOpen.value      = true;
-};
+const selectSp = (s: Sparepart) => { selectedSp.value = s; form.sparepart_id = String(s.id); spSearch.value = s.sparepart_name; spOpen.value = false; };
+const clearSp  = () => { selectedSp.value = null; form.sparepart_id = ''; spSearch.value = ''; spOpen.value = true; };
 const closeSpDropdown = () => setTimeout(() => { spOpen.value = false; }, 180);
 
-const selectIo = (io: Io) => {
-    selectedIo.value = io;
-    form.io_id       = String(io.id);
-    ioSearch.value   = io.nama;
-    ioOpen.value     = false;
-};
-const clearIo = () => {
-    selectedIo.value = null;
-    form.io_id       = '';
-    ioSearch.value   = '';
-    ioOpen.value     = true;
-};
+const selectIo = (io: Io) => { selectedIo.value = io; form.io_id = String(io.id); ioSearch.value = io.nama; ioOpen.value = false; };
+const clearIo  = () => { selectedIo.value = null; form.io_id = ''; ioSearch.value = ''; ioOpen.value = true; };
 const closeIoDropdown = () => setTimeout(() => { ioOpen.value = false; }, 180);
 
-const selectFilterSp = (s: Sparepart) => {
-    selectedFilterSp.value = s;
-    filterSparepart.value  = String(s.id);
-    spSearchFilter.value   = s.sparepart_name;
-    spFilterOpen.value     = false;
-};
-const clearFilterSp = () => {
-    selectedFilterSp.value = null;
-    filterSparepart.value  = '';
-    spSearchFilter.value   = '';
-    spFilterOpen.value     = true;
-};
+const selectFilterSp = (s: Sparepart) => { selectedFilterSp.value = s; filterSparepart.value = String(s.id); spSearchFilter.value = s.sparepart_name; spFilterOpen.value = false; };
+const clearFilterSp  = () => { selectedFilterSp.value = null; filterSparepart.value = ''; spSearchFilter.value = ''; spFilterOpen.value = true; };
 const closeFilterSpDropdown = () => setTimeout(() => { spFilterOpen.value = false; }, 180);
 
 const openReguler = () => {
-    form.reset();
-    form.quantity    = 1;
-    selectedSp.value = null;
-    selectedIo.value = null;
-    spSearch.value   = '';
-    ioSearch.value   = '';
-    spOpen.value     = false;
-    ioOpen.value     = false;
+    form.reset(); form.quantity = 1;
+    selectedSp.value = null; selectedIo.value = null;
+    spSearch.value = ''; ioSearch.value = '';
+    spOpen.value = false; ioOpen.value = false;
     showRegulerModal.value = true;
 };
-
 const closeReguler = () => {
-    showRegulerModal.value = false;
-    form.reset();
-    form.quantity    = 1;
-    selectedSp.value = null;
-    selectedIo.value = null;
-    spSearch.value   = '';
-    ioSearch.value   = '';
+    showRegulerModal.value = false; form.reset(); form.quantity = 1;
+    selectedSp.value = null; selectedIo.value = null;
+    spSearch.value = ''; ioSearch.value = '';
 };
-
 const submitReguler = () => {
     form.transform(data => ({ ...data, tipe: 'reguler' }))
         .post('/dies/sparepart/history', { onSuccess: () => closeReguler() });
@@ -304,6 +313,7 @@ const setFlow = (val: string) => {
     ]">
         <div class="p-3 sm:p-5 lg:p-6 space-y-4">
 
+            <!-- Header -->
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -329,6 +339,7 @@ const setFlow = (val: string) => {
                 </div>
             </div>
 
+            <!-- Flash -->
             <div v-if="flash?.success"
                 class="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                 <CheckCircle2 class="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -340,6 +351,7 @@ const setFlow = (val: string) => {
                 <p class="text-red-800 dark:text-red-200 font-medium text-xs sm:text-sm">{{ flash.error }}</p>
             </div>
 
+            <!-- Selection toolbar -->
             <div v-if="selectedCount > 0"
                 class="flex items-center justify-between gap-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
                 <div class="flex items-center gap-2">
@@ -348,10 +360,16 @@ const setFlow = (val: string) => {
                         {{ selectedCount }} data dipilih
                     </p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap justify-end">
                     <button @click="clearSelection"
                         class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-xs font-semibold hover:bg-gray-100 dark:hover:bg-gray-700 transition-all">
                         <X class="w-3 h-3" /> Batal
+                    </button>
+                    <!-- Bulk Confirm SAP (hanya jika canConfirm) -->
+                    <button v-if="canConfirm" @click="showBulkConfirmModal = true"
+                        class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold active:scale-95 transition-all shadow-sm">
+                        <ShieldCheck class="w-3.5 h-3.5" />
+                        Confirm SAP
                     </button>
                     <button @click="showExportModal = true"
                         class="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold active:scale-95 transition-all shadow-sm">
@@ -361,7 +379,9 @@ const setFlow = (val: string) => {
                 </div>
             </div>
 
+            <!-- Filters -->
             <div class="space-y-2.5">
+                <!-- Flow + Tipe -->
                 <div class="flex items-center gap-2 flex-wrap">
                     <button @click="setFlow('masuk')"
                         :class="['flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all',
@@ -414,8 +434,26 @@ const setFlow = (val: string) => {
                             </button>
                         </template>
                     </div>
+
+                    <!-- SAP Status filter -->
+                    <div class="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+                    <button @click="filterSapStatus = filterSapStatus === 'confirmed' ? '' : 'confirmed'"
+                        :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all',
+                            filterSapStatus === 'confirmed'
+                                ? 'bg-indigo-600 border-indigo-600 text-white'
+                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-indigo-400']">
+                        <BadgeCheck class="w-3.5 h-3.5" /> SAP Confirmed
+                    </button>
+                    <button @click="filterSapStatus = filterSapStatus === 'unconfirmed' ? '' : 'unconfirmed'"
+                        :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all',
+                            filterSapStatus === 'unconfirmed'
+                                ? 'bg-amber-500 border-amber-500 text-white'
+                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-amber-400']">
+                        <Clock class="w-3.5 h-3.5" /> Belum Confirm
+                    </button>
                 </div>
 
+                <!-- Sparepart search filter -->
                 <div class="relative">
                     <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
                     <input v-model="spSearchFilter" type="text" placeholder="Cari sparepart..." autocomplete="off"
@@ -449,6 +487,7 @@ const setFlow = (val: string) => {
                 </div>
             </div>
 
+            <!-- ── Desktop Table ── -->
             <div class="hidden lg:block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -469,27 +508,41 @@ const setFlow = (val: string) => {
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Catatan</th>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">PIC</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Tanggal</th>
+                                <!-- Kolom SAP -->
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">SAP</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">Aksi</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
                             <tr v-if="histories.data.length === 0">
-                                <td colspan="9" class="py-16 text-center text-gray-400 text-sm">
+                                <td colspan="10" class="py-16 text-center text-gray-400 text-sm">
                                     <History class="w-10 h-10 mx-auto mb-2 text-gray-300" />
                                     Tidak ada riwayat
                                 </td>
                             </tr>
                             <tr v-for="h in histories.data" :key="h.id"
-                                :class="['hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors',
-                                    selectedIds.has(h.id) ? 'bg-green-50/60 dark:bg-green-900/10' :
-                                    isMasuk(h) ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : '']">
+                                :class="['transition-colors',
+                                    isSapConfirmed(h)
+                                        ? 'bg-indigo-50/40 dark:bg-indigo-900/10 opacity-80'
+                                        : selectedIds.has(h.id)
+                                            ? 'bg-green-50/60 dark:bg-green-900/10'
+                                            : isMasuk(h)
+                                                ? 'bg-emerald-50/30 dark:bg-emerald-900/10 hover:bg-emerald-50/60'
+                                                : 'hover:bg-gray-50/80 dark:hover:bg-gray-700/30']">
+                                <!-- Checkbox -->
                                 <td class="px-4 py-3 text-center">
-                                    <button type="button" @click="toggleOne(h.id)"
-                                        class="flex items-center justify-center w-5 h-5 rounded transition-colors mx-auto"
-                                        :class="selectedIds.has(h.id) ? 'text-green-600' : 'text-gray-300 hover:text-gray-500'">
-                                        <CheckSquare v-if="selectedIds.has(h.id)" class="w-4 h-4" />
-                                        <Square v-else class="w-4 h-4" />
-                                    </button>
+                                    <template v-if="isSapConfirmed(h)">
+                                        <!-- Sudah confirmed → tampilkan ikon terkunci -->
+                                        <BadgeCheck class="w-4 h-4 text-indigo-400 mx-auto" title="Sudah dikonfirmasi SAP" />
+                                    </template>
+                                    <template v-else>
+                                        <button type="button" @click="toggleOne(h)"
+                                            class="flex items-center justify-center w-5 h-5 rounded transition-colors mx-auto"
+                                            :class="selectedIds.has(h.id) ? 'text-green-600' : 'text-gray-300 hover:text-gray-500'">
+                                            <CheckSquare v-if="selectedIds.has(h.id)" class="w-4 h-4" />
+                                            <Square v-else class="w-4 h-4" />
+                                        </button>
+                                    </template>
                                 </td>
                                 <td class="px-4 py-3">
                                     <span :class="['inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold', tipeCfg[h.tipe]?.badge ?? '']">
@@ -518,6 +571,41 @@ const setFlow = (val: string) => {
                                 </td>
                                 <td class="px-4 py-3 text-xs text-gray-500">{{ h.created_by?.name ?? '—' }}</td>
                                 <td class="px-4 py-3 text-center text-xs text-gray-500 whitespace-nowrap">{{ fmtDatetime(h.created_at) }}</td>
+
+                                <!-- SAP Confirm column -->
+                                <td class="px-4 py-3 text-center">
+                                    <template v-if="isSapConfirmed(h)">
+                                        <!-- Sudah confirmed -->
+                                        <div class="flex flex-col items-center gap-0.5">
+                                            <button v-if="canConfirm" @click="toggleConfirmSap(h)"
+                                                :disabled="confirmingId === h.id"
+                                                class="inline-flex items-center gap-1 px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors group disabled:opacity-50"
+                                                title="Klik untuk batalkan konfirmasi">
+                                                <ShieldCheck class="w-3.5 h-3.5 group-hover:hidden" />
+                                                <ShieldOff class="w-3.5 h-3.5 hidden group-hover:block" />
+                                                <span class="group-hover:hidden">Confirmed</span>
+                                                <span class="hidden group-hover:inline">Batalkan</span>
+                                            </button>
+                                            <!-- Non-canConfirm: hanya tampilkan badge -->
+                                            <span v-else class="inline-flex items-center gap-1 px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold">
+                                                <BadgeCheck class="w-3.5 h-3.5" /> Confirmed
+                                            </span>
+                                            <span class="text-xs text-gray-400 whitespace-nowrap">{{ fmtDate(h.sap_confirmed_at) }}</span>
+                                        </div>
+                                    </template>
+                                    <template v-else>
+                                        <!-- Belum confirmed -->
+                                        <button v-if="canConfirm" @click="toggleConfirmSap(h)"
+                                            :disabled="confirmingId === h.id"
+                                            class="inline-flex items-center gap-1 px-2 py-1 border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 rounded-lg text-xs hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-600 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
+                                            title="Klik untuk konfirmasi SAP">
+                                            <ShieldCheck class="w-3.5 h-3.5" />
+                                            Confirm
+                                        </button>
+                                        <span v-else class="text-xs text-gray-300">—</span>
+                                    </template>
+                                </td>
+
                                 <td class="px-4 py-3 text-center">
                                     <button @click="openDelete(h)"
                                         class="p-1.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 transition-colors">
@@ -542,26 +630,35 @@ const setFlow = (val: string) => {
                 </div>
             </div>
 
+            <!-- ── Mobile Cards ── -->
             <div class="lg:hidden space-y-2.5">
                 <div v-if="histories.data.length === 0" class="py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                     <p class="text-gray-400 text-sm">Tidak ada riwayat</p>
                 </div>
                 <div v-for="h in histories.data" :key="h.id"
                     :class="['rounded-2xl border shadow-sm overflow-hidden',
-                        selectedIds.has(h.id)
-                            ? 'bg-green-50 dark:bg-green-900/10 border-green-300 dark:border-green-700'
-                            : isMasuk(h)
-                                ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800'
-                                : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700']">
+                        isSapConfirmed(h)
+                            ? 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-800 opacity-80'
+                            : selectedIds.has(h.id)
+                                ? 'bg-green-50 dark:bg-green-900/10 border-green-300 dark:border-green-700'
+                                : isMasuk(h)
+                                    ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800'
+                                    : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700']">
                     <div class="p-3.5">
                         <div class="flex items-start justify-between gap-2 mb-2.5">
                             <div class="flex items-start gap-2 min-w-0">
-                                <button type="button" @click="toggleOne(h.id)"
-                                    class="flex-shrink-0 mt-0.5 transition-colors"
-                                    :class="selectedIds.has(h.id) ? 'text-green-600' : 'text-gray-300'">
-                                    <CheckSquare v-if="selectedIds.has(h.id)" class="w-4 h-4" />
-                                    <Square v-else class="w-4 h-4" />
-                                </button>
+                                <!-- Checkbox or SAP badge -->
+                                <template v-if="isSapConfirmed(h)">
+                                    <BadgeCheck class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
+                                </template>
+                                <template v-else>
+                                    <button type="button" @click="toggleOne(h)"
+                                        class="flex-shrink-0 mt-0.5 transition-colors"
+                                        :class="selectedIds.has(h.id) ? 'text-green-600' : 'text-gray-300'">
+                                        <CheckSquare v-if="selectedIds.has(h.id)" class="w-4 h-4" />
+                                        <Square v-else class="w-4 h-4" />
+                                    </button>
+                                </template>
                                 <div class="min-w-0">
                                     <p class="text-xs font-mono font-bold text-orange-600 dark:text-orange-400">{{ h.sparepart?.sparepart_code }}</p>
                                     <p class="text-sm font-bold text-gray-900 dark:text-white mt-0.5">{{ h.sparepart?.sparepart_name }}</p>
@@ -581,13 +678,42 @@ const setFlow = (val: string) => {
                                 </span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3 text-xs text-gray-500 mb-3">
+
+                        <div class="flex items-center gap-3 text-xs text-gray-500 mb-2">
                             <span class="flex items-center gap-1"><User class="w-3 h-3" /> {{ h.created_by?.name ?? '—' }}</span>
                             <span class="flex items-center gap-1"><Calendar class="w-3 h-3" /> {{ fmtDate(h.created_at) }}</span>
                         </div>
+
+                        <!-- SAP Confirmed banner (mobile) -->
+                        <div v-if="isSapConfirmed(h)"
+                            class="flex items-center gap-1.5 mb-2.5 px-2.5 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                            <BadgeCheck class="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
+                            <p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                                SAP Confirmed · {{ fmtDate(h.sap_confirmed_at) }}
+                            </p>
+                        </div>
+
                         <p v-if="h.notes" class="text-xs text-gray-500 bg-white dark:bg-gray-700/50 rounded-lg px-2.5 py-1.5 mb-3">{{ h.notes }}</p>
-                        <div class="flex justify-between items-center pt-2.5 border-t border-gray-100 dark:border-gray-700">
-                            <button @click="toggleOne(h.id)"
+
+                        <div class="flex justify-between items-center gap-2 pt-2.5 border-t border-gray-100 dark:border-gray-700 flex-wrap">
+                            <!-- SAP Confirm button (mobile) -->
+                            <template v-if="canConfirm">
+                                <button v-if="isSapConfirmed(h)" @click="toggleConfirmSap(h)"
+                                    :disabled="confirmingId === h.id"
+                                    class="flex items-center gap-1.5 py-2 px-3 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-red-100 hover:text-red-600 rounded-xl text-xs font-bold active:scale-95 transition-all disabled:opacity-50 group">
+                                    <ShieldOff class="w-3.5 h-3.5" />
+                                    Batalkan Confirm
+                                </button>
+                                <button v-else @click="toggleConfirmSap(h)"
+                                    :disabled="confirmingId === h.id"
+                                    class="flex items-center gap-1.5 py-2 px-3 border border-dashed border-indigo-300 text-indigo-500 rounded-xl text-xs font-bold hover:bg-indigo-50 active:scale-95 transition-all disabled:opacity-50">
+                                    <ShieldCheck class="w-3.5 h-3.5" />
+                                    Confirm SAP
+                                </button>
+                            </template>
+
+                            <!-- Checkbox / Select button (hanya jika belum confirmed) -->
+                            <button v-if="!isSapConfirmed(h)" @click="toggleOne(h)"
                                 :class="['flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold active:scale-95 transition-all',
                                     selectedIds.has(h.id)
                                         ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
@@ -596,8 +722,9 @@ const setFlow = (val: string) => {
                                 <Square v-else class="w-3.5 h-3.5" />
                                 {{ selectedIds.has(h.id) ? 'Dipilih' : 'Pilih' }}
                             </button>
+
                             <button @click="openDelete(h)"
-                                class="flex items-center gap-1.5 py-2 px-3 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold hover:bg-red-200 active:scale-95 transition-all">
+                                class="flex items-center gap-1.5 py-2 px-3 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold hover:bg-red-200 active:scale-95 transition-all ml-auto">
                                 <Trash2 class="w-3.5 h-3.5" />
                                 {{ isMasuk(h) ? 'Hapus & Kurangi Stok' : 'Hapus & Kembalikan Stok' }}
                             </button>
@@ -616,6 +743,7 @@ const setFlow = (val: string) => {
             </div>
         </div>
 
+        <!-- ── Modal: Export Excel ── -->
         <div v-if="showExportModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
@@ -629,6 +757,14 @@ const setFlow = (val: string) => {
                             <h3 class="text-base font-bold text-gray-900 dark:text-white">Export ke Excel</h3>
                             <p class="text-xs text-gray-500 mt-0.5">{{ selectedCount }} data akan diexport</p>
                         </div>
+                    </div>
+
+                    <!-- Info otomatis confirm SAP -->
+                    <div class="flex items-start gap-2 mb-4 p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                        <BadgeCheck class="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                        <p class="text-xs text-indigo-700 dark:text-indigo-300">
+                            Data yang diexport akan otomatis ditandai <strong>SAP Confirmed</strong> dan tidak dapat diexport ulang.
+                        </p>
                     </div>
 
                     <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 mb-4 space-y-1.5">
@@ -650,13 +786,43 @@ const setFlow = (val: string) => {
                         <button type="button" @click="exportToExcel"
                             class="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-all">
                             <Download class="w-4 h-4" />
-                            Download Excel
+                            Download & Confirm SAP
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- ── Modal: Bulk Confirm SAP ── -->
+        <div v-if="showBulkConfirmModal"
+            class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">
+                <div class="w-10 h-1 bg-gray-200 dark:bg-gray-600 rounded-full mx-auto mt-3 mb-1 sm:hidden"></div>
+                <div class="p-5 text-center">
+                    <div class="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <ShieldCheck class="w-6 h-6 text-indigo-600" />
+                    </div>
+                    <h3 class="text-base font-bold text-gray-900 dark:text-white mb-1">Konfirmasi SAP</h3>
+                    <p class="text-sm text-gray-500 mb-5">
+                        Tandai <strong>{{ selectedCount }} data</strong> sebagai sudah dikonfirmasi ke SAP?<br>
+                        <span class="text-xs text-gray-400">Data yang sudah diconfirm tidak bisa diexport ulang.</span>
+                    </p>
+                    <div class="flex gap-3">
+                        <button @click="showBulkConfirmModal = false"
+                            class="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm active:scale-95 transition-all">
+                            Batal
+                        </button>
+                        <button @click="submitBulkConfirm"
+                            class="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-all">
+                            <ShieldCheck class="w-4 h-4" />
+                            Ya, Confirm SAP
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Modal: Tambah Reguler ── -->
         <div v-if="showRegulerModal"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
@@ -670,7 +836,6 @@ const setFlow = (val: string) => {
                     </button>
                 </div>
                 <div class="p-4 sm:p-5 space-y-4">
-
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Sparepart <span class="text-red-500">*</span></label>
                         <div class="relative">
@@ -783,6 +948,7 @@ const setFlow = (val: string) => {
             </div>
         </div>
 
+        <!-- ── Modal: Delete Confirm ── -->
         <div v-if="showDelModal && selectedH"
             class="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div class="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm shadow-2xl">

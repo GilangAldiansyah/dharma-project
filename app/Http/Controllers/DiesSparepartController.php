@@ -169,7 +169,7 @@ class DiesSparepartController extends Controller
 
     public function historyIndex(Request $request)
     {
-        $query = DiesHistorySparepart::with(['sparepart', 'dies', 'io', 'createdBy'])->latest();
+        $query = DiesHistorySparepart::with(['sparepart', 'dies', 'io', 'createdBy', 'sapConfirmedBy'])->latest();
 
         if ($request->filled('tipe')) {
             $query->where('tipe', $request->tipe);
@@ -202,17 +202,27 @@ class DiesSparepartController extends Controller
             });
         }
 
+        // Filter SAP confirmed
+        if ($request->filled('sap_status')) {
+            if ($request->sap_status === 'confirmed') {
+                $query->whereNotNull('sap_confirmed_at');
+            } elseif ($request->sap_status === 'unconfirmed') {
+                $query->whereNull('sap_confirmed_at');
+            }
+        }
+
         $histories  = $query->paginate(20)->withQueryString();
         $spareparts = DiesSparepart::orderBy('sparepart_name')->get(['id', 'sparepart_name', 'sparepart_code', 'stok', 'unit']);
         $dies       = Dies::orderBy('no_part')->get(['id_sap', 'no_part', 'nama_dies', 'line']);
         $ios        = DiesIo::orderBy('nama')->get(['id', 'nama', 'cc', 'io_number']);
 
         return Inertia::render('Dies/Sparepart/History', [
-            'histories'  => $histories,
-            'spareparts' => $spareparts,
-            'dies'       => $dies,
-            'ios'        => $ios,
-            'filters'    => $request->only('tipe', 'sparepart_id', 'dies_id', 'io_id', 'flow', 'search'),
+            'histories'   => $histories,
+            'spareparts'  => $spareparts,
+            'dies'        => $dies,
+            'ios'         => $ios,
+            'filters'     => $request->only('tipe', 'sparepart_id', 'dies_id', 'io_id', 'flow', 'search', 'sap_status'),
+            'canConfirm' => Auth::user() && (Auth::user()->hasPermission('dies.pic') || Auth::user()->hasPermission('dies.edit')),
         ]);
     }
 
@@ -263,5 +273,43 @@ class DiesSparepartController extends Controller
         });
 
         return back()->with('success', 'Riwayat berhasil dihapus dan stok disesuaikan.');
+    }
+
+public function confirmSap(DiesHistorySparepart $history)
+{
+    if ($history->sap_confirmed_at !== null) {
+        $history->update([
+            'sap_confirmed_at' => null,
+            'sap_confirmed_by' => null,
+        ]);
+
+        return back()->with('success', 'Konfirmasi SAP dibatalkan.');
+    }
+
+    $history->update([
+        'sap_confirmed_at' => now(),
+        'sap_confirmed_by' => Auth::id(),
+    ]);
+
+    return back()->with('success', 'Data berhasil dikonfirmasi ke SAP.');
+}
+    public function bulkConfirmSap(Request $request)
+    {
+        $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => 'required|integer|exists:dies_history_sparepart,id',
+        ]);
+
+        $now    = now();
+        $userId = Auth::id();
+
+        DiesHistorySparepart::whereIn('id', $request->ids)
+            ->whereNull('sap_confirmed_at')
+            ->update([
+                'sap_confirmed_at' => $now,
+                'sap_confirmed_by' => $userId,
+            ]);
+
+        return back()->with('success', count($request->ids) . ' data berhasil dikonfirmasi ke SAP.');
     }
 }

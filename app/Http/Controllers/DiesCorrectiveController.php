@@ -27,6 +27,7 @@ class DiesCorrectiveController extends Controller
         $baseQuery = function ($q) use ($request, $year, $dateFrom, $dateTo, $useDateRange) {
             $q->when($request->status, fn($q) => $q->where('status', $request->status))
               ->when($request->dies_id, fn($q) => $q->where('dies_id', $request->dies_id))
+              ->when($request->line, fn($q) => $q->whereHas('dies', fn($d) => $d->where('line', $request->line)))
               ->when($useDateRange, function ($q) use ($dateFrom, $dateTo) {
                   if ($dateFrom) $q->whereDate('report_date', '>=', $dateFrom);
                   if ($dateTo)   $q->whereDate('report_date', '<=', $dateTo);
@@ -89,6 +90,13 @@ class DiesCorrectiveController extends Controller
         $ios = DiesIo::orderBy('nama')
             ->get(['id', 'nama', 'cc', 'io_number']);
 
+        $lines = Dies::distinct()
+            ->orderBy('line')
+            ->whereNotNull('line')
+            ->where('line', '!=', '')
+            ->pluck('line')
+            ->values();
+
         return Inertia::render('Dies/Corrective/Index', [
             'correctives' => [
                 'data'  => $paginated->items(),
@@ -106,8 +114,9 @@ class DiesCorrectiveController extends Controller
             'diesList'    => $diesList,
             'spareparts'  => $spareparts,
             'ios'         => $ios,
+            'lines'       => $lines,
             'summary'     => $summary,
-            'filters'     => $request->only('search', 'status', 'dies_id', 'month', 'year', 'date_from', 'date_to') + ['year' => (string) $year],
+            'filters'     => $request->only('search', 'status', 'dies_id', 'line', 'month', 'year', 'date_from', 'date_to') + ['year' => (string) $year],
         ]);
     }
 
@@ -336,20 +345,33 @@ class DiesCorrectiveController extends Controller
             ->whereNotNull('ended_at')
             ->sum('duration_minutes');
 
-        if ($repairMinutes === 0) {
+        $closedAt = now();
+        $machineDurationMinutes = $diesCorrective->machine_duration_minutes;
+        $offMachineAt = $diesCorrective->off_machine_at;
+
+        if (!$offMachineAt) {
             $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
                 ? $diesCorrective->report_date
                 : \Carbon\Carbon::parse($diesCorrective->report_date);
-            $repairMinutes = (int) $reportDate->diffInMinutes(now());
+            $machineDurationMinutes = (int) $reportDate->diffInMinutes($closedAt);
+            $offMachineAt = $closedAt;
+            $repairMinutes = null;
+        } else {
+            if ($repairMinutes === 0) {
+                $reportDate = $diesCorrective->report_date instanceof \Carbon\Carbon
+                    ? $diesCorrective->report_date
+                    : \Carbon\Carbon::parse($diesCorrective->report_date);
+                $repairMinutes = (int) $reportDate->diffInMinutes($closedAt);
+            }
         }
 
         $diesCorrective->update([
             'status'                   => 'closed',
             'action'                   => $request->action,
             'closed_by'                => Auth::id(),
-            'closed_at'                => now(),
-            'off_machine_at'           => $diesCorrective->off_machine_at,
-            'machine_duration_minutes' => $diesCorrective->machine_duration_minutes,
+            'closed_at'                => $closedAt,
+            'off_machine_at'           => $offMachineAt,
+            'machine_duration_minutes' => $machineDurationMinutes,
             'repair_duration_minutes'  => $repairMinutes,
         ]);
 
