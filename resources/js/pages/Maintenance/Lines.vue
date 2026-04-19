@@ -124,6 +124,7 @@ const showActiveReportsModal = ref(false);
 const showResetConfirmModal = ref(false);
 const showMachineModal = ref(false);
 const showScheduleModal = ref(false);
+const showConfirmPendingModal = ref(false);
 
 const selectedLine = ref<Line | null>(null);
 const selectedMachines = ref<Machine[]>([]);
@@ -148,6 +149,12 @@ const actionForm = ref({
     user_name: '',
     notes: '',
     problem: '',
+});
+
+const confirmPendingForm = ref({
+    machine_id: null as number | null,
+    problem: '',
+    reported_by: '',
 });
 
 const scheduleForm = ref({
@@ -178,24 +185,20 @@ const calculateCurrentUptime = (line: Line): number => {
     if (line.status === 'paused' && line.current_operation.paused_at) {
         const startedAt = new Date(line.current_operation.started_at);
         const pausedAt = new Date(line.current_operation.paused_at);
-
         const elapsedMs = pausedAt.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
         const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
         const frozenUptime = Math.max(0, elapsedHours - pauseHours);
-
         return baseUptime + frozenUptime;
     }
 
     if (line.status === 'operating') {
         const startedAt = new Date(line.current_operation.started_at);
         const now = new Date();
-
         const elapsedMs = now.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
         const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
         const currentOperationUptime = Math.max(0, elapsedHours - pauseHours);
-
         return baseUptime + currentOperationUptime;
     }
 
@@ -210,12 +213,10 @@ const calculateCurrentOperationTime = (line: Line): number => {
     if (line.status === 'paused' && line.current_operation.paused_at) {
         const startedAt = new Date(line.current_operation.started_at);
         const pausedAt = new Date(line.current_operation.paused_at);
-
         const elapsedMs = pausedAt.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
-        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;  // tambah ini
-        const netHours = Math.max(0, elapsedHours - pauseHours);  // kurangi pause
-
+        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
+        const netHours = Math.max(0, elapsedHours - pauseHours);
         return (line.total_operation_hours ?? 0) + netHours;
     }
 
@@ -224,7 +225,7 @@ const calculateCurrentOperationTime = (line: Line): number => {
         const now = new Date();
         const elapsedMs = now.getTime() - startedAt.getTime();
         const elapsedHours = elapsedMs / (1000 * 60 * 60);
-        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;  // sudah ada ini
+        const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
         return (line.total_operation_hours ?? 0) + Math.max(0, elapsedHours - pauseHours);
     }
 
@@ -267,10 +268,7 @@ const openScheduleModal = (line: Line) => {
 };
 
 const addBreak = () => {
-    scheduleForm.value.schedule_breaks.push({
-        start: '12:00',
-        end: '13:00',
-    });
+    scheduleForm.value.schedule_breaks.push({ start: '12:00', end: '13:00' });
 };
 
 const removeBreak = (index: number) => {
@@ -288,9 +286,7 @@ const submitSchedule = async () => {
             },
             body: JSON.stringify(scheduleForm.value),
         });
-
         const data = await response.json();
-
         if (data.success) {
             showScheduleModal.value = false;
             router.reload({ only: ['lines'] });
@@ -519,6 +515,45 @@ const generateQrCodeForDisplay = async (qrCode: string) => {
 };
 
 const printQrCode = () => window.print();
+
+const openConfirmPendingModal = (line: Line) => {
+    selectedLine.value = line;
+    scannedMachines.value = line.machines;
+    confirmPendingForm.value = { machine_id: null, problem: '', reported_by: '' };
+    showConfirmPendingModal.value = true;
+};
+
+const submitConfirmPending = async () => {
+    if (!selectedLine.value || !confirmPendingForm.value.machine_id) {
+        alert('Pilih mesin yang bermasalah!');
+        return;
+    }
+    try {
+        const response = await fetch('/maintenance/lines/line-stop', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify({
+                line_id: selectedLine.value.id,
+                machine_id: confirmPendingForm.value.machine_id,
+                problem: confirmPendingForm.value.problem,
+                reported_by: confirmPendingForm.value.reported_by || 'System',
+            }),
+        });
+        const data = await response.json();
+        if (data.success) {
+            showConfirmPendingModal.value = false;
+            alert(data.message || 'Line stop dikonfirmasi!');
+            router.reload({ only: ['lines', 'stats'] });
+        } else {
+            alert(data.message || 'Gagal konfirmasi');
+        }
+    } catch {
+        alert('Gagal konfirmasi line stop.');
+    }
+};
 
 const openActionModal = async (mode: typeof scanMode.value, line?: Line) => {
     scanMode.value = mode;
@@ -764,21 +799,19 @@ onMounted(() => {
     refreshInterval = window.setInterval(() => {
         refreshKey.value++;
     }, 1000);
-
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 });
 
 onUnmounted(() => {
     stopCamera();
-
     if (refreshInterval) {
         clearInterval(refreshInterval);
         refreshInterval = null;
     }
-
     document.removeEventListener('fullscreenchange', handleFullscreenChange);
 });
 </script>
+
 <template>
     <Head title="Line - Maintenance" />
     <AppLayout v-if="!isFullscreen" :breadcrumbs="[
@@ -924,7 +957,7 @@ onUnmounted(() => {
                                 Auto-Pause
                             </span>
                             <span v-if="line.pending_line_stop"
-                                @click="openActionModal('line-stop', line)"
+                                @click="openConfirmPendingModal(line)"
                                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer bg-red-500 text-white animate-pulse hover:bg-red-600 transition-all">
                                 <AlertCircle class="w-3.5 h-3.5" />
                                 Confirm Line Stop
@@ -1035,6 +1068,7 @@ onUnmounted(() => {
             </div>
         </div>
     </AppLayout>
+
     <div v-else :class="['fixed inset-0 overflow-auto', fullscreenDarkMode ? 'bg-gray-900' : 'bg-gray-50']">
         <div class="min-h-screen p-8">
             <div class="flex justify-between items-center mb-8">
@@ -1083,9 +1117,7 @@ onUnmounted(() => {
                     <div class="space-y-2">
                         <div :class="['flex justify-between text-sm', fullscreenDarkMode ? 'text-gray-300' : 'text-gray-700']">
                             <span>Operation:</span>
-                            <span class="font-mono font-bold text-blue-500">
-                                {{ formatDuration(calculateCurrentOperationTime(line)) }}
-                            </span>
+                            <span class="font-mono font-bold text-blue-500">{{ formatDuration(calculateCurrentOperationTime(line)) }}</span>
                         </div>
                         <div :class="['flex justify-between text-sm', fullscreenDarkMode ? 'text-gray-300' : 'text-gray-700']">
                             <span>Repair:</span>
@@ -1100,6 +1132,44 @@ onUnmounted(() => {
             </div>
         </div>
     </div>
+
+    <Dialog :open="showConfirmPendingModal" @update:open="showConfirmPendingModal = $event">
+        <DialogContent class="max-w-lg">
+            <DialogHeader>
+                <DialogTitle class="flex items-center gap-2">
+                    <AlertCircle class="w-5 h-5 text-red-600" />
+                    Konfirmasi Line Stop — {{ selectedLine?.line_name }}
+                </DialogTitle>
+                <DialogDescription>
+                    ESP32 telah mengirim sinyal line stop. Isi detail untuk melanjutkan.
+                </DialogDescription>
+            </DialogHeader>
+            <form @submit.prevent="submitConfirmPending" class="space-y-4 mt-4">
+                <div>
+                    <label class="block text-sm font-semibold mb-2">Mesin Bermasalah <span class="text-red-600">*</span></label>
+                    <select v-model="confirmPendingForm.machine_id" required class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800">
+                        <option :value="null">Pilih Mesin</option>
+                        <option v-for="machine in scannedMachines" :key="machine.id" :value="machine.id">
+                            {{ machine.machine_name }}
+                        </option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2">Deskripsi Masalah</label>
+                    <textarea v-model="confirmPendingForm.problem" rows="3" class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800" placeholder="Jelaskan masalah yang terjadi..."></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2">Dilaporkan Oleh</label>
+                    <input v-model="confirmPendingForm.reported_by" type="text" class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800" />
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" @click="showConfirmPendingModal = false" class="flex-1 px-4 py-2.5 border-2 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all">Batal</button>
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all">Konfirmasi Line Stop</button>
+                </div>
+            </form>
+        </DialogContent>
+    </Dialog>
+
     <Dialog :open="showScheduleModal" @update:open="showScheduleModal = $event">
         <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1108,84 +1178,47 @@ onUnmounted(() => {
                     Atur jadwal operasi dan break time untuk auto-pause
                 </DialogDescription>
             </DialogHeader>
-
             <form @submit.prevent="submitSchedule" class="space-y-6 mt-4">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-sm font-semibold mb-2">Jam Mulai</label>
-                        <input
-                            v-model="scheduleForm.schedule_start_time"
-                            type="time"
-                            required
-                            class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800"
-                        />
+                        <input v-model="scheduleForm.schedule_start_time" type="time" required class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800" />
                     </div>
                     <div>
                         <label class="block text-sm font-semibold mb-2">Jam Selesai</label>
-                        <input
-                            v-model="scheduleForm.schedule_end_time"
-                            type="time"
-                            required
-                            class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800"
-                        />
+                        <input v-model="scheduleForm.schedule_end_time" type="time" required class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800" />
                     </div>
                 </div>
-
                 <div>
                     <div class="flex justify-between items-center mb-3">
                         <label class="block text-sm font-semibold">Break Time (Auto-Pause)</label>
-                        <button
-                            type="button"
-                            @click="addBreak"
-                            class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-all"
-                        >
+                        <button type="button" @click="addBreak" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-all">
                             + Tambah Break
                         </button>
                     </div>
-
                     <div v-if="scheduleForm.schedule_breaks.length > 0" class="space-y-3">
-                        <div
-                            v-for="(breakItem, index) in scheduleForm.schedule_breaks"
-                            :key="index"
-                            class="flex gap-3 items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                        >
+                        <div v-for="(breakItem, index) in scheduleForm.schedule_breaks" :key="index" class="flex gap-3 items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                             <div class="flex-1 grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Mulai</label>
-                                    <input
-                                        v-model="breakItem.start"
-                                        type="time"
-                                        required
-                                        class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700"
-                                    />
+                                    <input v-model="breakItem.start" type="time" required class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700" />
                                 </div>
                                 <div>
                                     <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Selesai</label>
-                                    <input
-                                        v-model="breakItem.end"
-                                        type="time"
-                                        required
-                                        class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700"
-                                    />
+                                    <input v-model="breakItem.end" type="time" required class="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-700" />
                                 </div>
                             </div>
-                            <button
-                                type="button"
-                                @click="removeBreak(index)"
-                                class="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-all"
-                            >
+                            <button type="button" @click="removeBreak(index)" class="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                             </button>
                         </div>
                     </div>
-
                     <div v-else class="text-center py-8 text-gray-500 bg-gray-50 dark:bg-gray-800 rounded-lg">
                         <p class="text-sm">Tidak ada break time. Klik "Tambah Break" untuk menambahkan.</p>
                     </div>
                 </div>
-
                 <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4">
                     <div class="flex gap-3">
                         <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1197,21 +1230,9 @@ onUnmounted(() => {
                         </div>
                     </div>
                 </div>
-
                 <div class="flex gap-3">
-                    <button
-                        type="button"
-                        @click="showScheduleModal = false"
-                        class="flex-1 px-4 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
-                    >
-                        Batal
-                    </button>
-                    <button
-                        type="submit"
-                        class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
-                    >
-                        Simpan Schedule
-                    </button>
+                    <button type="button" @click="showScheduleModal = false" class="flex-1 px-4 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all">Batal</button>
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all">Simpan Schedule</button>
                 </div>
             </form>
         </DialogContent>
@@ -1391,9 +1412,7 @@ onUnmounted(() => {
                     </div>
                 </div>
                 <div class="flex gap-2 mt-6 print:hidden">
-                    <button @click="showQrModal = false" class="flex-1 px-4 py-2.5 border-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 font-semibold transition-all">
-                        Tutup
-                    </button>
+                    <button @click="showQrModal = false" class="flex-1 px-4 py-2.5 border-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 font-semibold transition-all">Tutup</button>
                     <button @click="printQrCode" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:shadow-lg flex items-center justify-center gap-2">
                         <Printer class="w-4 h-4" />
                         Cetak
