@@ -3,10 +3,9 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import {
     Search, Factory, Plus, Edit, Printer, Activity, Clock, AlertCircle, Wrench,
-    PlayCircle, Loader2, PauseCircle, StopCircle, RotateCcw,
+    PlayCircle, PauseCircle, StopCircle, RotateCcw,
     CheckCircle, Archive, Maximize2, Minimize2, Sun, Moon, Eye, Trash2, Calendar
 } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -118,7 +117,6 @@ const fullscreenDarkMode = ref(true);
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const showQrModal = ref(false);
-const showQrScanModal = ref(false);
 const showConfirmActionModal = ref(false);
 const showActiveReportsModal = ref(false);
 const showResetConfirmModal = ref(false);
@@ -130,16 +128,8 @@ const selectedLine = ref<Line | null>(null);
 const selectedMachines = ref<Machine[]>([]);
 const activeReports = ref<MaintenanceReport[]>([]);
 
-const videoRef = ref<HTMLVideoElement | null>(null);
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-const isScanning = ref(false);
-const scanError = ref('');
-const scannedLine = ref<Line | null>(null);
-const scannedMachines = ref<Machine[]>([]);
-const isCameraActive = ref(false);
-const scanMode = ref<'start' | 'line-stop' | 'pause' | 'resume' | 'stop' | 'complete'>('start');
-let stream: MediaStream | null = null;
-let scanInterval: number | null = null;
+type ScanMode = 'start' | 'line-stop' | 'pause' | 'resume' | 'stop' | 'complete';
+const scanMode = ref<ScanMode>('start');
 
 const actionForm = ref({
     line_id: null as number | null,
@@ -155,6 +145,8 @@ const confirmPendingForm = ref({
     machine_id: null as number | null,
     problem: '',
     reported_by: '',
+    immediately_complete: false,
+    completed_by: '',
 });
 
 const scheduleForm = ref({
@@ -177,11 +169,7 @@ let refreshInterval: number | null = null;
 
 const calculateCurrentUptime = (line: Line): number => {
     const baseUptime = line.uptime_hours ?? 0;
-
-    if (!line.current_operation) {
-        return baseUptime;
-    }
-
+    if (!line.current_operation) return baseUptime;
     if (line.status === 'paused' && line.current_operation.paused_at) {
         const startedAt = new Date(line.current_operation.started_at);
         const pausedAt = new Date(line.current_operation.paused_at);
@@ -191,7 +179,6 @@ const calculateCurrentUptime = (line: Line): number => {
         const frozenUptime = Math.max(0, elapsedHours - pauseHours);
         return baseUptime + frozenUptime;
     }
-
     if (line.status === 'operating') {
         const startedAt = new Date(line.current_operation.started_at);
         const now = new Date();
@@ -201,15 +188,11 @@ const calculateCurrentUptime = (line: Line): number => {
         const currentOperationUptime = Math.max(0, elapsedHours - pauseHours);
         return baseUptime + currentOperationUptime;
     }
-
     return baseUptime;
 };
 
 const calculateCurrentOperationTime = (line: Line): number => {
-    if (!line.current_operation) {
-        return line.total_operation_hours ?? 0;
-    }
-
+    if (!line.current_operation) return line.total_operation_hours ?? 0;
     if (line.status === 'paused' && line.current_operation.paused_at) {
         const startedAt = new Date(line.current_operation.started_at);
         const pausedAt = new Date(line.current_operation.paused_at);
@@ -219,7 +202,6 @@ const calculateCurrentOperationTime = (line: Line): number => {
         const netHours = Math.max(0, elapsedHours - pauseHours);
         return (line.total_operation_hours ?? 0) + netHours;
     }
-
     if (line.status === 'operating' || line.status === 'maintenance') {
         const startedAt = new Date(line.current_operation.started_at);
         const now = new Date();
@@ -228,7 +210,6 @@ const calculateCurrentOperationTime = (line: Line): number => {
         const pauseHours = (line.current_operation.total_pause_minutes ?? 0) / 60;
         return (line.total_operation_hours ?? 0) + Math.max(0, elapsedHours - pauseHours);
     }
-
     return line.total_operation_hours ?? 0;
 };
 
@@ -294,8 +275,7 @@ const submitSchedule = async () => {
         } else {
             alert(data.message || 'Gagal update schedule');
         }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (error) {
+    } catch {
         alert('Terjadi kesalahan saat update schedule');
     }
 };
@@ -338,13 +318,13 @@ const getStatusText = (status: string) => {
 };
 
 const getScanModeConfig = () => {
-    const configs = {
-        'start': { title: 'Start Operation', color: 'green', icon: PlayCircle, description: 'Scan QR Code LINE untuk memulai operasi.' },
-        'line-stop': { title: 'Line Stop', color: 'red', icon: AlertCircle, description: 'Scan QR Code LINE untuk line stop.' },
-        'pause': { title: 'Pause Operation', color: 'blue', icon: PauseCircle, description: 'Scan QR Code LINE untuk pause operasi.' },
-        'resume': { title: 'Resume Operation', color: 'green', icon: PlayCircle, description: 'Scan QR Code LINE untuk melanjutkan operasi.' },
-        'stop': { title: 'Stop Operation', color: 'orange', icon: StopCircle, description: 'Scan QR Code LINE untuk menghentikan operasi.' },
-        'complete': { title: 'Complete Maintenance', color: 'emerald', icon: CheckCircle, description: 'Scan QR Code LINE untuk menyelesaikan perbaikan.' },
+    const configs: Record<ScanMode, { title: string; color: string; icon: any; description: string }> = {
+        'start': { title: 'Start Operation', color: 'green', icon: PlayCircle, description: 'Mulai operasi line.' },
+        'line-stop': { title: 'Line Stop', color: 'red', icon: AlertCircle, description: 'Konfirmasi line stop.' },
+        'pause': { title: 'Pause Operation', color: 'blue', icon: PauseCircle, description: 'Pause operasi line.' },
+        'resume': { title: 'Resume Operation', color: 'green', icon: PlayCircle, description: 'Lanjutkan operasi line.' },
+        'stop': { title: 'Stop Operation', color: 'orange', icon: StopCircle, description: 'Hentikan operasi line.' },
+        'complete': { title: 'Complete Maintenance', color: 'emerald', icon: CheckCircle, description: 'Selesaikan perbaikan.' },
     };
     return configs[scanMode.value];
 };
@@ -391,13 +371,11 @@ const submitCreate = () => {
         plant: createForm.plant,
         description: createForm.description,
     };
-
     if (showNewAreaInput.value && editNewAreaName.value.trim()) {
         data.new_area_name = editNewAreaName.value.trim();
     } else if (editAreaId.value) {
         data.area_id = editAreaId.value;
     }
-
     router.post('/maintenance/lines', data, {
         preserveScroll: true,
         onSuccess: () => {
@@ -409,19 +387,16 @@ const submitCreate = () => {
 
 const submitEdit = () => {
     if (!selectedLine.value) return;
-
     const data: any = {
         line_name: editForm.line_name,
         plant: editForm.plant,
         description: editForm.description,
     };
-
     if (showNewAreaInput.value && editNewAreaName.value.trim()) {
         data.new_area_name = editNewAreaName.value.trim();
     } else if (editAreaId.value) {
         data.area_id = editAreaId.value;
     }
-
     router.put(`/maintenance/lines/${selectedLine.value.id}`, data, {
         preserveScroll: true,
         onSuccess: () => {
@@ -518,8 +493,14 @@ const printQrCode = () => window.print();
 
 const openConfirmPendingModal = (line: Line) => {
     selectedLine.value = line;
-    scannedMachines.value = line.machines;
-    confirmPendingForm.value = { machine_id: null, problem: '', reported_by: '' };
+    selectedMachines.value = line.machines;
+    confirmPendingForm.value = {
+        machine_id: null,
+        problem: '',
+        reported_by: '',
+        immediately_complete: false,
+        completed_by: '',
+    };
     showConfirmPendingModal.value = true;
 };
 
@@ -540,6 +521,8 @@ const submitConfirmPending = async () => {
                 machine_id: confirmPendingForm.value.machine_id,
                 problem: confirmPendingForm.value.problem,
                 reported_by: confirmPendingForm.value.reported_by || 'System',
+                immediately_complete: confirmPendingForm.value.immediately_complete,
+                completed_by: confirmPendingForm.value.completed_by || confirmPendingForm.value.reported_by || 'System',
             }),
         });
         const data = await response.json();
@@ -555,43 +538,36 @@ const submitConfirmPending = async () => {
     }
 };
 
-const openActionModal = async (mode: typeof scanMode.value, line?: Line) => {
+const openActionModal = async (mode: ScanMode, line: Line) => {
     scanMode.value = mode;
-    if (line) {
-        scannedLine.value = line;
-        scannedMachines.value = line.machines;
-        actionForm.value.line_id = line.id;
+    selectedLine.value = line;
+    selectedMachines.value = line.machines;
+    actionForm.value.line_id = line.id;
 
-        if (mode === 'pause' || mode === 'resume' || mode === 'stop') {
-            actionForm.value.operation_id = line.current_operation?.id ?? null;
-        }
-        if (mode === 'complete') {
-            try {
-                const response = await fetch(`/maintenance/lines/${line.id}/active-reports`);
-                const data = await response.json();
-                if (data.success && data.data.length > 0) {
-                    activeReports.value = data.data;
-                } else {
-                    alert('Tidak ada laporan maintenance aktif!');
-                    return;
-                }
-            } catch {
-                alert('Gagal mengambil data laporan!');
+    if (mode === 'pause' || mode === 'resume' || mode === 'stop') {
+        actionForm.value.operation_id = line.current_operation?.id ?? null;
+    }
+
+    if (mode === 'complete') {
+        try {
+            const response = await fetch(`/maintenance/lines/${line.id}/active-reports`);
+            const data = await response.json();
+            if (data.success && data.data.length > 0) {
+                activeReports.value = data.data;
+            } else {
+                alert('Tidak ada laporan maintenance aktif!');
                 return;
             }
+        } catch {
+            alert('Gagal mengambil data laporan!');
+            return;
         }
-        showConfirmActionModal.value = true;
-    } else {
-        resetScanState();
-        showQrScanModal.value = true;
-        await startCamera();
     }
+
+    showConfirmActionModal.value = true;
 };
 
-const resetScanState = () => {
-    scanError.value = '';
-    scannedLine.value = null;
-    scannedMachines.value = [];
+const resetActionForm = () => {
     actionForm.value = {
         line_id: null,
         operation_id: null,
@@ -601,120 +577,6 @@ const resetScanState = () => {
         notes: '',
         problem: '',
     };
-};
-
-const closeQrScanModal = () => {
-    stopCamera();
-    showQrScanModal.value = false;
-    resetScanState();
-};
-
-const startCamera = async () => {
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        if (videoRef.value) {
-            videoRef.value.srcObject = stream;
-            await videoRef.value.play();
-            isCameraActive.value = true;
-            startQrScan();
-        }
-    } catch {
-        scanError.value = 'Tidak dapat mengakses kamera.';
-    }
-};
-
-const stopCamera = () => {
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-    }
-    if (scanInterval) {
-        clearInterval(scanInterval);
-        scanInterval = null;
-    }
-    isCameraActive.value = false;
-};
-
-const startQrScan = () => {
-    scanInterval = window.setInterval(() => {
-        if (videoRef.value && canvasRef.value && isCameraActive.value) {
-            const canvas = canvasRef.value;
-            const video = videoRef.value;
-            const ctx = canvas.getContext('2d');
-            if (ctx && video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code) processQrCode(code.data);
-            }
-        }
-    }, 300);
-};
-
-const processQrCode = async (qrData: string) => {
-    if (isScanning.value) return;
-    isScanning.value = true;
-    scanError.value = '';
-    try {
-        const response = await fetch('/maintenance/lines/scan-qr', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-            },
-            body: JSON.stringify({ qr_code: qrData }),
-        });
-        const data = await response.json();
-        if (data.success) {
-            scannedLine.value = data.data.line;
-            scannedMachines.value = data.data.machines;
-            if (scanMode.value === 'start' && data.data.line.has_running_operation) {
-                scanError.value = 'Line sudah dalam operasi!';
-                setTimeout(() => { isScanning.value = false; }, 2000);
-                return;
-            } else if ((scanMode.value === 'pause' || scanMode.value === 'resume' || scanMode.value === 'stop') && !data.data.line.has_running_operation) {
-                scanError.value = 'Line tidak memiliki operasi!';
-                setTimeout(() => { isScanning.value = false; }, 2000);
-                return;
-            } else if (scanMode.value === 'complete' && data.data.line.status !== 'maintenance') {
-                scanError.value = 'Line tidak dalam maintenance!';
-                setTimeout(() => { isScanning.value = false; }, 2000);
-                return;
-            }
-            if (scanMode.value === 'pause' || scanMode.value === 'resume' || scanMode.value === 'stop') {
-                actionForm.value.operation_id = data.data.line.current_operation_id;
-            }
-            if (scanMode.value === 'complete') {
-                try {
-                    const reportsResponse = await fetch(`/maintenance/lines/${data.data.line.id}/active-reports`);
-                    const reportsData = await reportsResponse.json();
-                    if (reportsData.success && reportsData.data.length > 0) {
-                        activeReports.value = reportsData.data;
-                    } else {
-                        scanError.value = 'Tidak ada laporan maintenance aktif!';
-                        setTimeout(() => { isScanning.value = false; }, 2000);
-                        return;
-                    }
-                } catch {
-                    scanError.value = 'Gagal mengambil data laporan!';
-                    setTimeout(() => { isScanning.value = false; }, 2000);
-                    return;
-                }
-            }
-            stopCamera();
-            showQrScanModal.value = false;
-            actionForm.value.line_id = data.data.line.id;
-            showConfirmActionModal.value = true;
-        } else {
-            scanError.value = data.message || 'Line tidak ditemukan';
-        }
-    } catch {
-        scanError.value = 'Gagal memproses QR Code.';
-    } finally {
-        setTimeout(() => { isScanning.value = false; }, 1000);
-    }
 };
 
 const submitAction = async () => {
@@ -760,7 +622,7 @@ const submitAction = async () => {
         const data = await response.json();
         if (data.success) {
             showConfirmActionModal.value = false;
-            resetScanState();
+            resetActionForm();
             alert(data.message || 'Aksi berhasil!');
             router.reload({ only: ['lines', 'stats'] });
         } else {
@@ -803,7 +665,6 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-    stopCamera();
     if (refreshInterval) {
         clearInterval(refreshInterval);
         refreshInterval = null;
@@ -886,35 +747,6 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-5 shadow-lg">
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                    <button @click="openActionModal('start')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <PlayCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Start</span>
-                    </button>
-                    <button @click="openActionModal('pause')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-blue-500 to-cyan-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <PauseCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Pause</span>
-                    </button>
-                    <button @click="openActionModal('resume')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-teal-500 to-green-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <PlayCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Resume</span>
-                    </button>
-                    <button @click="openActionModal('stop')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <StopCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Stop</span>
-                    </button>
-                    <button @click="openActionModal('line-stop')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-red-500 to-rose-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <AlertCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Line Stop</span>
-                    </button>
-                    <button @click="openActionModal('complete')" class="flex flex-col items-center gap-2 p-4 bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl hover:shadow-xl active:scale-95 transition-all duration-300">
-                        <CheckCircle class="w-8 h-8" />
-                        <span class="text-sm font-bold">Complete</span>
-                    </button>
-                </div>
-            </div>
-
             <div class="flex gap-3 flex-wrap">
                 <div class="relative flex-1 min-w-[200px] max-w-md">
                     <input v-model="searchQuery" @keyup.enter="search" type="text" placeholder="Cari line, kode..." class="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all" />
@@ -978,14 +810,12 @@ onUnmounted(() => {
                                 <div class="text-[10px] text-blue-600 dark:text-blue-400 font-semibold mt-1 opacity-0 group-hover/machine:opacity-100 transition-opacity">Klik untuk detail</div>
                             </div>
                         </button>
-
                         <div class="text-center p-3 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl">
                             <div class="text-xs text-gray-600 dark:text-gray-400 font-medium">Uptime</div>
                             <div class="text-xl font-bold text-green-600 mt-3">
                                 {{ formatDuration(calculateCurrentUptime(line)) }}
                             </div>
                         </div>
-
                         <div class="text-center p-3 bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20 rounded-xl">
                             <div class="text-xs text-gray-600 dark:text-gray-400 font-medium">Failures</div>
                             <div class="text-2xl font-bold text-red-600 mt-1">{{ line.total_failures }}</div>
@@ -999,9 +829,7 @@ onUnmounted(() => {
                     <div class="space-y-2 mb-4 text-sm">
                         <div class="flex justify-between">
                             <span class="text-gray-600 dark:text-gray-400">Operation:</span>
-                            <span class="font-mono font-semibold text-blue-600">
-                                {{ formatDuration(calculateCurrentOperationTime(line)) }}
-                            </span>
+                            <span class="font-mono font-semibold text-blue-600">{{ formatDuration(calculateCurrentOperationTime(line)) }}</span>
                         </div>
                         <div class="flex justify-between">
                             <span class="text-gray-600 dark:text-gray-400">Repair:</span>
@@ -1105,9 +933,7 @@ onUnmounted(() => {
                         </div>
                         <div :class="['text-center p-2 rounded-xl', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-100']">
                             <div :class="['text-xs', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">Uptime</div>
-                            <div class="text-xs font-bold text-green-500 mt-1">
-                                {{ formatDuration(calculateCurrentUptime(line)) }}
-                            </div>
+                            <div class="text-xs font-bold text-green-500 mt-1">{{ formatDuration(calculateCurrentUptime(line)) }}</div>
                         </div>
                         <div :class="['text-center p-2 rounded-xl', fullscreenDarkMode ? 'bg-gray-700' : 'bg-gray-100']">
                             <div :class="['text-xs', fullscreenDarkMode ? 'text-gray-400' : 'text-gray-600']">Fail</div>
@@ -1149,7 +975,7 @@ onUnmounted(() => {
                     <label class="block text-sm font-semibold mb-2">Mesin Bermasalah <span class="text-red-600">*</span></label>
                     <select v-model="confirmPendingForm.machine_id" required class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800">
                         <option :value="null">Pilih Mesin</option>
-                        <option v-for="machine in scannedMachines" :key="machine.id" :value="machine.id">
+                        <option v-for="machine in selectedMachines" :key="machine.id" :value="machine.id">
                             {{ machine.machine_name }}
                         </option>
                     </select>
@@ -1162,9 +988,33 @@ onUnmounted(() => {
                     <label class="block text-sm font-semibold mb-2">Dilaporkan Oleh</label>
                     <input v-model="confirmPendingForm.reported_by" type="text" class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800" />
                 </div>
+
+                <div :class="['border-2 rounded-xl p-4 transition-all duration-200', confirmPendingForm.immediately_complete ? 'border-green-400 bg-green-50 dark:bg-green-900/20 dark:border-green-700' : 'border-gray-200 dark:border-gray-700']">
+                    <label class="flex items-start gap-3 cursor-pointer">
+                        <input type="checkbox" v-model="confirmPendingForm.immediately_complete" class="mt-0.5 w-4 h-4 rounded accent-green-600 flex-shrink-0" />
+                        <div>
+                            <div class="font-semibold text-sm text-gray-900 dark:text-white">Langsung selesaikan perbaikan</div>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Centang jika leader dapat langsung memperbaiki tanpa memanggil teknisi</div>
+                        </div>
+                    </label>
+                    <div v-if="confirmPendingForm.immediately_complete" class="mt-3 pt-3 border-t border-green-200 dark:border-green-700">
+                        <label class="block text-sm font-semibold mb-2 text-gray-900 dark:text-white">Diselesaikan Oleh</label>
+                        <input
+                            v-model="confirmPendingForm.completed_by"
+                            type="text"
+                            class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800 border-green-300 dark:border-green-700 focus:border-green-500 focus:ring-2 focus:ring-green-200"
+                            :placeholder="confirmPendingForm.reported_by || 'Nama yang memperbaiki...'"
+                        />
+                    </div>
+                </div>
+
                 <div class="flex gap-2">
                     <button type="button" @click="showConfirmPendingModal = false" class="flex-1 px-4 py-2.5 border-2 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all">Batal</button>
-                    <button type="submit" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all">Konfirmasi Line Stop</button>
+                    <button type="submit" :class="['flex-1 px-4 py-2.5 text-white rounded-xl font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2', confirmPendingForm.immediately_complete ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-rose-600']">
+                        <CheckCircle v-if="confirmPendingForm.immediately_complete" class="w-4 h-4" />
+                        <AlertCircle v-else class="w-4 h-4" />
+                        {{ confirmPendingForm.immediately_complete ? 'Konfirmasi & Selesaikan' : 'Konfirmasi Line Stop' }}
+                    </button>
                 </div>
             </form>
         </DialogContent>
@@ -1174,9 +1024,7 @@ onUnmounted(() => {
         <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
                 <DialogTitle>Set Schedule - {{ selectedLine?.line_name }}</DialogTitle>
-                <DialogDescription>
-                    Atur jadwal operasi dan break time untuk auto-pause
-                </DialogDescription>
+                <DialogDescription>Atur jadwal operasi dan break time untuk auto-pause</DialogDescription>
             </DialogHeader>
             <form @submit.prevent="submitSchedule" class="space-y-6 mt-4">
                 <div class="grid grid-cols-2 gap-4">
@@ -1192,9 +1040,7 @@ onUnmounted(() => {
                 <div>
                     <div class="flex justify-between items-center mb-3">
                         <label class="block text-sm font-semibold">Break Time (Auto-Pause)</label>
-                        <button type="button" @click="addBreak" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-all">
-                            + Tambah Break
-                        </button>
+                        <button type="button" @click="addBreak" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-all">+ Tambah Break</button>
                     </div>
                     <div v-if="scheduleForm.schedule_breaks.length > 0" class="space-y-3">
                         <div v-for="(breakItem, index) in scheduleForm.schedule_breaks" :key="index" class="flex gap-3 items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -1209,9 +1055,7 @@ onUnmounted(() => {
                                 </div>
                             </div>
                             <button type="button" @click="removeBreak(index)" class="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                         </div>
                     </div>
@@ -1221,12 +1065,10 @@ onUnmounted(() => {
                 </div>
                 <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4">
                     <div class="flex gap-3">
-                        <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+                        <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         <div class="text-sm text-blue-800 dark:text-blue-300">
                             <p class="font-semibold mb-1">Auto-Pause System</p>
-                            <p>System akan otomatis pause operasi saat break time dan resume setelah break selesai. Total waktu pause akan tercatat dan tidak mempengaruhi perhitungan performa.</p>
+                            <p>System akan otomatis pause operasi saat break time dan resume setelah break selesai.</p>
                         </div>
                     </div>
                 </div>
@@ -1245,9 +1087,7 @@ onUnmounted(() => {
                     <Wrench class="w-5 h-5 text-blue-600" />
                     Daftar Mesin
                 </DialogTitle>
-                <DialogDescription v-if="selectedLine">
-                    {{ selectedLine.line_name }} - Total {{ selectedMachines.length }} Mesin
-                </DialogDescription>
+                <DialogDescription v-if="selectedLine">{{ selectedLine.line_name }} - Total {{ selectedMachines.length }} Mesin</DialogDescription>
             </DialogHeader>
             <div class="mt-4">
                 <div v-if="selectedMachines.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1288,31 +1128,6 @@ onUnmounted(() => {
         </DialogContent>
     </Dialog>
 
-    <Dialog :open="showQrScanModal" @update:open="val => !val && closeQrScanModal()">
-        <DialogContent class="max-w-lg">
-            <DialogHeader>
-                <DialogTitle class="flex items-center gap-2">
-                    <component :is="getScanModeConfig().icon" class="w-5 h-5" />
-                    Scan QR - {{ getScanModeConfig().title }}
-                </DialogTitle>
-            </DialogHeader>
-            <div class="space-y-4 mt-4">
-                <div class="relative bg-black rounded-lg overflow-hidden" style="aspect-ratio: 4/3;">
-                    <video ref="videoRef" class="w-full h-full object-cover" playsinline></video>
-                    <canvas ref="canvasRef" class="hidden"></canvas>
-                    <div v-if="!isCameraActive" class="absolute inset-0 flex items-center justify-center bg-gray-900">
-                        <Loader2 class="w-12 h-12 text-white animate-spin" />
-                    </div>
-                    <div v-if="isScanning" class="absolute inset-0 flex items-center justify-center bg-green-500/20">
-                        <div class="bg-green-600 text-white px-4 py-2 rounded-lg font-semibold">✓ QR Code Terdeteksi!</div>
-                    </div>
-                </div>
-                <p v-if="scanError" class="text-red-500 text-sm text-center font-medium bg-red-50 dark:bg-red-900/20 p-2 rounded">⚠️ {{ scanError }}</p>
-                <button @click="closeQrScanModal" class="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 font-medium transition-all">Tutup</button>
-            </div>
-        </DialogContent>
-    </Dialog>
-
     <Dialog :open="showConfirmActionModal" @update:open="showConfirmActionModal = $event">
         <DialogContent class="max-w-lg">
             <DialogHeader>
@@ -1322,9 +1137,9 @@ onUnmounted(() => {
                 </DialogTitle>
             </DialogHeader>
             <form @submit.prevent="submitAction" class="space-y-4 mt-4">
-                <div v-if="scannedLine" class="border-2 rounded-xl p-4 bg-blue-50 dark:bg-blue-900/20">
-                    <div class="font-semibold mb-2">{{ scannedLine.line_name }}</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">{{ scannedLine.line_code }} - {{ scannedLine.plant }}</div>
+                <div v-if="selectedLine" class="border-2 rounded-xl p-4 bg-blue-50 dark:bg-blue-900/20">
+                    <div class="font-semibold mb-2">{{ selectedLine.line_name }}</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400">{{ selectedLine.line_code }} - {{ selectedLine.plant }}</div>
                 </div>
                 <div v-if="scanMode === 'complete' && activeReports.length > 0">
                     <label class="block text-sm font-semibold mb-2">Pilih Laporan <span class="text-red-600">*</span></label>
@@ -1343,7 +1158,7 @@ onUnmounted(() => {
                     <label class="block text-sm font-semibold mb-2">Mesin Bermasalah <span class="text-red-600">*</span></label>
                     <select v-model="actionForm.machine_id" required class="w-full rounded-xl border-2 px-3 py-2 dark:bg-gray-800">
                         <option value="">Pilih Mesin</option>
-                        <option v-for="machine in scannedMachines" :key="machine.id" :value="machine.id">{{ machine.machine_name }}</option>
+                        <option v-for="machine in selectedMachines" :key="machine.id" :value="machine.id">{{ machine.machine_name }}</option>
                     </select>
                 </div>
                 <div v-if="scanMode === 'line-stop'">
@@ -1393,9 +1208,7 @@ onUnmounted(() => {
         <DialogContent class="max-w-md print:max-w-full print:shadow-none print:border-0">
             <DialogHeader class="print:hidden">
                 <DialogTitle>QR Code Line</DialogTitle>
-                <DialogDescription v-if="selectedLine">
-                    {{ selectedLine.line_code }} - {{ selectedLine.line_name }}
-                </DialogDescription>
+                <DialogDescription v-if="selectedLine">{{ selectedLine.line_code }} - {{ selectedLine.line_name }}</DialogDescription>
             </DialogHeader>
             <div class="mt-4 print:mt-0">
                 <div class="text-center print:py-8">
@@ -1530,20 +1343,10 @@ onUnmounted(() => {
 
 <style scoped>
 @media print {
-    body * {
-        visibility: hidden;
-    }
-    #qrcode-display,
-    #qrcode-display * {
-        visibility: visible;
-    }
-    .print\:block {
-        display: block !important;
-        visibility: visible !important;
-    }
-    .print\:hidden {
-        display: none !important;
-    }
+    body * { visibility: hidden; }
+    #qrcode-display, #qrcode-display * { visibility: visible; }
+    .print\:block { display: block !important; visibility: visible !important; }
+    .print\:hidden { display: none !important; }
     [role="dialog"] {
         position: absolute !important;
         left: 50% !important;
@@ -1554,8 +1357,6 @@ onUnmounted(() => {
         width: auto !important;
         max-width: 100% !important;
     }
-    [role="dialog"] * {
-        visibility: visible !important;
-    }
+    [role="dialog"] * { visibility: visible !important; }
 }
 </style>

@@ -604,10 +604,12 @@ class LineController extends Controller
     public function lineStop(Request $request)
     {
         $validated = $request->validate([
-            'line_id'     => 'required|exists:lines,id',
-            'machine_id'  => 'required|exists:machines,id',
-            'problem'     => 'nullable|string',
-            'reported_by' => 'nullable|string|max:100',
+            'line_id'              => 'required|exists:lines,id',
+            'machine_id'           => 'required|exists:machines,id',
+            'problem'              => 'nullable|string',
+            'reported_by'          => 'nullable|string|max:100',
+            'immediately_complete' => 'nullable|boolean',
+            'completed_by'         => 'nullable|string|max:100',
         ]);
 
         DB::beginTransaction();
@@ -635,11 +637,22 @@ class LineController extends Controller
                 ? $line->last_line_stop
                 : now();
 
-            $line->update([
-                'status'            => 'maintenance',
-                'last_line_stop'    => $lineStoppedAt,
-                'pending_line_stop' => false,
-            ]);
+            $immediatelyComplete = filter_var($validated['immediately_complete'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $completedBy = $validated['completed_by'] ?? $validated['reported_by'] ?? 'System';
+
+            if ($immediatelyComplete) {
+                $line->update([
+                    'status'               => 'operating',
+                    'last_operation_start' => now(),
+                    'pending_line_stop'    => false,
+                ]);
+            } else {
+                $line->update([
+                    'status'            => 'maintenance',
+                    'last_line_stop'    => $lineStoppedAt,
+                    'pending_line_stop' => false,
+                ]);
+            }
 
             $report = MaintenanceReport::create([
                 'line_id'           => $validated['line_id'],
@@ -648,11 +661,21 @@ class LineController extends Controller
                 'report_number'     => MaintenanceReport::generateReportNumber(),
                 'problem'           => $validated['problem'] ?? 'Line Stop - Mesin bermasalah',
                 'reported_by'       => $validated['reported_by'] ?? '-',
-                'status'            => 'Sedang Diperbaiki',
+                'completed_by'      => $immediatelyComplete ? $completedBy : null,
+                'resolution_type'   => $immediatelyComplete ? 'leader' : null,
+                'status'            => $immediatelyComplete ? 'Selesai' : 'Sedang Diperbaiki',
                 'reported_at'       => now(),
                 'line_stopped_at'   => $lineStoppedAt,
                 'started_at'        => $lineStoppedAt,
+                'completed_at'      => $immediatelyComplete ? now() : null,
             ]);
+
+            if ($immediatelyComplete) {
+                $report->calculateRepairDuration();
+                $report->calculateLineStopDuration();
+                $machine->recalculateMetrics();
+                $line->recalculateMetrics();
+            }
 
             DB::commit();
 
@@ -660,6 +683,19 @@ class LineController extends Controller
                 AppNotification::createLineStop($report->fresh(['line', 'machine']));
             } catch (\Exception $e) {
                 Log::warning('[Notif] ' . $e->getMessage());
+            }
+
+            if ($immediatelyComplete) {
+                try {
+                    AppNotification::createRepairComplete($report->fresh(['line', 'machine']));
+                } catch (\Exception $e) {
+                    Log::warning('[Notif] ' . $e->getMessage());
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Line stop dikonfirmasi dan perbaikan langsung diselesaikan oleh {$completedBy}. Line kembali beroperasi."
+                ]);
             }
 
             return response()->json([
@@ -695,8 +731,9 @@ class LineController extends Controller
             }
 
             $report->update([
-                'status' => 'Selesai',
-                'completed_at' => now(),
+                'status'           => 'Selesai',
+                'completed_at'     => now(),
+                'resolution_type'  => 'teknisi',
             ]);
 
             $report->calculateRepairDuration();

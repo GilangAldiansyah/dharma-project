@@ -16,13 +16,15 @@ class MaintenanceReport extends Model
         'problem',
         'status',
         'reported_by',
+        'completed_by',
+        'resolution_type',
         'reported_at',
         'line_stopped_at',
         'started_at',
         'completed_at',
         'repair_duration_minutes',
         'line_stop_duration_minutes',
-        'shift', // ← TAMBAHAN
+        'shift',
     ];
 
     protected $casts = [
@@ -34,9 +36,8 @@ class MaintenanceReport extends Model
         'line_stop_duration_minutes' => 'decimal:4',
     ];
 
-    protected $appends = ['shift_label']; // ← TAMBAHAN
+    protected $appends = ['shift_label'];
 
-    // ← TAMBAHAN: Auto-detect shift saat create
     protected static function booted()
     {
         static::creating(function ($report) {
@@ -61,7 +62,6 @@ class MaintenanceReport extends Model
         return $this->belongsTo(LineOperation::class);
     }
 
-    // ← TAMBAHAN: Accessor untuk shift label
     public function getShiftLabelAttribute(): string
     {
         return $this->shift ? DateHelper::getShiftLabel($this->shift) : 'N/A';
@@ -129,6 +129,7 @@ class MaintenanceReport extends Model
         if ($this->line_stopped_at && $this->completed_at) {
             $seconds = $this->line_stopped_at->diffInSeconds($this->completed_at);
             $this->line_stop_duration_minutes = round($seconds / 60, 4);
+            $this->save();
         }
     }
 
@@ -140,6 +141,15 @@ class MaintenanceReport extends Model
     public function getIsCompletedAttribute(): bool
     {
         return $this->status === 'Selesai';
+    }
+
+    public function getResolutionLabelAttribute(): string
+    {
+        return match($this->resolution_type) {
+            'leader' => 'Diselesaikan Langsung oleh Leader',
+            'teknisi' => 'Diselesaikan oleh Teknisi',
+            default => '-',
+        };
     }
 
     public function scopeActive($query)
@@ -176,7 +186,6 @@ class MaintenanceReport extends Model
         });
     }
 
-    // ← TAMBAHAN: Scope untuk filter by shift
     public function scopeByShift($query, int $shift)
     {
         return $query->where('shift', $shift);

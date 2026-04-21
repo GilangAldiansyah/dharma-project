@@ -4,7 +4,7 @@ import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref, computed, onUnmounted } from 'vue';
 import {
     Search, Activity, AlertCircle, Clock, CheckCircle, RefreshCw,
-    Eye, Trash2, X, Loader2, Camera, ScanLine, Factory,
+    Eye, Trash2, X, Loader2, Camera, ScanLine, Factory, UserCheck, Wrench,
 } from 'lucide-vue-next';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -50,6 +50,9 @@ interface Report {
     problem: string;
     status: 'Dilaporkan' | 'Sedang Diperbaiki' | 'Selesai';
     reported_by: string;
+    completed_by: string | null;
+    resolution_type: 'leader' | 'teknisi' | null;
+    resolution_label: string;
     reported_at: string;
     line_stopped_at: string | null;
     started_at: string | null;
@@ -149,6 +152,14 @@ const getShiftBadgeColor = (shift: number) => {
     }
 };
 
+const getResolutionColor = (type: string | null) => {
+    switch (type) {
+        case 'leader': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        case 'teknisi': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
+};
+
 const refreshData = () => {
     router.reload({ only: ['reports', 'stats'] });
 };
@@ -193,8 +204,7 @@ const startCamera = async () => {
             isCameraActive.value = true;
             startQrScan();
         }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (error) {
+    } catch {
         scanError.value = 'Tidak dapat mengakses kamera. Pastikan izin kamera sudah diberikan.';
     }
 };
@@ -257,8 +267,7 @@ const processQrCode = async (qrData: string) => {
         } else {
             scanError.value = data.message || 'Line tidak ditemukan';
         }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (error) {
+    } catch {
         scanError.value = 'Gagal memproses QR Code. Coba lagi.';
     } finally {
         setTimeout(() => { isScanning.value = false; }, 1000);
@@ -474,6 +483,7 @@ onUnmounted(() => {
                                 <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Shift</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Masalah</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Status</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Penyelesaian</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Waktu Stop</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Durasi</th>
                                 <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Aksi</th>
@@ -508,6 +518,16 @@ onUnmounted(() => {
                                     </span>
                                 </td>
                                 <td class="px-3 py-2">
+                                    <template v-if="report.resolution_type">
+                                        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold', getResolutionColor(report.resolution_type)]">
+                                            <component :is="report.resolution_type === 'leader' ? UserCheck : Wrench" class="w-3 h-3" />
+                                            {{ report.resolution_type === 'leader' ? 'Leader' : 'Teknisi' }}
+                                        </span>
+                                        <div v-if="report.completed_by" class="text-xs text-gray-400 mt-0.5">{{ report.completed_by }}</div>
+                                    </template>
+                                    <span v-else class="text-xs text-gray-400">-</span>
+                                </td>
+                                <td class="px-3 py-2">
                                     <div v-if="report.line_stopped_at" class="text-xs text-gray-700 dark:text-gray-300">{{ formatDateTime(report.line_stopped_at) }}</div>
                                     <div class="text-xs text-gray-400">{{ report.reported_by }}</div>
                                 </td>
@@ -536,7 +556,7 @@ onUnmounted(() => {
                                 </td>
                             </tr>
                             <tr v-if="reports.data.length === 0">
-                                <td colspan="9" class="px-4 py-12 text-center">
+                                <td colspan="10" class="px-4 py-12 text-center">
                                     <Activity class="w-12 h-12 mx-auto mb-3 text-gray-300 opacity-50" />
                                     <h3 class="text-base font-bold text-gray-600 dark:text-gray-300">Tidak ada laporan maintenance</h3>
                                     <p class="text-xs text-gray-400 mt-1">Belum ada laporan yang sesuai dengan filter</p>
@@ -545,7 +565,7 @@ onUnmounted(() => {
                         </tbody>
                         <tfoot v-if="reports.data.length > 0" class="bg-gray-50 dark:bg-gray-700">
                             <tr>
-                                <td colspan="9" class="px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+                                <td colspan="10" class="px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300">
                                     Total: {{ reports.total }} laporan
                                 </td>
                             </tr>
@@ -680,11 +700,18 @@ onUnmounted(() => {
                                 <div class="text-xs text-gray-500 font-semibold uppercase">Nomor Laporan</div>
                                 <div class="text-xl font-bold font-mono text-gray-900 dark:text-white">{{ selectedReport.report_number }}</div>
                             </div>
-                            <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold', getStatusColor(selectedReport.status)]">
-                                <component :is="getStatusIcon(selectedReport.status)" class="w-3.5 h-3.5" />
-                                {{ selectedReport.status }}
-                            </span>
+                            <div class="flex flex-col items-end gap-2">
+                                <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold', getStatusColor(selectedReport.status)]">
+                                    <component :is="getStatusIcon(selectedReport.status)" class="w-3.5 h-3.5" />
+                                    {{ selectedReport.status }}
+                                </span>
+                                <span v-if="selectedReport.resolution_type" :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold', getResolutionColor(selectedReport.resolution_type)]">
+                                    <component :is="selectedReport.resolution_type === 'leader' ? UserCheck : Wrench" class="w-3.5 h-3.5" />
+                                    {{ selectedReport.resolution_label }}
+                                </span>
+                            </div>
                         </div>
+
                         <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                             <h3 class="font-bold text-xs mb-2.5 flex items-center gap-1.5 text-gray-700 dark:text-gray-300 uppercase">
                                 <Factory class="w-3.5 h-3.5" /> Informasi Line & Mesin
@@ -698,14 +725,20 @@ onUnmounted(() => {
                                 </div>
                                 <div><div class="text-xs text-gray-400">Mesin</div><div class="font-semibold text-sm text-gray-900 dark:text-white">{{ selectedReport.machine.machine_name }}</div></div>
                                 <div><div class="text-xs text-gray-400">Tipe Mesin</div><div class="font-semibold text-sm text-gray-900 dark:text-white">{{ selectedReport.machine.machine_type }}</div></div>
+                                <div v-if="selectedReport.completed_by">
+                                    <div class="text-xs text-gray-400">Diselesaikan Oleh</div>
+                                    <div class="font-semibold text-sm text-gray-900 dark:text-white">{{ selectedReport.completed_by }}</div>
+                                </div>
                             </div>
                         </div>
+
                         <div>
                             <h3 class="font-bold text-xs mb-2 text-gray-700 dark:text-gray-300 uppercase">Deskripsi Masalah</h3>
                             <div class="p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-xl">
                                 <p class="text-sm text-gray-800 dark:text-gray-200">{{ selectedReport.problem }}</p>
                             </div>
                         </div>
+
                         <div>
                             <h3 class="font-bold text-xs mb-2.5 text-gray-700 dark:text-gray-300 uppercase">Timeline</h3>
                             <div class="space-y-3">
@@ -730,6 +763,10 @@ onUnmounted(() => {
                                     <div class="flex-1">
                                         <div class="font-semibold text-sm text-gray-900 dark:text-white">Perbaikan Selesai & Line Beroperasi</div>
                                         <div class="text-xs text-gray-500">{{ formatDateTime(selectedReport.completed_at) }}</div>
+                                        <div v-if="selectedReport.completed_by" class="text-xs text-gray-500">Oleh: {{ selectedReport.completed_by }}</div>
+                                        <div v-if="selectedReport.resolution_type" class="text-xs text-gray-500 mt-0.5">
+                                            {{ selectedReport.resolution_label }}
+                                        </div>
                                         <div class="flex flex-wrap gap-1.5 mt-1.5">
                                             <span v-if="selectedReport.repair_duration_formatted" class="px-2 py-0.5 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 rounded-full text-xs font-bold">
                                                 MTTR: {{ selectedReport.repair_duration_formatted }}
@@ -742,6 +779,7 @@ onUnmounted(() => {
                                 </div>
                             </div>
                         </div>
+
                         <div class="flex gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
                             <button v-if="selectedReport.status === 'Sedang Diperbaiki'"
                                 @click="completeRepair(selectedReport.id)"
